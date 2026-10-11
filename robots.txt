@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://wu.farshed.me/sitemap.xml
+Sitemap: https://wu.dstrml.org/sitemap.xml
