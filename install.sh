@@ -2,17 +2,20 @@
 set -eu
 
 # Downloads a Wu release from GitHub and unpacks it into ~/.local/.
+# Optional: WU_VERSION=1.2.3 picks a release, WU_BUNDLE_PATH installs a local tarball.
+# The ZED_ names of these variables still work for older instructions.
 
 main() {
     platform="$(uname -s)"
     arch="$(uname -m)"
-    channel="${ZED_CHANNEL:-stable}"
+    channel="${WU_CHANNEL:-${ZED_CHANNEL:-stable}}"
     repo="dstrml/wu"
-    ZED_VERSION="${ZED_VERSION:-latest}"
-    if [ "$ZED_VERSION" = "latest" ]; then
+    version="${WU_VERSION:-${ZED_VERSION:-latest}}"
+    bundle_path="${WU_BUNDLE_PATH:-${ZED_BUNDLE_PATH:-}}"
+    if [ "$version" = "latest" ]; then
         download_base="https://github.com/$repo/releases/latest/download"
     else
-        download_base="https://github.com/$repo/releases/download/v$ZED_VERSION"
+        download_base="https://github.com/$repo/releases/download/v$version"
     fi
     # Use TMPDIR if available (for environments with non-standard temp directories)
     if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
@@ -83,10 +86,10 @@ main() {
 }
 
 linux() {
-    if [ -n "${ZED_BUNDLE_PATH:-}" ]; then
-        cp "$ZED_BUNDLE_PATH" "$temp/wu-linux-$arch.tar.gz"
+    if [ -n "$bundle_path" ]; then
+        cp "$bundle_path" "$temp/wu-linux-$arch.tar.gz"
     else
-        echo "Downloading Wu version: $ZED_VERSION"
+        echo "Downloading Wu version: $version"
         curl "$download_base/wu-linux-$arch.tar.gz" > "$temp/wu-linux-$arch.tar.gz"
     fi
 
@@ -114,9 +117,9 @@ linux() {
     mkdir -p "$HOME/.local/wu$suffix.app"
     tar -xzf "$temp/wu-linux-$arch.tar.gz" -C "$HOME/.local/"
 
-    zed_editor="$HOME/.local/wu$suffix.app/libexec/wu-editor"
-    if [ -f "$zed_editor" ] && command -v ldd >/dev/null 2>&1; then
-        missing="$(ldd "$zed_editor" 2>/dev/null | sed -n 's/^[[:space:]]*\(.*\) => not found$/\1/p')"
+    wu_editor="$HOME/.local/wu$suffix.app/libexec/wu-editor"
+    if [ -f "$wu_editor" ] && command -v ldd >/dev/null 2>&1; then
+        missing="$(ldd "$wu_editor" 2>/dev/null | sed -n 's/^[[:space:]]*\(.*\) => not found$/\1/p')"
         if [ -n "$missing" ]; then
             echo "Warning: your system is missing libraries that Wu needs:"
             echo "$missing" | sed 's/^/    /'
@@ -139,7 +142,7 @@ linux() {
 }
 
 macos() {
-    echo "Downloading Wu version: $ZED_VERSION"
+    echo "Downloading Wu version: $version"
     curl "$download_base/Wu-$arch.dmg" > "$temp/Wu-$arch.dmg"
     hdiutil attach -quiet "$temp/Wu-$arch.dmg" -mountpoint "$temp/mount"
     app="$(cd "$temp/mount/"; echo *.app)"
