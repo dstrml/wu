@@ -215,8 +215,13 @@ pub struct SettingsContent {
     #[serde(flatten)]
     pub remote: RemoteSettingsContent,
 
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
     /// Settings for agent chats.
     pub agent_chat: Option<AgentChatSettingsContent>,
+=======
+    /// Settings related to the command palette.
+    pub command_palette: Option<CommandPaletteSettingsContent>,
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
 
     /// Settings related to the file finder.
     pub file_finder: Option<FileFinderSettingsContent>,
@@ -276,6 +281,13 @@ pub struct SettingsContent {
 
     pub line_indicator_format: Option<LineIndicatorFormat>,
 
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+    pub language_models: Option<AllLanguageModelSettingsContent>,
+
+    pub copilot: Option<CopilotSettingsContent>,
+
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
     pub outline_panel: Option<OutlinePanelSettingsContent>,
 
     pub project_panel: Option<ProjectPanelSettingsContent>,
@@ -355,6 +367,7 @@ impl SettingsContent {
 fallible_options::flattened_deserialize!(SettingsContent {
     sections: { project, theme, extension, workspace, editor, remote },
     options: {
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
         agent_chat, call_hierarchy, file_finder, git_panel, tabs, tab_bar, status_bar, activity_bar,
         preview_tabs,
         auto_update, base_keymap, debugger, diagnostics,
@@ -363,6 +376,15 @@ fallible_options::flattened_deserialize!(SettingsContent {
         log, line_indicator_format, outline_panel, project_panel, search_panel,
         node, proxy, reduce_motion, server_url, credentials_url, session, terminal,
         title_bar, modeline_lines,
+=======
+        call_hierarchy, command_palette, file_finder, git_panel, tabs, tab_bar, status_bar, preview_tabs, agent,
+        agent_servers, audio, auto_update, base_keymap, collaboration_panel, debugger, diagnostics,
+        git,
+        global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, hide_mouse,
+        journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,
+        node, proxy, reduce_motion, server_url, credentials_url, session, telemetry, terminal,
+        title_bar, vim_mode, calls, which_key, vim, modeline_lines, feature_flags,
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
         instrumentation,
     },
     defaults: {},
@@ -677,6 +699,34 @@ pub struct GitPanelSettingsContent {
     ///
     /// Default: project_diff
     pub entry_primary_click_action: Option<GitPanelClickBehavior>,
+
+    /// Whether the commit message editor is shown in the Git panel by default.
+    ///
+    /// Default: expanded
+    pub commit_editor: Option<GitPanelCommitEditor>,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum GitPanelCommitEditor {
+    /// Show the commit message editor.
+    #[default]
+    Expanded,
+    /// Hide the commit message editor, leaving only the commit button row.
+    Collapsed,
 }
 
 #[derive(
@@ -795,6 +845,15 @@ pub struct PanelSettingsContent {
 
 #[with_fallible_options]
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema, MergeFrom, Debug, PartialEq)]
+pub struct CommandPaletteSettingsContent {
+    /// Whether to use command history ranking for sorting in the command palette.
+    ///
+    /// Default: true
+    pub use_command_history: Option<bool>,
+}
+
+#[with_fallible_options]
+#[derive(Clone, Default, Serialize, Deserialize, JsonSchema, MergeFrom, Debug, PartialEq)]
 pub struct FileFinderSettingsContent {
     /// Whether to show file icons in the file finder.
     ///
@@ -813,6 +872,18 @@ pub struct FileFinderSettingsContent {
     ///
     /// Default: Smart
     pub include_ignored: Option<IncludeIgnoredContent>,
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+    /// Whether to include text channels in file finder results.
+    ///
+    /// Default: false
+    pub include_channels: Option<bool>,
+    /// Whether to pre-fill the file finder's query with the text selected in the
+    /// focused item (e.g. an editor or a terminal) when it is opened.
+    ///
+    /// Default: true
+    pub prefill_query_from_selection: Option<bool>,
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
 }
 
 #[derive(
@@ -1023,6 +1094,28 @@ pub enum LineIndicatorFormat {
 #[with_fallible_options]
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, MergeFrom, Default, PartialEq)]
 pub struct MarkdownPreviewSettingsContent {
+    /// The name of a font to use for rendering in the markdown preview.
+    /// Falls back to the UI font if unset.
+    pub font_family: Option<FontFamilyName>,
+    /// The name of a font to use for code (code blocks and inline code) in the
+    /// markdown preview. Falls back to the buffer font if unset.
+    pub code_font_family: Option<FontFamilyName>,
+    /// The font size to use for rendering in the markdown preview.
+    /// Falls back to the UI font size if unset.
+    pub font_size: Option<FontSize>,
+    /// The theme to use for the markdown preview.
+    /// Falls back to the main editor theme if unset.
+    pub theme: Option<ThemeSelection>,
+    /// The weight of headings (H1 through H6) in the markdown preview, in CSS
+    /// units from 100 to 900. Also applies to rendered Markdown cells in
+    /// notebooks, which share the preview typography.
+    ///
+    /// Default: 600
+    pub heading_font_weight: Option<FontWeightContent>,
+    /// Whether to automatically open Markdown files in the preview.
+    ///
+    /// Default: false
+    pub open_markdown_files_in_preview: Option<bool>,
     /// Whether to limit the width of the rendered markdown content. When
     /// enabled, content is constrained to `max_width` and centered
     /// horizontally within the preview pane, for optimal readability.
@@ -1400,6 +1493,54 @@ pub struct SshPortForwardOption {
     pub remote_port: u16,
 }
 
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+/// Settings for configuring REPL display and behavior.
+#[with_fallible_options]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
+pub struct ReplSettingsContent {
+    /// Maximum number of lines to keep in REPL's scrollback buffer.
+    /// Clamped with [4, 256] range.
+    ///
+    /// Default: 32
+    pub max_lines: Option<usize>,
+    /// Maximum number of columns to keep in REPL's scrollback buffer.
+    /// Clamped with [20, 512] range.
+    ///
+    /// Default: 128
+    pub max_columns: Option<usize>,
+    /// Whether to show small single-line outputs inline instead of in a block.
+    ///
+    /// Default: true
+    pub inline_output: Option<bool>,
+    /// Maximum number of characters for an output to be shown inline.
+    /// Only applies when `inline_output` is true.
+    ///
+    /// Default: 50
+    pub inline_output_max_length: Option<usize>,
+    /// Maximum number of lines of output to display before scrolling.
+    /// Set to 0 to disable output height limits.
+    ///
+    /// Default: 0
+    pub output_max_height_lines: Option<usize>,
+}
+
+/// Settings for configuring the which-key popup behaviour.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
+pub struct WhichKeySettingsContent {
+    /// Whether to show the which-key popup when holding down key combinations.
+    /// When enabled, the pending keystrokes indicator remains visible, but its binding preview
+    /// popover is disabled.
+    ///
+    /// Default: false
+    pub enabled: Option<bool>,
+    /// Delay in milliseconds before showing the which-key popup.
+    ///
+    /// Default: 1000
+    pub delay_ms: Option<u64>,
+}
+
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
 // An ExtendingVec in the settings can only accumulate new values.
 //
 // This is useful for things like private files where you only want
@@ -1428,8 +1569,6 @@ impl<T: Clone> merge_from::MergeFrom for ExtendingVec<T> {
     }
 }
 
-pub const REST_OF_FILE_SCAN_EXCLUSIONS: &str = "...";
-
 // A SplicingVec in the settings replaces the value it merges over, except that
 // a `...` entry expands to that previous value.
 //
@@ -1442,6 +1581,10 @@ pub const REST_OF_FILE_SCAN_EXCLUSIONS: &str = "...";
 // repeating it.
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SplicingVec(pub Vec<String>);
+
+impl SplicingVec {
+    pub const REST: &str = "...";
+}
 
 impl From<Vec<String>> for SplicingVec {
     fn from(vec: Vec<String>) -> Self {
@@ -1456,7 +1599,7 @@ impl merge_from::MergeFrom for SplicingVec {
             .0
             .iter()
             .flat_map(|entry| {
-                if entry == REST_OF_FILE_SCAN_EXCLUSIONS {
+                if entry == Self::REST {
                     inherited.clone()
                 } else {
                     vec![entry.clone()]

@@ -500,6 +500,80 @@ pub fn init(cx: &mut App) {
     });
 
     cx.observe_new(DisconnectedOverlay::register).detach();
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+
+    cx.on_action(|_: &OpenDevContainer, cx| {
+        with_active_or_new_workspace(cx, move |workspace, window, cx| {
+            if !workspace.project().read(cx).is_local() {
+                cx.spawn_in(window, async move |_, cx| {
+                    cx.prompt(
+                        gpui::PromptLevel::Critical,
+                        "Cannot open Dev Container from remote project",
+                        None,
+                        &["OK"],
+                    )
+                    .await
+                    .ok();
+                })
+                .detach();
+                return;
+            }
+
+            let fs = workspace.project().read(cx).fs().clone();
+            let configs = find_devcontainer_configs(workspace, cx);
+            let app_state = workspace.app_state().clone();
+            let dev_container_context = DevContainerContext::from_workspace(workspace, cx);
+            let handle = cx.entity().downgrade();
+            workspace.toggle_modal(window, cx, |window, cx| {
+                RemoteServerProjects::new_dev_container(
+                    fs,
+                    configs,
+                    app_state,
+                    dev_container_context,
+                    window,
+                    handle,
+                    cx,
+                )
+            });
+        });
+    });
+
+    // Subscribe to worktree additions to suggest opening the project in a dev container
+    cx.observe_new(
+        |workspace: &mut Workspace, window: Option<&mut Window>, cx: &mut Context<Workspace>| {
+            let Some(window) = window else {
+                return;
+            };
+            // A workspace opened with `--dev-container` has its worktrees scanning
+            // before this observer runs, so their update events can't be relied on
+            // to trigger the auto-open.
+            if workspace.open_in_dev_container() {
+                dev_container_suggest::open_dev_container_from_cli(workspace, window, cx);
+            }
+            cx.subscribe_in(
+                workspace.project(),
+                window,
+                move |workspace, project, event, window, cx| {
+                    if let project::Event::WorktreeUpdatedEntries(worktree_id, updated_entries) =
+                        event
+                    {
+                        dev_container_suggest::suggest_on_worktree_updated(
+                            workspace,
+                            *worktree_id,
+                            updated_entries,
+                            project,
+                            window,
+                            cx,
+                        );
+                    }
+                },
+            )
+            .detach();
+        },
+    )
+    .detach();
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
 }
 
 #[cfg(target_os = "windows")]

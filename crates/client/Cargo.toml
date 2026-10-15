@@ -18,6 +18,20 @@ test-support = ["gpui/test-support", "rpc/test-support"]
 [dependencies]
 anyhow.workspace = true
 async-channel.workspace = true
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+async-tungstenite = { workspace = true, features = ["tokio", "tokio-rustls-manual-roots"] }
+chrono.workspace = true
+clock.workspace = true
+cloud_api_client.workspace = true
+cloud_api_types.workspace = true
+cloud_llm_client.workspace = true
+collections.workspace = true
+credentials_provider.workspace = true
+derive_more.workspace = true
+feature_flags.workspace = true
+fs.workspace = true
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
 futures.workspace = true
 gpui.workspace = true
 http_client.workspace = true
@@ -42,8 +56,17 @@ util = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 semver.workspace = true
-windows.workspace = true
+windows = { workspace = true, features = ["Wdk_System_SystemServices", "Win32_System_SystemInformation"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation.workspace = true
 
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tokio-native-tls = "0.3"
+
+[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
+rustls-pki-types = "1.12"
+tokio-rustls = { workspace = true, features = ["tls12", "ring"] }
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31

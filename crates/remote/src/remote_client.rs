@@ -384,7 +384,7 @@ pub async fn connect(
 ) -> Result<Arc<dyn RemoteConnection>> {
     cx.update(|cx| {
         cx.update_default_global(|pool: &mut ConnectionPool, cx| {
-            pool.connect(connection_options.clone(), delegate.clone(), cx)
+            pool.connect(connection_options.clone(), None, delegate.clone(), cx)
         })
     })
     .await
@@ -670,7 +670,12 @@ impl RemoteClient {
             let (remote_connection, io_task) = match async {
                 let remote_connection = cx
                     .update_global(|pool: &mut ConnectionPool, cx| {
-                        pool.connect(connection_options, delegate.clone(), cx)
+                        pool.connect(
+                            connection_options,
+                            Some(remote_connection.remote_platform().os),
+                            delegate.clone(),
+                            cx,
+                        )
                     })
                     .await
                     .map_err(|error| error.cloned())?;
@@ -1217,6 +1222,7 @@ impl ConnectionPool {
     fn connect(
         &mut self,
         opts: RemoteConnectionOptions,
+        known_os: Option<RemoteOs>,
         delegate: Arc<dyn RemoteClientDelegate>,
         cx: &mut App,
     ) -> Shared<Task<Result<Arc<dyn RemoteConnection>, Arc<anyhow::Error>>>> {
@@ -1256,7 +1262,7 @@ impl ConnectionPool {
                 async move |cx| {
                     let connection = match opts.clone() {
                         RemoteConnectionOptions::Ssh(opts) => {
-                            SshRemoteConnection::new(opts, delegate, cx)
+                            SshRemoteConnection::new(opts, known_os, delegate, cx)
                                 .await
                                 .map(|connection| Arc::new(connection) as Arc<dyn RemoteConnection>)
                         }
@@ -1336,6 +1342,16 @@ impl RemoteConnectionOptions {
             RemoteConnectionOptions::Wsl(_) => "wsl",
             #[cfg(any(test, feature = "test-support"))]
             RemoteConnectionOptions::Mock(_) => "mock",
+        }
+    }
+
+    pub fn host(&self) -> String {
+        match self {
+            RemoteConnectionOptions::Ssh(opts) => opts.host.to_string(),
+            RemoteConnectionOptions::Wsl(opts) => opts.distro_name.clone(),
+            RemoteConnectionOptions::Docker(opts) => opts.name.clone(),
+            #[cfg(any(test, feature = "test-support"))]
+            RemoteConnectionOptions::Mock(opts) => format!("mock-{}", opts.id),
         }
     }
 }
@@ -1512,6 +1528,17 @@ mod tests {
             0,
             "stream channel should be removed once the consumer has dropped the stream"
         );
+    }
+
+    #[test]
+    fn test_ssh_host_ignores_nickname() {
+        let options = RemoteConnectionOptions::Ssh(SshConnectionOptions {
+            host: "1.2.3.4".into(),
+            nickname: Some("My Cool Project".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(options.host(), "1.2.3.4");
     }
 }
 

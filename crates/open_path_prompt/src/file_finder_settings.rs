@@ -7,6 +7,11 @@ pub struct FileFinderSettings {
     pub modal_max_width: ModalWidthContent,
     pub skip_focus_for_active_in_search: bool,
     pub include_ignored: Option<bool>,
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+    pub include_channels: bool,
+    pub prefill_query_from_selection: bool,
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
 }
 
 impl Settings for FileFinderSettings {
@@ -22,6 +27,11 @@ impl Settings for FileFinderSettings {
                 settings::IncludeIgnoredContent::Indexed => Some(false),
                 settings::IncludeIgnoredContent::Smart => None,
             },
+<<<<<<< 7a576a25c2d16d37124c400cf48068b5f26d1123
+=======
+            include_channels: file_finder.include_channels.unwrap(),
+            prefill_query_from_selection: file_finder.prefill_query_from_selection.unwrap(),
+>>>>>>> f8381935e291dcc13a1e90480cb212972c459d31
         }
     }
 }
