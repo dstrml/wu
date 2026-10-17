@@ -28,6 +28,10 @@ language.workspace = true
 linkify.workspace = true
 log.workspace = true
 markup5ever_rcdom.workspace = true
+<<<<<<< 11083fd81a860adc38c46e06497d3555781b8919
+=======
+mermaid_render.workspace = true
+>>>>>>> 847b95c7efe68ae8266bc394fb8537ff11853e59
 pulldown-cmark.workspace = true
 settings.workspace = true
 smallvec.workspace = true

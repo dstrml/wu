@@ -150,8 +150,9 @@ pub use buffer_store::ProjectTransaction;
 pub use lsp_command::{CallHierarchyItem, IncomingCall, OutgoingCall};
 pub use lsp_store::{
     DiagnosticSummary, InvalidationStrategy, LanguageServerLogType, LanguageServerProgress,
-    LanguageServerPromptRequest, LanguageServerStatus, LanguageServerToQuery, LspStore,
-    LspStoreEvent, ProgressToken, SERVER_PROGRESS_THROTTLE_TIMEOUT,
+    LanguageServerPromptRequest, LanguageServerShowDocumentRequest, LanguageServerStatus,
+    LanguageServerToQuery, LspStore, LspStoreEvent, ProgressToken,
+    SERVER_PROGRESS_THROTTLE_TIMEOUT,
 };
 pub use toolchain_store::{ToolchainStore, Toolchains};
 const MAX_PROJECT_SEARCH_HISTORY_SIZE: usize = 500;
@@ -274,7 +275,9 @@ pub struct ToastLink {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     LanguageServerAdded(LanguageServerId, LanguageServerName, Option<WorktreeId>),
+    SupplementaryLanguageServerAdded(LanguageServerId, LanguageServerName),
     LanguageServerRemoved(LanguageServerId),
+    SupplementaryLanguageServerRemoved(LanguageServerId),
     LanguageServerLog(LanguageServerId, LanguageServerLogType, String),
     // [`lsp::notification::DidOpenTextDocument`] was sent to this server using the buffer data.
     // Zed's buffer-related data is updated accordingly.
@@ -285,6 +288,7 @@ pub enum Event {
         name: Option<LanguageServerName>,
     },
     ToggleLspLogs {
+        peer_id: proto::PeerId,
         server_id: LanguageServerId,
         enabled: bool,
         toggled_log_kind: LogKind,
@@ -299,6 +303,7 @@ pub enum Event {
         notification_id: SharedString,
     },
     LanguageServerPrompt(LanguageServerPromptRequest),
+    LanguageServerShowDocument(LanguageServerShowDocumentRequest),
     LanguageNotFound(Entity<Buffer>),
     ActiveEntryChanged(Option<ProjectEntryId>),
     ActivateProjectPanel,
@@ -338,6 +343,9 @@ pub enum Event {
         server_id: Option<LanguageServerId>,
     },
     RefreshDocumentLinks {
+        server_id: Option<LanguageServerId>,
+    },
+    RefreshDocumentHighlights {
         server_id: Option<LanguageServerId>,
     },
     RefreshFoldingRanges {
@@ -408,7 +416,10 @@ impl ProjectPath {
 
 #[derive(Debug, Default)]
 pub enum PrepareRenameResponse {
-    Success(Range<Anchor>),
+    Success {
+        range: Range<Anchor>,
+        language_server_id: Option<LanguageServerId>,
+    },
     OnlyUnpreparedRenameSupported,
     #[default]
     InvalidPosition,
@@ -434,7 +445,7 @@ impl InlayId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InlayHint {
     pub position: language::Anchor,
     pub label: InlayHintLabel,
@@ -768,17 +779,18 @@ impl InlayHint {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InlayHintLabel {
     String(String),
     LabelParts(Vec<InlayHintLabelPart>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InlayHintLabelPart {
     pub value: String,
     pub tooltip: Option<InlayHintLabelPartTooltip>,
     pub location: Option<(LanguageServerId, lsp::Location)>,
+    pub command: Option<(LanguageServerId, lsp::Command)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1448,6 +1460,8 @@ impl Project {
             remote_proto.add_entity_message_handler(Self::handle_update_project);
             remote_proto.add_entity_message_handler(Self::handle_toast);
             remote_proto.add_entity_request_handler(Self::handle_language_server_prompt_request);
+            remote_proto
+                .add_entity_request_handler(Self::handle_language_server_show_document_request);
             remote_proto.add_entity_message_handler(Self::handle_hide_toast);
             remote_proto.add_entity_request_handler(Self::handle_update_buffer_from_remote_server);
             remote_proto.add_entity_request_handler(Self::handle_trust_worktrees);
@@ -1499,7 +1513,13 @@ impl Project {
         root_paths: impl IntoIterator<Item = &Path>,
         cx: &mut AsyncApp,
     ) -> Entity<Project> {
+<<<<<<< 11083fd81a860adc38c46e06497d3555781b8919
         let fs = Arc::new(RealFs::new(None, cx.background_executor().clone()));
+=======
+        use clock::FakeSystemClock;
+
+        let fs = RealFs::new(None, cx.background_executor().clone());
+>>>>>>> 847b95c7efe68ae8266bc394fb8537ff11853e59
         let languages = LanguageRegistry::test(cx.background_executor().clone());
         let http_client = http_client::FakeHttpClient::with_404_response();
         let client = client::Client::new(http_client.clone());
@@ -2715,8 +2735,28 @@ impl Project {
             LspStoreEvent::LanguageServerAdded(server_id, name, worktree_id) => cx.emit(
                 Event::LanguageServerAdded(*server_id, name.clone(), *worktree_id),
             ),
+            LspStoreEvent::SupplementaryLanguageServerAdded(server_id, name) => cx.emit(
+                Event::SupplementaryLanguageServerAdded(*server_id, name.clone()),
+            ),
             LspStoreEvent::LanguageServerRemoved(server_id) => {
+                if self.is_local()
+                    && let Some(project_id) = self.remote_id()
+                {
+                    self.collab_client
+                        .send(proto::UpdateLanguageServer {
+                            project_id,
+                            server_name: None,
+                            language_server_id: server_id.to_proto(),
+                            variant: Some(proto::update_language_server::Variant::Removed(
+                                proto::ServerRemoved {},
+                            )),
+                        })
+                        .log_err();
+                }
                 cx.emit(Event::LanguageServerRemoved(*server_id))
+            }
+            LspStoreEvent::SupplementaryLanguageServerRemoved(server_id) => {
+                cx.emit(Event::SupplementaryLanguageServerRemoved(*server_id))
             }
             LspStoreEvent::LanguageServerLog(server_id, log_type, string) => cx.emit(
                 Event::LanguageServerLog(*server_id, log_type.clone(), string.clone()),
@@ -2751,6 +2791,11 @@ impl Project {
                     server_id: *server_id,
                 })
             }
+            LspStoreEvent::RefreshDocumentHighlights { server_id } => {
+                cx.emit(Event::RefreshDocumentHighlights {
+                    server_id: *server_id,
+                })
+            }
             LspStoreEvent::RefreshFoldingRanges { server_id } => {
                 cx.emit(Event::RefreshFoldingRanges {
                     server_id: *server_id,
@@ -2763,6 +2808,9 @@ impl Project {
             }
             LspStoreEvent::LanguageServerPrompt(prompt) => {
                 cx.emit(Event::LanguageServerPrompt(prompt.clone()))
+            }
+            LspStoreEvent::LanguageServerShowDocument(request) => {
+                cx.emit(Event::LanguageServerShowDocument(request.clone()))
             }
             LspStoreEvent::DiskBasedDiagnosticsStarted { language_server_id } => {
                 cx.emit(Event::DiskBasedDiagnosticsStarted {
@@ -2778,6 +2826,7 @@ impl Project {
                 language_server_id,
                 name,
                 message,
+<<<<<<< 11083fd81a860adc38c46e06497d3555781b8919
             } => match message {
                 proto::update_language_server::Variant::MetadataUpdated(update) => {
                     self.lsp_store.update(cx, |lsp_store, _| {
@@ -2811,6 +2860,34 @@ impl Project {
                                 .configuration
                                 .as_ref()
                                 .and_then(|config_str| serde_json::from_str(config_str).ok());
+=======
+            } => {
+                if self.is_local()
+                    && !matches!(
+                        message,
+                        proto::update_language_server::Variant::MetadataUpdated(_)
+                    )
+                {
+                    self.enqueue_buffer_ordered_message(
+                        BufferOrderedMessage::LanguageServerUpdate {
+                            language_server_id: *language_server_id,
+                            message: message.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .ok();
+                }
+
+                match message {
+                    proto::update_language_server::Variant::MetadataUpdated(update) => {
+                        self.lsp_store.update(cx, |lsp_store, _| {
+                            if let Some(capabilities) = update.capabilities.as_ref() {
+                                lsp_store.insert_synced_server_capabilities(
+                                    *language_server_id,
+                                    capabilities,
+                                );
+                            }
+>>>>>>> 847b95c7efe68ae8266bc394fb8537ff11853e59
 
                             language_server_status.workspace_folders = update
                                 .workspace_folders
@@ -3673,20 +3750,32 @@ impl Project {
         buffer: Entity<Buffer>,
         position: T,
         new_name: String,
+        language_server_id: Option<LanguageServerId>,
         cx: &mut Context<Self>,
     ) -> Task<Result<ProjectTransaction>> {
         let push_to_history = true;
         let position = position.to_point_utf16(buffer.read(cx));
-        self.request_lsp(
-            buffer,
-            LanguageServerToQuery::FirstCapable,
-            PerformRename {
-                position,
-                new_name,
-                push_to_history,
-            },
-            cx,
-        )
+        let mut request = PerformRename {
+            position,
+            new_name,
+            push_to_history,
+            language_server_id,
+        };
+        if let Some(server_id) = request.language_server_id {
+            let server_is_capable = !self.is_local()
+                || self.lsp_store.update(cx, |lsp_store, cx| {
+                    lsp_store
+                        .language_server_capable_of_lsp_request(&buffer, server_id, &request, cx)
+                });
+            if !server_is_capable {
+                request.language_server_id = None;
+            }
+        }
+        let server_to_query = request
+            .language_server_id
+            .map(LanguageServerToQuery::Other)
+            .unwrap_or(LanguageServerToQuery::FirstCapable);
+        self.request_lsp(buffer, server_to_query, request, cx)
     }
 
     pub fn on_type_format<T: ToPointUtf16>(
@@ -3893,6 +3982,122 @@ impl Project {
         })
     }
 
+    pub fn resolve_abs_file_link(
+        &self,
+        path: &str,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Option<ResolvedPath>>> {
+        let resolve_task = self.resolve_abs_file_path_canonical(path, cx);
+        let path = if self.is_local() {
+            shellexpand::tilde(path).into_owned()
+        } else {
+            path.to_owned()
+        };
+        cx.spawn(async move |project, cx| {
+            let Some(resolved_path) = resolve_task.await? else {
+                return Ok(None);
+            };
+            let path = if path.starts_with("~") {
+                let Ok(task) =
+                    project.update(cx, |project, cx| project.resolve_abs_path(&path, cx))
+                else {
+                    return Ok(None);
+                };
+                let Some(path) = task.await.and_then(ResolvedPath::into_abs_path) else {
+                    return Ok(Some(resolved_path));
+                };
+                path
+            } else {
+                path
+            };
+            let Ok(candidate) = project.update(cx, |project, cx| {
+                let lexical_path = project.path_style(cx).normalize(&path);
+                let project_path =
+                    project.project_path_for_absolute_path(Path::new(&lexical_path), cx)?;
+                let abs_path = project.absolute_path(&project_path, cx)?;
+                let task = project.resolve_abs_file_path_canonical(abs_path.to_str()?, cx);
+                Some((project_path, abs_path, task))
+            }) else {
+                return Ok(None);
+            };
+            let Some((project_path, abs_path, task)) = candidate else {
+                return Ok(Some(resolved_path));
+            };
+            let canonical_candidate = task
+                .await
+                .with_context(|| format!("validating file link alias {abs_path:?}"))
+                .log_err()
+                .flatten();
+            let Ok(alias_unchanged) = project.read_with(cx, |project, cx| {
+                project.absolute_path(&project_path, cx).as_deref() == Some(abs_path.as_path())
+            }) else {
+                return Ok(None);
+            };
+            if alias_unchanged
+                && canonical_candidate
+                    .is_some_and(|candidate| candidate.abs_path() == resolved_path.abs_path())
+            {
+                Ok(Some(ResolvedPath::ProjectPath {
+                    project_path,
+                    is_dir: false,
+                }))
+            } else {
+                Ok(Some(resolved_path))
+            }
+        })
+    }
+
+    pub fn resolve_abs_file_path_canonical(
+        &self,
+        path: &str,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Option<ResolvedPath>>> {
+        if self.is_local() {
+            let expanded = PathBuf::from(shellexpand::tilde(path).into_owned());
+            let fs = self.fs.clone();
+            cx.background_spawn(async move {
+                if fs
+                    .metadata(&expanded)
+                    .await?
+                    .is_none_or(|metadata| metadata.is_dir)
+                {
+                    return Ok(None);
+                }
+                let path = fs.canonicalize(&expanded).await?;
+                let path = path
+                    .to_str()
+                    .context("canonical file path is not valid UTF-8")?
+                    .to_owned();
+                Ok(Some(ResolvedPath::AbsPath {
+                    path,
+                    is_dir: false,
+                }))
+            })
+        } else if let Some(ssh_client) = self.remote_client.as_ref() {
+            let request = ssh_client
+                .read(cx)
+                .proto_client()
+                .request(proto::GetPathMetadata {
+                    project_id: REMOTE_SERVER_PROJECT_ID,
+                    path: path.into(),
+                    canonicalize: true,
+                });
+            cx.background_spawn(async move {
+                let response = request.await?;
+                if response.exists && !response.is_dir {
+                    Ok(Some(ResolvedPath::AbsPath {
+                        path: response.path,
+                        is_dir: false,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            })
+        } else {
+            Task::ready(Ok(None))
+        }
+    }
+
     pub fn resolve_abs_path(&self, path: &str, cx: &App) -> Task<Option<ResolvedPath>> {
         if self.is_local() {
             let expanded = PathBuf::from(shellexpand::tilde(&path).into_owned());
@@ -3912,6 +4117,7 @@ impl Project {
                 .request(proto::GetPathMetadata {
                     project_id: REMOTE_SERVER_PROJECT_ID,
                     path: path.into(),
+                    canonicalize: false,
                 });
             cx.background_spawn(async move {
                 let response = request.await.log_err()?;
@@ -4410,6 +4616,49 @@ impl Project {
         })
     }
 
+    async fn handle_language_server_show_document_request(
+        project: Entity<Self>,
+        envelope: TypedEnvelope<proto::LanguageServerShowDocumentRequest>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::Ack> {
+        let payload = envelope.payload;
+        let selection = payload.selection_start.zip(payload.selection_end).map(
+            |(selection_start, selection_end)| lsp::Range {
+                start: lsp::Position {
+                    line: selection_start.row,
+                    character: selection_start.column,
+                },
+                end: lsp::Position {
+                    line: selection_end.row,
+                    character: selection_end.column,
+                },
+            },
+        );
+        let uri = lsp::Uri::from_str(&payload.uri)
+            .with_context(|| format!("parsing show document uri {}", payload.uri))?;
+        let (tx, rx) = async_channel::bounded(1);
+        project.update(&mut cx, |_, cx| {
+            cx.emit(Event::LanguageServerShowDocument(
+                LanguageServerShowDocumentRequest {
+                    uri,
+                    external: payload.external,
+                    take_focus: payload.take_focus,
+                    selection,
+                    response_channel: tx,
+                },
+            ));
+        });
+        drop(project);
+
+        let success = rx.recv().await.unwrap_or(false);
+        anyhow::ensure!(
+            success,
+            "show document request for {} was not handled successfully",
+            payload.uri
+        );
+        Ok(proto::Ack {})
+    }
+
     async fn handle_hide_toast(
         this: Entity<Self>,
         envelope: TypedEnvelope<proto::HideToast>,
@@ -4563,6 +4812,206 @@ impl Project {
         })
     }
 
+<<<<<<< 11083fd81a860adc38c46e06497d3555781b8919
+=======
+    async fn handle_toggle_lsp_logs(
+        project: Entity<Self>,
+        envelope: TypedEnvelope<proto::ToggleLspLogs>,
+        mut cx: AsyncApp,
+    ) -> Result<()> {
+        let peer_id = envelope.original_sender_id()?;
+        let toggled_log_kind =
+            match proto::toggle_lsp_logs::LogType::try_from(envelope.payload.log_type)
+                .ok()
+                .context("invalid log type")?
+            {
+                proto::toggle_lsp_logs::LogType::Log => LogKind::Logs,
+                proto::toggle_lsp_logs::LogType::Trace => LogKind::Trace,
+                proto::toggle_lsp_logs::LogType::Rpc => LogKind::Rpc,
+            };
+        project.update(&mut cx, |_, cx| {
+            cx.emit(Event::ToggleLspLogs {
+                peer_id,
+                server_id: LanguageServerId::from_proto(envelope.payload.server_id),
+                enabled: envelope.payload.enabled,
+                toggled_log_kind,
+            })
+        });
+        Ok(())
+    }
+
+    async fn handle_synchronize_buffers(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::SynchronizeBuffers>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::SynchronizeBuffersResponse> {
+        let response = this.update(&mut cx, |this, cx| {
+            let client = this.collab_client.clone();
+            this.buffer_store.update(cx, |this, cx| {
+                this.handle_synchronize_buffers(envelope, cx, client)
+            })
+        })?;
+
+        Ok(response)
+    }
+
+    // Goes from client to host.
+    async fn handle_search_candidate_buffers(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::FindSearchCandidates>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::Ack> {
+        let peer_id = envelope.original_sender_id.unwrap_or(envelope.sender_id);
+        let message = envelope.payload;
+        let project_id = message.project_id;
+        let path_style = this.read_with(&cx, |this, cx| this.path_style(cx));
+        let query =
+            SearchQuery::from_proto(message.query.context("missing query field")?, path_style)?;
+
+        let handle = message.handle;
+        let buffer_store = this.read_with(&cx, |this, _| this.buffer_store().clone());
+        let client = this.read_with(&cx, |this, _| this.client());
+        let task = cx.spawn(async move |cx| {
+            let results = this.update(cx, |this, cx| {
+                this.search_impl(query, cx).matching_buffers(cx)
+            });
+            let (batcher, batches) = project_search::AdaptiveBatcher::new(cx.background_executor());
+            let mut new_matches = Box::pin(results.rx);
+
+            let sender_task = cx.background_executor().spawn({
+                let client = client.clone();
+                async move {
+                    let mut batches = std::pin::pin!(batches);
+                    while let Some(buffer_ids) = batches.next().await {
+                        client
+                            .request(proto::FindSearchCandidatesChunk {
+                                handle,
+                                peer_id: Some(peer_id),
+                                project_id,
+                                variant: Some(
+                                    proto::find_search_candidates_chunk::Variant::Matches(
+                                        proto::FindSearchCandidatesMatches { buffer_ids },
+                                    ),
+                                ),
+                            })
+                            .await?;
+                    }
+                    anyhow::Ok(())
+                }
+            });
+
+            while let Some((buffer, _)) = new_matches.next().await {
+                let is_private = buffer.read_with(cx, |buffer, _| {
+                    buffer.file().is_some_and(|file| file.is_private())
+                });
+                if is_private {
+                    continue;
+                }
+
+                let buffer_id = this.update(cx, |this, cx| {
+                    this.create_buffer_for_peer(&buffer, peer_id, cx).to_proto()
+                });
+                batcher.push(buffer_id).await;
+            }
+            batcher.flush().await;
+
+            sender_task.await?;
+
+            let _ = client
+                .request(proto::FindSearchCandidatesChunk {
+                    handle,
+                    peer_id: Some(peer_id),
+                    project_id,
+                    variant: Some(proto::find_search_candidates_chunk::Variant::Done(
+                        proto::FindSearchCandidatesDone {},
+                    )),
+                })
+                .await?;
+            anyhow::Ok(())
+        });
+        buffer_store.update(&mut cx, |this, _| {
+            this.register_ongoing_project_search((peer_id, handle), task);
+        });
+
+        Ok(proto::Ack {})
+    }
+
+    async fn handle_open_buffer_by_id(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::OpenBufferById>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::OpenBufferResponse> {
+        let peer_id = envelope.original_sender_id()?;
+        let buffer_id = BufferId::new(envelope.payload.id)?;
+        let buffer = this
+            .update(&mut cx, |this, cx| this.open_buffer_by_id(buffer_id, cx))
+            .await?;
+        Project::respond_to_open_buffer_request(this, buffer, peer_id, &mut cx)
+    }
+
+    async fn handle_open_buffer_by_path(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::OpenBufferByPath>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::OpenBufferResponse> {
+        let peer_id = envelope.original_sender_id()?;
+        let worktree_id = WorktreeId::from_proto(envelope.payload.worktree_id);
+        let path = RelPath::from_unix_str(&envelope.payload.path)?.into();
+        let open_buffer = this
+            .update(&mut cx, |this, cx| {
+                this.open_buffer(ProjectPath { worktree_id, path }, cx)
+            })
+            .await?;
+        Project::respond_to_open_buffer_request(this, open_buffer, peer_id, &mut cx)
+    }
+
+    async fn handle_open_new_buffer(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::OpenNewBuffer>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::OpenBufferResponse> {
+        let buffer = this
+            .update(&mut cx, |this, cx| this.create_buffer(None, true, cx))
+            .await?;
+        let peer_id = envelope.original_sender_id()?;
+
+        Project::respond_to_open_buffer_request(this, buffer, peer_id, &mut cx)
+    }
+
+    fn respond_to_open_buffer_request(
+        this: Entity<Self>,
+        buffer: Entity<Buffer>,
+        peer_id: proto::PeerId,
+        cx: &mut AsyncApp,
+    ) -> Result<proto::OpenBufferResponse> {
+        this.update(cx, |this, cx| {
+            let is_private = buffer
+                .read(cx)
+                .file()
+                .map(|f| f.is_private())
+                .unwrap_or_default();
+            anyhow::ensure!(!is_private, ErrorCode::UnsharedItem);
+            Ok(proto::OpenBufferResponse {
+                buffer_id: this.create_buffer_for_peer(&buffer, peer_id, cx).into(),
+            })
+        })
+    }
+
+    fn create_buffer_for_peer(
+        &mut self,
+        buffer: &Entity<Buffer>,
+        peer_id: proto::PeerId,
+        cx: &mut App,
+    ) -> BufferId {
+        self.buffer_store
+            .update(cx, |buffer_store, cx| {
+                buffer_store.create_buffer_for_peer(buffer, peer_id, cx)
+            })
+            .detach_and_log_err(cx);
+        buffer.read(cx).remote_id()
+    }
+
+>>>>>>> 847b95c7efe68ae8266bc394fb8537ff11853e59
     async fn handle_create_image_for_peer(
         this: Entity<Self>,
         envelope: TypedEnvelope<proto::CreateImageForPeer>,
@@ -4749,11 +5198,31 @@ impl Project {
         })
     }
 
+<<<<<<< 11083fd81a860adc38c46e06497d3555781b8919
     pub fn supplementary_language_servers<'a>(
         &'a self,
         cx: &'a App,
     ) -> impl 'a + Iterator<Item = (LanguageServerId, LanguageServerName)> {
         self.lsp_store.read(cx).supplementary_language_servers()
+=======
+    fn set_collaborators_from_proto(
+        &mut self,
+        messages: Vec<proto::Collaborator>,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let mut collaborators = HashMap::default();
+        for message in messages {
+            let collaborator = Collaborator::from_proto(message)?;
+            collaborators.insert(collaborator.peer_id, collaborator);
+        }
+        for old_peer_id in self.collaborators.keys() {
+            if !collaborators.contains_key(old_peer_id) {
+                cx.emit(Event::CollaboratorLeft(*old_peer_id));
+            }
+        }
+        self.collaborators = collaborators;
+        Ok(())
+>>>>>>> 847b95c7efe68ae8266bc394fb8537ff11853e59
     }
 
     pub fn any_language_server_supports_inlay_hints(&self, buffer: &Buffer, cx: &mut App) -> bool {
@@ -4821,14 +5290,16 @@ impl Project {
         if !relevant_language_servers.contains(name) {
             return None;
         }
+        let opened_in_servers = self
+            .lsp_store
+            .read(cx)
+            .language_server_ids_for_opened_buffer(buffer.remote_id());
         self.language_server_statuses(cx)
             .filter(|(_, server_status)| relevant_language_servers.contains(&server_status.name))
             .find_map(|(server_id, server_status)| {
-                if &server_status.name == name {
-                    Some(server_id)
-                } else {
-                    None
-                }
+                (&server_status.name == name
+                    && opened_in_servers.is_none_or(|server_ids| server_ids.contains(&server_id)))
+                .then_some(server_id)
             })
     }
 
