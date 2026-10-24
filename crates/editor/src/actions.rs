@@ -140,7 +140,7 @@ pub struct ConfirmCodeAction {
 }
 
 /// Toggles comment markers for the selected lines.
-#[derive(PartialEq, Clone, Deserialize, Default, JsonSchema, Action)]
+#[derive(PartialEq, Clone, Deserialize, JsonSchema, Action)]
 #[action(namespace = editor)]
 #[serde(deny_unknown_fields)]
 pub struct ToggleComments {
@@ -148,6 +148,22 @@ pub struct ToggleComments {
     pub advance_downwards: bool,
     #[serde(default)]
     pub ignore_indent: bool,
+    /// Whether to add comment markers to blank lines inside a multi-line
+    /// selection. A line of only whitespace counts as blank. Defaults to true.
+    #[serde(default = "default_true")]
+    pub comment_empty_lines: bool,
+}
+
+// `Default` is written out rather than derived because `comment_empty_lines`
+// defaults to true.
+impl Default for ToggleComments {
+    fn default() -> Self {
+        Self {
+            advance_downwards: false,
+            ignore_indent: false,
+            comment_empty_lines: true,
+        }
+    }
 }
 
 /// Toggles block comment markers for the selected text.
@@ -409,6 +425,17 @@ actions!(
 actions!(
     editor,
     [
+<<<<<<< e5acc7eddc3f484d216f97de770f3d0c75f1fc52
+=======
+        /// Accepts the full edit prediction.
+        AcceptEditPrediction,
+        /// Amends the editor text with hint's edit (if sent).
+        AcceptInlayHint,
+        /// Accepts a partial edit prediction.
+        #[action(deprecated_aliases = ["editor::AcceptPartialCopilotSuggestion"])]
+        AcceptNextWordEditPrediction,
+        AcceptNextLineEditPrediction,
+>>>>>>> 2c85a2738b5f37a225b35d926f3ea143d71f064f
         /// Applies all diff hunks in the editor.
         ApplyAllDiffHunks,
         /// Applies the diff hunk at the current position.
@@ -916,6 +943,8 @@ actions!(
         UnwrapSyntaxNode,
         /// Wraps selections in tag specified by language.
         WrapSelectionsInTag,
+        /// Wraps selections in an expanded Emmet abbreviation.
+        WrapWithAbbreviation,
         /// Aligns selections from different rows into the same column
         AlignSelections,
         /// Saves the current location to navigation history.
