@@ -7,6 +7,8 @@ release body.
 
 ## Unreleased
 
+## 1.1.12 - 2026-10-26
+
 - Add support for Simplified Chinese (Preview).
 - Cancelled messages in older Codex chats no longer offer Edit.
 - Fixed agent chats with generated images jumping while you scroll.
