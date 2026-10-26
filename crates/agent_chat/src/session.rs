@@ -1778,7 +1778,24 @@ impl AgentSession {
                 let started_at = self
                     .known_tasks
                     .get(&task_id)
+                    .or_else(|| {
+                        self.background_tasks
+                            .iter()
+                            .find(|task| task.task_id == task_id)
+                    })
                     .map_or_else(Instant::now, |task| task.started_at);
+                if let Some(live) = self
+                    .background_tasks
+                    .iter_mut()
+                    .find(|task| task.task_id == task_id)
+                {
+                    if live.tool_use_id.is_none() {
+                        live.tool_use_id = tool_use_id.clone();
+                    }
+                    if live.description.trim().is_empty() {
+                        live.description = description.clone();
+                    }
+                }
                 self.known_tasks.insert(
                     task_id.clone(),
                     BackgroundTask {
@@ -4553,6 +4570,21 @@ done
                 ("bg1".into(), "Run tests".into(), Some("toolu_bg".into())),
                 ("a1".into(), String::new(), None),
             ]
+        );
+        feed_events(
+            &session,
+            vec![AgentEvent::TaskStarted {
+                task_id: "a1".into(),
+                tool_use_id: Some("toolu_agent".into()),
+                kind: BackgroundTaskKind::Agent,
+                description: "Explore".into(),
+            }],
+            cx,
+        );
+        assert_eq!(
+            tasks(cx)[1],
+            ("a1".into(), "Explore".into(), Some("toolu_agent".into())),
+            "a start message after the list fills in the task"
         );
         feed_events(
             &session,

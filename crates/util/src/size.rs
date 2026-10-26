@@ -1,19 +1,22 @@
 pub fn format_file_size(size: u64, use_decimal: bool) -> String {
-    if use_decimal {
-        if size < 1000 {
-            format!("{size}B")
-        } else if size < 1000 * 1000 {
-            format!("{:.1}KB", size as f64 / 1000.0)
-        } else {
-            format!("{:.1}MB", size as f64 / (1000.0 * 1000.0))
-        }
-    } else if size < 1024 {
-        format!("{size}B")
-    } else if size < 1024 * 1024 {
-        format!("{:.1}KiB", size as f64 / 1024.0)
+    let (base, units) = if use_decimal {
+        (1000.0, ["KB", "MB", "GB", "TB"])
     } else {
-        format!("{:.1}MiB", size as f64 / (1024.0 * 1024.0))
+        (1024.0, ["KiB", "MiB", "GiB", "TiB"])
+    };
+    if (size as f64) < base {
+        return format!("{size}B");
     }
+    let mut value = size as f64;
+    let mut unit = "B";
+    for next_unit in units {
+        if value < base {
+            break;
+        }
+        value /= base;
+        unit = next_unit;
+    }
+    format!("{value:.1}{unit}")
 }
 
 #[cfg(test)]
@@ -30,6 +33,9 @@ mod tests {
         assert_eq!(format_file_size(1000000, true), "1.0MB");
         assert_eq!(format_file_size(1500000, true), "1.5MB");
         assert_eq!(format_file_size(10000000, true), "10.0MB");
+        assert_eq!(format_file_size(2_500_000_000, true), "2.5GB");
+        assert_eq!(format_file_size(3_000_000_000_000, true), "3.0TB");
+        assert_eq!(format_file_size(5_000_000_000_000_000, true), "5000.0TB");
     }
 
     #[test]
@@ -42,5 +48,7 @@ mod tests {
         assert_eq!(format_file_size(1048576, false), "1.0MiB");
         assert_eq!(format_file_size(1572864, false), "1.5MiB");
         assert_eq!(format_file_size(10485760, false), "10.0MiB");
+        assert_eq!(format_file_size(1 << 30, false), "1.0GiB");
+        assert_eq!(format_file_size(3 << 40, false), "3.0TiB");
     }
 }

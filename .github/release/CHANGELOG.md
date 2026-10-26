@@ -7,6 +7,8 @@ release body.
 
 ## Unreleased
 
+- Subagents running in the background can now be expanded and observed via the background task indicator.
+
 ## 1.1.12 - 2026-10-26
 
 - Add support for Simplified Chinese (Preview).

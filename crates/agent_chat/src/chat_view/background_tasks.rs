@@ -5,21 +5,24 @@ use crate::usage_rings::menu_heading;
 use agent_harness::{BackgroundTaskKind, ToolCall};
 use gpui::{
     Anchor, AnyElement, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, SharedString, Styled, Task, Window, div, point, px,
+    IntoElement, ParentElement, Render, SharedString, Styled, Task, WeakEntity, Window, div, point,
+    px,
 };
 use i18n::t;
 use std::time::Duration;
 use theme::ActiveTheme as _;
-use ui::{PopoverMenu, prelude::*};
+use ui::{PopoverMenu, Tooltip, prelude::*};
+use util::ResultExt as _;
 
 const TICK: Duration = Duration::from_secs(1);
-const CARD_MAX_WIDTH: f32 = 360.;
+const CARD_WIDTH: f32 = 360.;
 
 struct TaskRow {
     kind: BackgroundTaskKind,
     title: SharedString,
     command: Option<SharedString>,
     elapsed: SharedString,
+    subagent: Option<(String, ToolCall)>,
 }
 
 fn running_label(kind: BackgroundTaskKind) -> SharedString {
@@ -73,8 +76,19 @@ impl ChatView {
             _ => t!("{count} tasks running", count = tasks.len()),
         };
         let elapsed = format_elapsed(oldest.elapsed().as_secs());
+        let elapsed_placeholder = elapsed
+            .chars()
+            .map(|character| {
+                if character.is_ascii_digit() {
+                    '0'
+                } else {
+                    character
+                }
+            })
+            .collect::<String>();
         let colors = cx.theme().colors();
         let session = self.session.clone();
+        let chat = cx.weak_entity();
         let summary = h_flex()
             .debug_selector(|| "agent-background-tasks".into())
             .h(px(20.))
@@ -88,7 +102,13 @@ impl ChatView {
                     .bg(cx.theme().status().info),
             )
             .child(label)
-            .child(div().text_color(text_faint(cx)).child(elapsed));
+            .child(
+                div()
+                    .relative()
+                    .text_color(text_faint(cx))
+                    .child(div().invisible().child(elapsed_placeholder))
+                    .child(div().absolute().top_0().left_0().child(elapsed)),
+            );
         Some(
             PopoverMenu::new(SharedString::from(format!(
                 "agent-background-tasks-{}",
@@ -101,7 +121,8 @@ impl ChatView {
             )
             .menu(move |_, cx| {
                 let session = session.clone();
-                Some(cx.new(|cx| BackgroundTasksCard::new(session, cx)))
+                let chat = chat.clone();
+                Some(cx.new(|cx| BackgroundTasksCard::new(session, chat, cx)))
             })
             .anchor(Anchor::BottomLeft)
             .attach(Anchor::TopLeft)
@@ -116,14 +137,17 @@ fn background_rows(session: &AgentSession) -> Vec<TaskRow> {
         .background_tasks()
         .iter()
         .map(|task| {
-            let command = task
+            let tool = task
                 .tool_use_id
                 .as_deref()
-                .and_then(|id| session.tool_entry(id))
-                .and_then(|tool| match &tool.call {
-                    ToolCall::Exec { command } => Some(SharedString::from(command.clone())),
-                    _ => None,
-                });
+                .and_then(|id| session.tool_entry(id));
+            let command = tool.and_then(|tool| match &tool.call {
+                ToolCall::Exec { command } => Some(SharedString::from(command.clone())),
+                _ => None,
+            });
+            let subagent = tool
+                .filter(|tool| tool.call.is_subagent_spawn())
+                .map(|tool| (tool.id.clone(), tool.call.clone()));
             let title: SharedString = if !task.description.trim().is_empty() {
                 task.description.clone().into()
             } else if let Some(command) = &command {
@@ -136,6 +160,7 @@ fn background_rows(session: &AgentSession) -> Vec<TaskRow> {
                 command: command.filter(|command| *command != title),
                 title,
                 elapsed: format_elapsed(task.started_at.elapsed().as_secs()).into(),
+                subagent,
             }
         })
         .collect()
@@ -143,12 +168,17 @@ fn background_rows(session: &AgentSession) -> Vec<TaskRow> {
 
 struct BackgroundTasksCard {
     session: Entity<AgentSession>,
+    chat: WeakEntity<ChatView>,
     focus_handle: FocusHandle,
     _tick: Task<()>,
 }
 
 impl BackgroundTasksCard {
-    fn new(session: Entity<AgentSession>, cx: &mut Context<Self>) -> Self {
+    fn new(
+        session: Entity<AgentSession>,
+        chat: WeakEntity<ChatView>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let tick = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
@@ -159,6 +189,7 @@ impl BackgroundTasksCard {
         });
         Self {
             session,
+            chat,
             focus_handle: cx.focus_handle(),
             _tick: tick,
         }
@@ -179,12 +210,14 @@ impl Render for BackgroundTasksCard {
         let muted = cx.theme().colors().text_muted;
         let faint = text_faint(cx);
         let code_font = super::code_font(cx);
+        let hover = ink(0.05, cx);
+        let chat = self.chat.clone();
         popover_card(cx)
             .key_context("menu")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| cx.emit(DismissEvent)))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
-            .max_w(px(CARD_MAX_WIDTH))
+            .w(px(CARD_WIDTH))
             .child(menu_heading(&t!("Background tasks"), cx))
             .when(rows.is_empty(), |this| {
                 this.child(
@@ -196,46 +229,57 @@ impl Render for BackgroundTasksCard {
                         .child(t!("Nothing is running in the background.")),
                 )
             })
-            .child(
-                v_flex()
-                    .px(px(8.))
-                    .pb(px(6.))
-                    .gap(px(6.))
-                    .children(rows.into_iter().map(move |row| {
-                        v_flex()
-                            .gap(px(2.))
-                            .text_size(ui(12.))
-                            .child(
-                                h_flex()
-                                    .gap(px(8.))
-                                    .child(
-                                        icon(
-                                            match row.kind {
-                                                BackgroundTaskKind::Shell => {
-                                                    IconName::AgentTerminal
-                                                }
-                                                BackgroundTaskKind::Agent => IconName::AgentBot,
-                                                BackgroundTaskKind::Other => IconName::AgentWidget,
-                                            },
-                                            14.,
-                                        )
-                                        .text_color(muted),
+            .child(v_flex().px(px(4.)).pb(px(4.)).gap(px(2.)).children(
+                rows.into_iter().enumerate().map(move |(index, row)| {
+                    v_flex()
+                        .id(index)
+                        .px(px(4.))
+                        .py(px(2.))
+                        .rounded(px(6.))
+                        .gap(px(2.))
+                        .text_size(ui(12.))
+                        .when_some(row.subagent, |this, (id, call)| {
+                            let chat = chat.clone();
+                            this.cursor_pointer()
+                                .hover(|style| style.bg(hover))
+                                .tooltip(Tooltip::text(t!("Open subagent")))
+                                .on_click(cx.listener(move |_, _, window, cx| {
+                                    chat.update(cx, |chat, cx| {
+                                        chat.open_subagent(id.clone(), &call, window, cx)
+                                    })
+                                    .log_err();
+                                    cx.emit(DismissEvent);
+                                }))
+                        })
+                        .child(
+                            h_flex()
+                                .gap(px(8.))
+                                .child(
+                                    icon(
+                                        match row.kind {
+                                            BackgroundTaskKind::Shell => IconName::AgentTerminal,
+                                            BackgroundTaskKind::Agent => IconName::AgentBot,
+                                            BackgroundTaskKind::Other => IconName::AgentWidget,
+                                        },
+                                        14.,
                                     )
-                                    .child(div().flex_1().min_w_0().truncate().child(row.title))
-                                    .child(div().flex_none().text_color(faint).child(row.elapsed)),
-                            )
-                            .when_some(row.command, |this, command| {
-                                this.child(
-                                    div()
-                                        .pl(px(22.))
-                                        .text_size(ui(11.))
-                                        .text_color(muted)
-                                        .font(code_font.clone())
-                                        .child(command),
+                                    .text_color(muted),
                                 )
-                            })
-                    })),
-            )
+                                .child(div().flex_1().min_w_0().truncate().child(row.title))
+                                .child(div().flex_none().text_color(faint).child(row.elapsed)),
+                        )
+                        .when_some(row.command, |this, command| {
+                            this.child(
+                                div()
+                                    .pl(px(22.))
+                                    .text_size(ui(11.))
+                                    .text_color(muted)
+                                    .font(code_font.clone())
+                                    .child(command),
+                            )
+                        })
+                }),
+            ))
     }
 }
 
@@ -329,8 +373,13 @@ mod tests {
                 rows[0].command.is_none(),
                 "the command is the title already"
             );
+            assert!(rows[0].subagent.is_none(), "commands don't open a subagent");
             assert_eq!(rows[1].title.as_ref(), "Scan the repo");
             assert!(rows[1].command.is_none());
+            assert_eq!(
+                rows[1].subagent.as_ref().map(|(id, _)| id.as_str()),
+                Some("toolu_agent")
+            );
         });
         feed_events(
             &session,
