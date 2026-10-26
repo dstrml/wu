@@ -8,6 +8,7 @@ release body.
 ## Unreleased
 
 - Subagents running in the background can now be expanded and observed via the background task indicator.
+- On WSL2, Wu can now use the GPU when started with `WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1`.
 
 ## 1.1.12 - 2026-10-26
 

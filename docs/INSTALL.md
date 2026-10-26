@@ -61,6 +61,14 @@ ln -sf ~/.local/wu.app/bin/wu ~/.local/bin/wu
 
 Make sure `~/.local/bin` is on your `PATH`, then run `wu`. This doesn't add Wu to your app menu; the install command above does.
 
+#### WSL2
+
+On WSL2, Wu draws with the CPU by default because the WSL GPU driver isn't fully standards-compliant. To try the GPU instead, start Wu with:
+
+```sh
+WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1 wu
+```
+
 ### Windows (x86-64)
 
 Download the [installer](https://github.com/dstrml/wu/releases/latest/download/Wu-x86_64.exe) and click to run. The installer isn't code-signed, so Windows SmartScreen may warn you. Click **More info**, then **Run anyway**.
