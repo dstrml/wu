@@ -12,7 +12,7 @@ export const zhCN: Messages = {
     support: { title: '支持 Wu', description: 'Wu 免费开源。在 Open Collective 上捐助，帮它继续走下去。' },
     notFound: { title: '找不到页面 · Wu' }
   },
-  languageName: '简体中文',
+  languageName: '中文',
   header: {
     docs: '文档',
     support: '支持',
