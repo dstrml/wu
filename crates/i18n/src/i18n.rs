@@ -790,7 +790,11 @@ mod tests {
         assert!(problems.is_empty(), "\n{}", problems.join("\n"));
     }
 
-    const DEBUG_BUILD_ONLY_ACTIONS: &[&str] = &["dev::ShowWorkspaceError"];
+    const ACTIONS_MISSING_FROM_MACOS_RELEASE: &[&str] = &[
+        "dev::ShowWorkspaceError",
+        "projects::OpenFolderInWsl",
+        "projects::OpenWsl",
+    ];
 
     #[derive(Deserialize)]
     struct DumpedActions {
@@ -848,7 +852,7 @@ mod tests {
         }
         for name in translations.keys() {
             if !registered.contains(name.as_str())
-                && !DEBUG_BUILD_ONLY_ACTIONS.contains(&name.as_str())
+                && !ACTIONS_MISSING_FROM_MACOS_RELEASE.contains(&name.as_str())
             {
                 problems.push(format!("{name} is not a registered command"));
             }
