@@ -289,7 +289,7 @@ impl MacPlatform {
                 menu_item.setSubmenu_(menu);
                 application_menu.addItem_(menu_item);
 
-                if menu_config.name == "Window" {
+                if menu_config.window_menu {
                     let app: id = msg_send![APP_CLASS, sharedApplication];
                     app.setWindowsMenu_(menu);
                 }
@@ -449,6 +449,7 @@ impl MacPlatform {
                     name,
                     items,
                     disabled,
+                    ..
                 }) => {
                     let item = NSMenuItem::new(nil).autorelease();
                     let submenu = NSMenu::new(nil).autorelease();

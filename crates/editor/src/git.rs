@@ -714,7 +714,8 @@ impl Editor {
                 .ok();
             }
             Err(err) => {
-                let message = format!("Failed to copy permalink to line: {err}");
+                let message =
+                    t!("Failed to copy permalink to line: {error}", error = err).to_string();
 
                 anyhow::Result::<()>::Err(err).log_err();
 
@@ -755,7 +756,8 @@ impl Editor {
                 .ok();
             }
             Err(err) => {
-                let message = format!("Failed to open permalink to line: {err}");
+                let message =
+                    t!("Failed to open permalink to line: {error}", error = err).to_string();
 
                 anyhow::Result::<()>::Err(err).log_err();
 
@@ -1764,13 +1766,13 @@ pub fn render_diff_hunk_controls(
                     || (!status.has_secondary_hunk() && supports_unstaging)),
             |el| {
                 el.child(if status.has_secondary_hunk() {
-                    Button::new(("stage", row as u64), "Stage")
+                    Button::new(("stage", row as u64), t!("Stage"))
                         .alpha(if status.is_pending() { 0.66 } else { 1.0 })
                         .tooltip({
                             let focus_handle = editor.focus_handle(cx);
                             move |_window, cx| {
                                 Tooltip::for_action_in(
-                                    "Stage Hunk",
+                                    t!("Stage Hunk"),
                                     &::git::ToggleStaged,
                                     &focus_handle,
                                     cx,
@@ -1791,13 +1793,13 @@ pub fn render_diff_hunk_controls(
                             }
                         })
                 } else {
-                    Button::new(("unstage", row as u64), "Unstage")
+                    Button::new(("unstage", row as u64), t!("Unstage"))
                         .alpha(if status.is_pending() { 0.66 } else { 1.0 })
                         .tooltip({
                             let focus_handle = editor.focus_handle(cx);
                             move |_window, cx| {
                                 Tooltip::for_action_in(
-                                    "Unstage Hunk",
+                                    t!("Unstage Hunk"),
                                     &::git::ToggleStaged,
                                     &focus_handle,
                                     cx,
@@ -1822,12 +1824,12 @@ pub fn render_diff_hunk_controls(
         )
         .when(show_stage_restore && supports_restore, |el| {
             el.child(
-                Button::new(("restore", row as u64), "Restore")
+                Button::new(("restore", row as u64), t!("Restore"))
                     .tooltip({
                         let focus_handle = editor.focus_handle(cx);
                         move |_window, cx| {
                             Tooltip::for_action_in(
-                                "Restore Hunk",
+                                t!("Restore Hunk"),
                                 &::git::Restore,
                                 &focus_handle,
                                 cx,
@@ -1858,7 +1860,12 @@ pub fn render_diff_hunk_controls(
                         .tooltip({
                             let focus_handle = editor.focus_handle(cx);
                             move |_window, cx| {
-                                Tooltip::for_action_in("Next Hunk", &GoToHunk, &focus_handle, cx)
+                                Tooltip::for_action_in(
+                                    t!("Next Hunk"),
+                                    &GoToHunk,
+                                    &focus_handle,
+                                    cx,
+                                )
                             }
                         })
                         .on_click({
@@ -1890,7 +1897,7 @@ pub fn render_diff_hunk_controls(
                             let focus_handle = editor.focus_handle(cx);
                             move |_window, cx| {
                                 Tooltip::for_action_in(
-                                    "Previous Hunk",
+                                    t!("Previous Hunk"),
                                     &GoToPreviousHunk,
                                     &focus_handle,
                                     cx,

@@ -1,6 +1,7 @@
 use super::register_wu_scheme;
 use anyhow::Result;
-use gpui::{AppContext as _, AsyncApp, Context, PromptLevel, Window, actions};
+use gpui::{AppContext as _, AsyncApp, Context, PromptButton, PromptLevel, Window, actions};
+use i18n::t;
 use release_channel::ReleaseChannel;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -81,15 +82,15 @@ async fn install_script(cx: &AsyncApp) -> Result<Option<PathBuf>> {
 }
 
 pub fn install_cli_binary(window: &mut Window, cx: &mut Context<Workspace>) {
-    const LINUX_PROMPT_DETAIL: &str = "If you installed Wu from our official release add ~/.local/bin to your PATH.\n\nIf you installed Wu from a different source like your package manager, then you may need to create an alias/symlink manually.\n\nDepending on your package manager, the CLI might be named zeditor, zedit, zed-editor or something else.";
-
     cx.spawn_in(window, async move |workspace, cx| {
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             let prompt = cx.prompt(
                 PromptLevel::Warning,
-                "CLI should already be installed",
-                Some(LINUX_PROMPT_DETAIL),
-                &["OK"],
+                &t!("CLI should already be installed"),
+                Some(&t!(
+                    "If you installed Wu from our official release add ~/.local/bin to your PATH.\n\nIf you installed Wu from a different source like your package manager, then you may need to create an alias/symlink manually.\n\nDepending on your package manager, the CLI might be named zeditor, zedit, zed-editor or something else."
+                )),
+                &[PromptButton::ok(t!("OK"))],
             );
             cx.background_spawn(prompt).detach();
             return Ok(());
@@ -109,11 +110,11 @@ pub fn install_cli_binary(window: &mut Window, cx: &mut Context<Workspace>) {
                         |cx| {
                             cx.new(|cx| {
                                 MessageNotification::new(
-                                    "You can add `wu` to your PATH manually.",
+                                    t!("You can add `wu` to your PATH manually."),
                                     cx,
                                 )
-                                .with_title("Couldn't install the Wu CLI")
-                                .more_info_message("Show me how")
+                                .with_title(t!("Couldn't install the Wu CLI"))
+                                .more_info_message(t!("Show me how"))
                                 .more_info_url(CANT_INSTALL_DOCS_URL)
                             })
                         },
@@ -129,11 +130,12 @@ pub fn install_cli_binary(window: &mut Window, cx: &mut Context<Workspace>) {
             workspace.show_toast(
                 Toast::new(
                     NotificationId::unique::<InstalledZedCli>(),
-                    format!(
-                        "Installed `wu` to {}. You can launch {} from your terminal.",
-                        path.to_string_lossy(),
-                        ReleaseChannel::global(cx).display_name()
-                    ),
+                    t!(
+                        "Installed `wu` to {path}. You can launch {app} from your terminal.",
+                        path = path.to_string_lossy(),
+                        app = ReleaseChannel::global(cx).display_name()
+                    )
+                    .to_string(),
                 ),
                 cx,
             )
@@ -141,5 +143,5 @@ pub fn install_cli_binary(window: &mut Window, cx: &mut Context<Workspace>) {
         register_wu_scheme(cx).await.log_err();
         Ok(())
     })
-    .detach_and_prompt_err("Cannot install the Wu CLI", window, cx, |_, _, _| None);
+    .detach_and_prompt_err(&t!("Cannot install the Wu CLI"), window, cx, |_, _, _| None);
 }

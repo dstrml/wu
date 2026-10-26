@@ -44,7 +44,10 @@ impl CatalogFailure {
             }
             _ => {}
         }
-        let text = error.to_string().to_ascii_lowercase();
+        let text = match error {
+            HarnessError::Protocol(detail) => detail.to_ascii_lowercase(),
+            _ => error.to_string().to_ascii_lowercase(),
+        };
         if text.contains("enoent")
             || text.contains("harness binary not found")
             || text.contains("no such file or directory")

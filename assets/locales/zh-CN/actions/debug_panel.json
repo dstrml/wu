@@ -1,0 +1,10 @@
+{
+  "debug_panel::Toggle": {
+    "name": "切换调试面板",
+    "description": "打开或关闭调试面板。"
+  },
+  "debug_panel::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "将焦点移到调试面板或移出调试面板。"
+  }
+}

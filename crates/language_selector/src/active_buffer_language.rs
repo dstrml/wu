@@ -1,14 +1,15 @@
 use editor::Editor;
 use gpui::{
-    App, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, WeakEntity,
-    Window, div,
+    App, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
+    WeakEntity, Window, div,
 };
+use i18n::t;
 use language::LanguageName;
 use settings::Settings as _;
 use ui::{Button, ButtonCommon, Clickable, FluentBuilder, LabelSize, Tooltip};
 use workspace::{HideStatusItem, StatusBarSettings, StatusItemView, Workspace, item::ItemHandle};
 
-use crate::{LanguageSelector, Toggle};
+use crate::{LanguageSelector, Toggle, language_display_name};
 
 pub struct ActiveBufferLanguage {
     active_language: Option<Option<LanguageName>>,
@@ -46,17 +47,16 @@ impl Render for ActiveBufferLanguage {
         }
 
         div().when_some(self.active_language.as_ref(), |el, active_language| {
-            let active_language_text = if let Some(active_language_text) = active_language {
-                active_language_text.to_string()
-            } else {
-                "Unknown".to_string()
+            let active_language_text: SharedString = match active_language {
+                Some(active_language_text) => language_display_name(active_language_text.as_ref()),
+                None => t!("Unknown"),
             };
 
             el.child(
                 Button::new("change-language", active_language_text.clone())
                     .label_size(LabelSize::Small)
                     .tab_index(0isize)
-                    .aria_label(format!("Language: {active_language_text}"))
+                    .aria_label(t!("Language: {language}", language = active_language_text))
                     .on_click(cx.listener(|this, _, window, cx| {
                         if let Some(workspace) = this.workspace.upgrade() {
                             workspace.update(cx, |workspace, cx| {
@@ -64,7 +64,7 @@ impl Render for ActiveBufferLanguage {
                             });
                         }
                     }))
-                    .tooltip(|_window, cx| Tooltip::for_action("Select Language", &Toggle, cx)),
+                    .tooltip(|_window, cx| Tooltip::for_action(t!("Select Language"), &Toggle, cx)),
             )
         })
     }

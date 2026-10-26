@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import type { Messages } from '../i18n/en';
+import { useMessages } from '../i18n/locale';
 import {
-  chats,
   fileByPath,
   fileIcon,
   fileName,
@@ -10,7 +11,6 @@ import {
   initiallyExpanded,
   languageName,
   outline,
-  previewReply,
   tree,
   type ChatEntry,
   type ChatStep,
@@ -56,13 +56,13 @@ const tokenStyles: Record<TokenKind, CSSProperties> = {
   literal: { color: '#34d399' }
 };
 
-const panels: { key: PanelKey; icon: string; label: string }[] = [
-  { key: 'explorer', icon: 'activity_explorer', label: 'Project Panel' },
-  { key: 'search', icon: 'activity_search', label: 'Search' },
-  { key: 'git', icon: 'activity_source_control', label: 'Git Panel' },
-  { key: 'outline', icon: 'activity_outline', label: 'Outline Panel' },
-  { key: 'debug', icon: 'activity_debug', label: 'Debug Panel' },
-  { key: 'agent', icon: 'agent_bot', label: 'Agent Chats' }
+const panels: { key: PanelKey; icon: string }[] = [
+  { key: 'explorer', icon: 'activity_explorer' },
+  { key: 'search', icon: 'activity_search' },
+  { key: 'git', icon: 'activity_source_control' },
+  { key: 'outline', icon: 'activity_outline' },
+  { key: 'debug', icon: 'activity_debug' },
+  { key: 'agent', icon: 'agent_bot' }
 ];
 
 const toolIcons: Record<ToolKind, string> = {
@@ -71,8 +71,6 @@ const toolIcons: Record<ToolKind, string> = {
   edit: 'agent_pen',
   search: 'agent_magnifer'
 };
-
-const toolLabels: Record<ToolKind, string> = { run: 'Run', read: 'Read', edit: 'Edit', search: 'Search' };
 
 const changedFiles = files.filter((file) => file.modified);
 export const hover = 'hover:bg-[#ffffff1c]';
@@ -238,6 +236,7 @@ function Editor({
   revealToken: number;
   onCursor: (line: number, column: number) => void;
 }) {
+  const t = useMessages().wuWindow;
   const scrollRef = useRef<HTMLDivElement>(null);
   const lines = file.code.split('\n');
   const levels = indentLevels(lines);
@@ -295,7 +294,7 @@ function Editor({
             {isActive && line.trim() && (
               <span className="flex items-center gap-2 pl-[61px] whitespace-pre select-none" style={{ color: muted }}>
                 <Icon name="file_git" size={17} />
-                farshed, 3 weeks ago
+                {t.blame}
               </span>
             )}
           </div>
@@ -326,9 +325,10 @@ export function StepRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const t = useMessages().wuWindow.chat;
   const isThought = step.kind === 'thought';
   const icon = isThought ? 'agent_chat_round_line' : toolIcons[step.tool];
-  const label = isThought ? 'Thought process' : toolLabels[step.tool];
+  const label = isThought ? t.thoughtProcess : t.tools[step.tool];
   return (
     <div className="relative pl-12">
       <TreeGutter isLast={isLast} />
@@ -370,24 +370,23 @@ export function StepRow({
   );
 }
 
-export function stepsSummary(steps: ChatStep[]) {
+export function stepsSummary(steps: ChatStep[], t: Messages['wuWindow']['summary']) {
   const thoughts = steps.filter((step) => step.kind === 'thought').length;
   const tools = steps.flatMap((step) => (step.kind === 'tool' ? [step] : []));
   const count = (tool: ToolKind) => tools.filter((step) => step.tool === tool).length;
-  const plural = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`;
+  const editedFiles = new Set(tools.filter((step) => step.tool === 'edit').map((step) => step.detail)).size;
   const toolSegments = [
-    count('run') && `ran ${plural(count('run'), 'command', 'commands')}`,
-    new Set(tools.filter((step) => step.tool === 'edit').map((step) => step.detail)).size &&
-      `edited ${plural(new Set(tools.filter((step) => step.tool === 'edit').map((step) => step.detail)).size, 'file', 'files')}`,
-    count('read') && `read ${plural(count('read'), 'file', 'files')}`,
-    count('search') && `searched ${plural(count('search'), 'time', 'times')}`
+    count('run') && t.ran(count('run')),
+    editedFiles && t.edited(editedFiles),
+    count('read') && t.read(count('read')),
+    count('search') && t.searched(count('search'))
   ].filter((segment): segment is string => Boolean(segment));
-  const toolSummary = toolSegments.join(' · ');
+  const toolSummary = toolSegments.join(t.separator);
   const segments = [
-    thoughts === 1 ? 'thought process' : thoughts > 1 ? `thought ${thoughts} times` : '',
+    thoughts === 1 ? t.thoughtOnce : thoughts > 1 ? t.thoughtTimes(thoughts) : '',
     toolSummary && toolSummary[0]?.toUpperCase() + toolSummary.slice(1)
   ].filter(Boolean);
-  const summary = segments.join(' · ');
+  const summary = segments.join(t.separator);
   return summary.charAt(0).toUpperCase() + summary.slice(1);
 }
 
@@ -402,6 +401,7 @@ function HoverStrip({
   saved: boolean;
   onToggleSaved: () => void;
 }) {
+  const t = useMessages().wuWindow;
   return (
     <div
       className={`flex h-8 items-center gap-2 pt-2 opacity-0 transition-opacity group-hover/turn:opacity-100 ${alignEnd ? 'justify-end' : ''}`}
@@ -412,7 +412,7 @@ function HoverStrip({
       </span>
       <button
         type="button"
-        title={saved ? 'Remove from saved' : 'Save message'}
+        title={saved ? t.agentPanel.removeSaved : t.chat.saveMessage}
         aria-pressed={saved}
         className="grid size-6 cursor-pointer place-items-center rounded-[6px] hover:bg-[#ffffff14]"
         onClick={onToggleSaved}
@@ -467,6 +467,8 @@ function ChatView({
   savedEntries: Set<number>;
   onToggleSaved: (index: number) => void;
 }) {
+  const messages = useMessages();
+  const t = messages.wuWindow.chat;
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastEntry = entries[entries.length - 1];
   const lastText = lastEntry?.kind === 'assistant' ? lastEntry.text : '';
@@ -509,7 +511,7 @@ function ChatView({
                           <Icon name="agent_arrow_down" size={14} />
                         </span>
                       </span>
-                      {stepsSummary(entry.steps)}
+                      {stepsSummary(entry.steps, messages.wuWindow.summary)}
                     </button>
                     {open &&
                       entry.steps.map((step, stepIndex) => {
@@ -534,7 +536,7 @@ function ChatView({
                       <AssistantText source={entry.text} />
                     ) : (
                       <span className="text-[12px]" style={{ color: muted }}>
-                        Thinking…
+                        {t.thinking}
                       </span>
                     )}
                     {!(streaming && index === entries.length - 1) && (
@@ -555,8 +557,8 @@ function ChatView({
           <input
             className="min-w-0 flex-1 bg-transparent px-2 text-[14px] outline-none placeholder:text-[#727080]"
             style={{ color: text }}
-            placeholder="Do anything…"
-            aria-label="Message"
+            placeholder={t.placeholder}
+            aria-label={t.messageLabel}
             value={draft}
             onChange={(event) => onDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -569,7 +571,7 @@ function ChatView({
           <span className="flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium text-[#f0eef4e6] hover:bg-[#ffffff1c]">
             <Icon name="agent_claude" size={16} color={claude} />
             Opus 5.5
-            <span className="text-[#aaa8b7b3]">High</span>
+            <span className="text-[#aaa8b7b3]">{t.effort}</span>
           </span>
           <span className="flex shrink-0 items-center gap-2 pl-0.5">
             <span className={`grid size-7 place-items-center rounded-full ${hover}`}>
@@ -577,7 +579,7 @@ function ChatView({
             </span>
             <button
               type="button"
-              aria-label="Send"
+              aria-label={t.send}
               disabled={!canSend}
               className={`grid size-7 place-items-center rounded-full bg-[#f0eef4] ${canSend ? 'cursor-pointer hover:opacity-85' : 'opacity-35'}`}
               onClick={onSend}
@@ -590,7 +592,7 @@ function ChatView({
           <span className="flex items-center gap-1 pl-2.5">
             <span className="flex h-5 items-center gap-1.5 px-2">
               <Icon name="agent_folder" size={12} />
-              Local checkout
+              {t.checkout}
             </span>
             <span className="flex h-5 items-center gap-1.5 px-2">
               <Icon name="agent_git_branch" size={12} />
@@ -733,6 +735,7 @@ function DiffCell({ side, kind, language }: { side?: DiffSide; kind: 'deleted' |
 }
 
 function DiffView({ target }: { target: string }) {
+  const t = useMessages().wuWindow.diff;
   const scrollRef = useRef<HTMLDivElement>(null);
   const headerRefs = useRef(new Map<string, HTMLDivElement>());
   const totals = changedFiles.map(diffStats).reduce(
@@ -757,24 +760,24 @@ function DiffView({ target }: { target: string }) {
     <>
       <div className="flex h-[45px] shrink-0 items-center gap-2 border-b border-[#23262f] bg-[#181a21] px-2 py-1.5 text-[14px]">
         <span className="flex gap-1 pl-0.5">
-          <IconButton name="chevron_down_up" label="Collapse All Files" />
-          <IconButton name="diff_unified" label="Unified" />
-          <IconButton name="diff_split" color={accent} label="Split" />
+          <IconButton name="chevron_down_up" label={t.collapseAll} />
+          <IconButton name="diff_unified" label={t.unified} />
+          <IconButton name="diff_split" color={accent} label={t.split} />
         </span>
         <span className="ml-auto flex items-center gap-1.5">
           <DiffStat {...totals} />
           {divider}
           <span className="flex gap-0.5">
-            <IconButton name="arrow_up" label="Go to Previous Hunk" />
-            <IconButton name="arrow_down" label="Go to Next Hunk" />
+            <IconButton name="arrow_up" label={t.previousHunk} />
+            <IconButton name="arrow_down" label={t.nextHunk} />
           </span>
           {divider}
-          {toolbarButton('Stage')}
-          {toolbarButton('Unstage', false)}
+          {toolbarButton(t.stage)}
+          {toolbarButton(t.unstage, false)}
           {divider}
-          <span className="flex w-20 justify-center">{toolbarButton('Stage All')}</span>
+          <span className="flex w-20 justify-center">{toolbarButton(t.stageAll)}</span>
           {divider}
-          {toolbarButton('Commit')}
+          {toolbarButton(t.commit)}
         </span>
       </div>
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto overscroll-contain bg-[#181a21] font-wu-mono text-[15px]">
@@ -810,7 +813,7 @@ function DiffView({ target }: { target: string }) {
                     <span
                       className={`flex h-[22px] items-center gap-1.5 rounded-[4px] border border-[#23262f] px-1.5 text-[14px] ${isTarget ? '' : 'invisible group-hover/header:visible'}`}
                     >
-                      Open File
+                      {t.openFile}
                       <span className="text-[12px]" style={{ color: muted }}>
                         ⌥↩
                       </span>
@@ -857,6 +860,8 @@ function savedPreview(source: string) {
 const directory = (path: string) => path.slice(0, Math.max(0, path.length - fileName(path).length - 1));
 
 export function WuWindow() {
+  const t = useMessages().wuWindow;
+  const { chats, previewReply } = t;
   const [panel, setPanel] = useState<PanelKey | null>('explorer');
   const [expanded, setExpanded] = useState(() => new Set(initiallyExpanded));
   const [tabs, setTabs] = useState<TabId[]>([
@@ -920,7 +925,7 @@ export function WuWindow() {
     setDrafts((current) => ({ ...current, [chatId]: '' }));
     setChatEntries((current) => ({
       ...current,
-      [chatId]: [...(current[chatId] ?? []), { kind: 'user', text: message, time: 'Just now' }, { kind: 'assistant', text: '' }]
+      [chatId]: [...(current[chatId] ?? []), { kind: 'user', text: message, time: t.chat.justNow }, { kind: 'assistant', text: '' }]
     }));
     setStreamingChat(chatId);
     const words = previewReply.split(' ');
@@ -958,7 +963,7 @@ export function WuWindow() {
     if (rows.length === 0) {
       return (
         <div className="px-4 pt-3 text-[12px]" style={{ color: placeholder }}>
-          No saved messages yet. Hover a message and click the bookmark to save it.
+          {t.agentPanel.noSaved}
         </div>
       );
     }
@@ -974,7 +979,7 @@ export function WuWindow() {
               <span className="line-clamp-3 min-w-0 flex-1 text-[13px] leading-[18px]">{preview}</span>
               <button
                 type="button"
-                title="Remove from saved"
+                title={t.agentPanel.removeSaved}
                 className="invisible grid size-[18px] shrink-0 cursor-pointer place-items-center rounded-[5px] group-hover/saved:visible hover:bg-[#ffffff1c]"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -987,7 +992,7 @@ export function WuWindow() {
             <div className="flex min-w-0 items-center gap-1 text-[11px] leading-[14px] text-[#aaa8b7b3]">
               <Icon name={fromAgent ? 'agent_bot' : 'agent_chat_round_line'} size={11} />
               <span className="truncate">
-                {fromAgent ? 'Claude' : 'You'} · {chat.title} · now
+                {fromAgent ? 'Claude' : t.agentPanel.you} · {chat.title} · {t.agentPanel.now}
               </span>
             </div>
           </div>
@@ -1079,19 +1084,19 @@ export function WuWindow() {
                 <input
                   className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[#727080]"
                   style={{ color: text }}
-                  placeholder="Search"
-                  aria-label="Search the project"
+                  placeholder={t.search.placeholder}
+                  aria-label={t.search.label}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
-                <IconButton name="case_sensitive" size={16} box={20} label="Match Case" />
-                <IconButton name="whole_word" size={16} box={20} label="Match Whole Words" />
-                <IconButton name="regex" size={16} box={20} label="Use Regular Expressions" />
+                <IconButton name="case_sensitive" size={16} box={20} label={t.search.matchCase} />
+                <IconButton name="whole_word" size={16} box={20} label={t.search.wholeWords} />
+                <IconButton name="regex" size={16} box={20} label={t.search.regex} />
               </div>
             </div>
             <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[#23262f] pr-1 pl-2">
               <span className="flex-1 truncate text-[12px]" style={{ color: muted }}>
-                {needle.length >= 2 && `${matchCount} ${matchCount === 1 ? 'result' : 'results'} in ${searchResults.length} ${searchResults.length === 1 ? 'file' : 'files'}`}
+                {needle.length >= 2 && t.search.results(matchCount, searchResults.length)}
               </span>
               {['arrow_circle', 'eraser', 'list_collapse', 'file_diff', 'ellipsis'].map((name) => (
                 <IconButton key={name} name={name} box={18} label={name} />
@@ -1145,31 +1150,31 @@ export function WuWindow() {
           <>
             <div className="flex h-8 shrink-0 text-[14px]">
               <span className="flex flex-1 items-center justify-center gap-1" style={{ color: text }}>
-                Changes
+                {t.git.changes}
                 <span className="text-[12px]" style={{ color: muted }}>
                   ({changedFiles.length})
                 </span>
               </span>
               <span className="w-px bg-[#2c2f3a]" />
               <span className="flex flex-1 items-center justify-center border-b border-[#2c2f3a99] bg-[#181a2199]" style={{ color: muted }}>
-                History
+                {t.git.history}
               </span>
             </div>
             <div className="flex min-h-8 shrink-0 items-center pr-2 pl-1">
               <span className={`flex h-[22px] items-center gap-1 rounded-[4px] px-1 text-[12px] ${hover}`}>
                 <Icon name="diff" size={14} color={muted} />
-                View Diff
+                {t.git.viewDiff}
                 <span className="pl-1 font-wu-mono text-[11px]">
                   <span className="text-[#34d399]">+75</span> <span className="text-[#f87171]">−8</span>
                 </span>
               </span>
               <span className="ml-auto flex gap-0.5">
-                <IconButton name="ellipsis" label="View Options" />
+                <IconButton name="ellipsis" label={t.git.viewOptions} />
               </span>
             </div>
             <div className="flex h-7 shrink-0 items-center gap-2 pr-1 pl-2.5 text-[12px]" style={{ color: muted }}>
               <Icon name="chevron_down" size={12} />
-              Tracked
+              {t.git.tracked}
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
               {changedFiles.map((file) => (
@@ -1197,11 +1202,11 @@ export function WuWindow() {
               <span className={`rounded-[4px] px-1 text-[12px] ${hover}`}>main</span>
             </div>
             <div className="h-[142px] border-t border-[#2c2f3a] bg-[#181a21] px-2 pt-2 font-wu-mono text-[12px] leading-[19px]" style={{ color: placeholder }}>
-              Enter commit message
+              {t.git.commitMessage}
             </div>
             <div className="flex justify-end p-1.5">
               <span className="flex h-[22px] items-center overflow-hidden rounded-[4px] bg-[#2a2d37] text-[12px]" style={{ color: text }}>
-                <span className="px-2">Commit Tracked</span>
+                <span className="px-2">{t.git.commitTracked}</span>
                 <span className="grid h-full w-5 place-items-center border-l border-[#2c2f3a]">
                   <Icon name="chevron_down" size={12} color={muted} />
                 </span>
@@ -1216,9 +1221,9 @@ export function WuWindow() {
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-[#2c2f3a] px-2">
               <Icon name="magnifying_glass" size={14} color={muted} />
               <span className="flex-1 text-[14px]" style={{ color: placeholder }}>
-                Search buffer symbols…
+                {t.outline.search}
               </span>
-              <IconButton name="pin" size={16} box={20} color={muted} label="Pin Active Outline" />
+              <IconButton name="pin" size={16} box={20} color={muted} label={t.outline.pin} />
             </div>
             <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
               {activeFile &&
@@ -1251,10 +1256,10 @@ export function WuWindow() {
           <>
             <div className="flex h-1/3 shrink-0 flex-col items-center justify-center gap-2 text-[14px]" style={{ color: text }}>
               {[
-                ['plus', 'New Session'],
-                ['code', 'Edit debug.json'],
-                ['book', 'Debugger Docs'],
-                ['blocks', 'Debugger Extensions']
+                ['plus', t.debug.newSession],
+                ['code', t.debug.editConfig],
+                ['book', t.debug.docs],
+                ['blocks', t.debug.extensions]
               ].map(([icon = '', label]) => (
                 <span key={label} className={`flex h-[22px] items-center gap-1 rounded-[4px] px-1 ${hover}`}>
                   <Icon name={icon} size={14} color={muted} />
@@ -1263,10 +1268,10 @@ export function WuWindow() {
               ))}
             </div>
             <div className="flex items-center border-b border-[#23262f] p-1.5 text-[12px]" style={{ color: text }}>
-              Breakpoints
+              {t.debug.breakpoints}
             </div>
             <div className="p-2 text-[12px]" style={{ color: muted }}>
-              No Breakpoints Set
+              {t.debug.noBreakpoints}
             </div>
           </>
         );
@@ -1275,11 +1280,11 @@ export function WuWindow() {
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-center gap-1 px-2 pt-2 pb-1">
               <span className="flex h-[29px] flex-1 items-center px-2 text-[13px] font-medium text-[#f0eef4cc]">
-                {showingSaved ? 'Saved Messages' : 'Chats'}
+                {showingSaved ? t.agentPanel.savedMessages : t.agentPanel.chats}
               </span>
               <button
                 type="button"
-                title={showingSaved ? 'Back to Chats' : 'Saved Messages'}
+                title={showingSaved ? t.agentPanel.backToChats : t.agentPanel.savedMessages}
                 aria-pressed={showingSaved}
                 className={`grid size-[29px] cursor-pointer place-items-center rounded-[8px] ${showingSaved ? 'bg-[#ffffff1c]' : hover}`}
                 onClick={() => setShowingSaved((current) => !current)}
@@ -1293,7 +1298,7 @@ export function WuWindow() {
             <div className="px-2 pb-1">
               <div className="flex items-center gap-2 rounded-[7px] bg-[#ffffff0a] px-2.5 py-1.5 text-[13px]" style={{ color: placeholder }}>
                 <Icon name="agent_magnifer" size={16} color={muted} />
-                {showingSaved ? 'Search saved messages…' : 'Search chats…'}
+                {showingSaved ? t.agentPanel.searchSaved : t.agentPanel.searchChats}
               </div>
             </div>
             {showingSaved ? (
@@ -1302,7 +1307,7 @@ export function WuWindow() {
               <div className="min-h-0 flex-1 overflow-auto px-2 pt-1">
                 <div className="pt-3">
                   <div className="flex h-7 items-center gap-2 px-2 text-[12px] font-medium text-[#aaa8b780]">
-                    Chats
+                    {t.agentPanel.chats}
                     <span className="ml-auto rotate-90">
                       <Icon name="agent_arrow_right" size={12} />
                     </span>
@@ -1337,10 +1342,10 @@ export function WuWindow() {
   };
 
   const tabParts = (tab: TabId, isActive: boolean) => {
-    if (tab === 'diff') return { title: 'Uncommitted Changes', icon: <Icon name="git_branch" size={14} color={muted} /> };
+    if (tab === 'diff') return { title: t.tabs.uncommittedChanges, icon: <Icon name="git_branch" size={14} color={muted} /> };
     if (tab.startsWith('chat:')) {
       const chat = chats.find((candidate) => candidate.id === tab.slice(5));
-      return { title: chat?.title ?? 'New chat', icon: <Icon name="agent_claude" size={14} color={claude} /> };
+      return { title: chat?.title ?? t.tabs.newChat, icon: <Icon name="agent_claude" size={14} color={claude} /> };
     }
     const path = tab.slice(5);
     return { title: fileName(path), icon: <ImageIcon src={fileIcon(path)} size={14} className={isActive ? '' : 'opacity-78'} /> };
@@ -1378,9 +1383,9 @@ export function WuWindow() {
               <button
                 key={item.key}
                 type="button"
-                aria-label={item.label}
+                aria-label={t.panels[item.key]}
                 aria-pressed={isActive}
-                title={item.label}
+                title={t.panels[item.key]}
                 className={`relative grid size-10 cursor-pointer place-items-center rounded-[4px] ${hover} active:bg-[#ffffff29]`}
                 style={{ color: isActive ? accent : text }}
                 onClick={() => setPanel(isActive ? null : item.key)}
@@ -1394,7 +1399,7 @@ export function WuWindow() {
               </button>
             );
           })}
-          <span className={`mt-auto grid size-10 place-items-center rounded-[4px] ${hover}`} title="Manage">
+          <span className={`mt-auto grid size-10 place-items-center rounded-[4px] ${hover}`} title={t.manage}>
             <Icon name="activity_settings" size={24} />
           </span>
         </div>
@@ -1408,8 +1413,8 @@ export function WuWindow() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-8 shrink-0 items-center">
             <div className="flex gap-1 p-1.5">
-              <IconButton name="arrow_left" color={placeholder} label="Go Back" />
-              <IconButton name="arrow_right" color={placeholder} label="Go Forward" />
+              <IconButton name="arrow_left" color={placeholder} label={t.tabs.goBack} />
+              <IconButton name="arrow_right" color={placeholder} label={t.tabs.goForward} />
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden px-1">
               {tabs.map((tab) => {
@@ -1426,7 +1431,7 @@ export function WuWindow() {
                     <span className="truncate">{title}</span>
                     <button
                       type="button"
-                      aria-label={`Close ${title}`}
+                      aria-label={t.tabs.close(title)}
                       className={`invisible grid size-[18px] cursor-pointer place-items-center rounded-[4px] group-hover/tab:visible ${hover}`}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -1439,12 +1444,12 @@ export function WuWindow() {
                 );
               })}
               <span className="grid h-8 place-items-center px-0.5">
-                <IconButton name="plus" label="New..." />
+                <IconButton name="plus" label={t.tabs.new} />
               </span>
             </div>
             <div className="flex gap-1 p-1.5">
-              <IconButton name="split" label="Split Pane" />
-              <IconButton name="maximize" label="Zoom In" />
+              <IconButton name="split" label={t.tabs.splitPane} />
+              <IconButton name="maximize" label={t.tabs.zoomIn} />
             </div>
           </div>
 
@@ -1463,9 +1468,9 @@ export function WuWindow() {
                   ))}
                 </span>
                 <span className="ml-auto flex gap-0.5">
-                  <IconButton name="activity_search" label="Buffer Search" />
-                  <IconButton name="cursor_i_beam" label="Selection Controls" />
-                  <IconButton name="filter" label="Editor Controls" />
+                  <IconButton name="activity_search" label={t.toolbar.bufferSearch} />
+                  <IconButton name="cursor_i_beam" label={t.toolbar.selectionControls} />
+                  <IconButton name="filter" label={t.toolbar.editorControls} />
                 </span>
               </div>
               <Editor
@@ -1506,8 +1511,8 @@ export function WuWindow() {
 
       <div className="flex h-[30px] shrink-0 items-center justify-between gap-2 p-1 text-[12px]">
         <span className="flex items-center gap-1">
-          {activeFile?.language === 'rust' && <IconButton name="bolt_outlined" label="Language Servers" />}
-          <IconButton name="check" label="Project Diagnostics" />
+          {activeFile?.language === 'rust' && <IconButton name="bolt_outlined" label={t.statusBar.languageServers} />}
+          <IconButton name="check" label={t.statusBar.diagnostics} />
         </span>
         <span className="flex items-center gap-1">
           {activeFile && cursor && (
@@ -1519,7 +1524,7 @@ export function WuWindow() {
             </>
           )}
           <span className="h-4 w-px bg-[#2c2f3a]" />
-          <IconButton name="terminal_alt" label="Terminal Panel" />
+          <IconButton name="terminal_alt" label={t.statusBar.terminal} />
         </span>
       </div>
     </div>

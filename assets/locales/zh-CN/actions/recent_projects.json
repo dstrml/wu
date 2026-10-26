@@ -1,0 +1,11 @@
+{
+  "recent_projects::AddToWorkspace": {
+    "name": "添加到工作区"
+  },
+  "recent_projects::RemoveSelected": {
+    "name": "移除所选项"
+  },
+  "recent_projects::ToggleActionsMenu": {
+    "name": "切换操作菜单"
+  }
+}

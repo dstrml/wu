@@ -3,6 +3,7 @@ use crate::{
     settings::RowIdentifiers,
     types::{DataRow, DisplayRow, LineNumber},
 };
+use i18n::t;
 use ui::{
     ActiveTheme as _, AnyElement, ButtonCommon as _, ButtonSize, Clickable, Context,
     FluentBuilder as _, IconButton, IconButtonShape, IconName, IconSize, IntoElement as _,
@@ -121,11 +122,11 @@ impl TabularDataPreviewPane {
                 let (icon, tooltip_text) = match self.settings.numbering_type {
                     RowIdentifiers::SrcLines => (
                         IconName::Code,
-                        "Showing file line numbers.\nClick to show sequential row numbers.",
+                        t!("Showing file line numbers.\nClick to show sequential row numbers."),
                     ),
                     RowIdentifiers::RowNum => (
                         IconName::Hash,
-                        "Showing sequential row numbers.\nClick to show file line numbers.",
+                        t!("Showing sequential row numbers.\nClick to show file line numbers."),
                     ),
                 };
 

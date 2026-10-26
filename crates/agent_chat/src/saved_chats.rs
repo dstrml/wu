@@ -5,6 +5,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Render, SharedString,
     Task, WeakEntity, Window,
 };
+use i18n::t;
 use picker::{Picker, PickerDelegate};
 use settings::Settings as _;
 use time::OffsetDateTime;
@@ -25,7 +26,7 @@ pub(crate) fn toggle(workspace: &mut Workspace, window: &mut Window, cx: &mut Co
         workspace.show_toast(
             Toast::new(
                 NotificationId::unique::<SavedChatPicker>(),
-                "Agent chats only work in local projects for now.",
+                t!("Agent chats only work in local projects for now.").to_string(),
             )
             .autohide(),
             cx,
@@ -157,7 +158,10 @@ impl SavedChatDelegate {
             .iter()
             .enumerate()
             .filter(|(_, chat)| {
-                query.is_empty() || chat.session.title.to_lowercase().contains(&query)
+                query.is_empty()
+                    || crate::session::display_title(&chat.session.title)
+                        .to_lowercase()
+                        .contains(&query)
             })
             .map(|(index, _)| index)
             .collect();
@@ -175,16 +179,18 @@ impl PickerDelegate for SavedChatDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Continue a chat from Claude Code, Codex or OpenCode…".into()
+        t!("Continue a chat from Claude Code, Codex or OpenCode…")
+            .as_str()
+            .into()
     }
 
     fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
         Some(if self.pending > 0 {
-            "Loading chats…".into()
+            t!("Loading chats…")
         } else if self.query.trim().is_empty() {
-            "No saved chats for this project".into()
+            t!("No saved chats for this project")
         } else {
-            "No matching chats".into()
+            t!("No matching chats")
         })
     }
 
@@ -240,7 +246,11 @@ impl PickerDelegate for SavedChatDelegate {
                         workspace.show_toast(
                             Toast::new(
                                 NotificationId::unique::<SavedChatPicker>(),
-                                format!("Couldn't open the chat: {error:#}"),
+                                t!(
+                                    "Couldn't open the chat: {error}",
+                                    error = format!("{error:#}")
+                                )
+                                .to_string(),
                             ),
                             cx,
                         )
@@ -280,7 +290,10 @@ impl PickerDelegate for SavedChatDelegate {
                     h_flex()
                         .gap_2()
                         .min_w_0()
-                        .child(Label::new(chat.session.title.clone()).truncate())
+                        .child(
+                            Label::new(crate::session::display_title(&chat.session.title))
+                                .truncate(),
+                        )
                         .children(folder.map(|folder| {
                             Label::new(folder)
                                 .size(LabelSize::Small)

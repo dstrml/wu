@@ -1503,9 +1503,9 @@ impl Editor {
                     .take(3)
                     .join(", ");
                 let title = if target.is_empty() {
-                    "References".to_owned()
+                    t!("References").to_string()
                 } else {
-                    format!("References to {target}")
+                    t!("References to {target}", target = target).to_string()
                 };
                 let allow_preview = PreviewTabsSettings::get_global(cx)
                     .enable_preview_multibuffer_from_code_navigation;
@@ -1762,12 +1762,6 @@ impl Editor {
             }
 
             if num_locations > 1 {
-                let tab_kind = match kind {
-                    Some(GotoDefinitionKind::Implementation) => "Implementations",
-                    Some(GotoDefinitionKind::Symbol) | None => "Definitions",
-                    Some(GotoDefinitionKind::Declaration) => "Declarations",
-                    Some(GotoDefinitionKind::Type) => "Types",
-                };
                 let title = editor
                     .update_in(cx, |_, _, cx| {
                         let target = locations
@@ -1783,11 +1777,27 @@ impl Editor {
                             .unique()
                             .take(3)
                             .join(", ");
-                        if target.is_empty() {
-                            tab_kind.to_owned()
-                        } else {
-                            format!("{tab_kind} for {target}")
-                        }
+                        let title = match (kind, target.is_empty()) {
+                            (Some(GotoDefinitionKind::Implementation), true) => {
+                                t!("Implementations")
+                            }
+                            (Some(GotoDefinitionKind::Implementation), false) => {
+                                t!("Implementations for {target}", target = target)
+                            }
+                            (Some(GotoDefinitionKind::Symbol) | None, true) => t!("Definitions"),
+                            (Some(GotoDefinitionKind::Symbol) | None, false) => {
+                                t!("Definitions for {target}", target = target)
+                            }
+                            (Some(GotoDefinitionKind::Declaration), true) => t!("Declarations"),
+                            (Some(GotoDefinitionKind::Declaration), false) => {
+                                t!("Declarations for {target}", target = target)
+                            }
+                            (Some(GotoDefinitionKind::Type), true) => t!("Types"),
+                            (Some(GotoDefinitionKind::Type), false) => {
+                                t!("Types for {target}", target = target)
+                            }
+                        };
+                        title.to_string()
                     })
                     .context("buffer title")?;
 

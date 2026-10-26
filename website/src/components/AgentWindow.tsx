@@ -1,35 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
+import { useMessages } from '../i18n/locale';
 import { mediaFrame } from './Section';
 import { AssistantText, Icon, StepRow, UsageRing, accent, claude, muted, placeholder, stepsSummary, text } from './WuWindow';
-import type { ChatStep } from './wuWindowData';
 
 const WIDTH = 760;
 const HEIGHT = 475;
 const TICK = 100;
 
-const message = 'Retry uploads that fail because of a network error';
-const chatTitle = 'Retry uploads on network errors';
-
-const steps: ChatStep[] = [
-  {
-    kind: 'thought',
-    text: 'Uploads go through `UploadClient::send`. Only network errors are worth retrying, so the retry should check the error kind first.'
-  },
-  { kind: 'tool', tool: 'search', detail: 'fn send in src/upload' },
-  { kind: 'tool', tool: 'read', detail: 'src/upload/client.rs' },
-  { kind: 'tool', tool: 'edit', detail: 'src/upload/client.rs', added: 31, removed: 4 },
-  { kind: 'tool', tool: 'run', detail: 'cargo test -p upload' }
-];
-
-const reply =
-  "Uploads now retry up to 3 times when the network drops, waiting a little longer before each try. Other errors, like a rejected file, still fail right away since retrying won't help.\n\nAdded a test for each case, and all 26 tests in `upload` pass.";
-
 const TYPE_START = 600;
 const TYPE_SPEED = 32;
-const SENT_AT = TYPE_START + message.length * TYPE_SPEED + 500;
-const STEP_TIMES = [900, 2100, 2900, 3900, 5100].map((delay) => SENT_AT + delay);
-const REPLY_AT = SENT_AT + 7000;
-const LOOP_END = REPLY_AT + 7000;
+// Chinese messages are much shorter, so typing them at the English speed would look rushed.
+const MIN_TYPING_TIME = 1600;
+
+function timeline(message: string) {
+  const typeSpeed = Math.max(TYPE_SPEED, MIN_TYPING_TIME / message.length);
+  const sentAt = TYPE_START + message.length * typeSpeed + 500;
+  const replyAt = sentAt + 7000;
+  return {
+    typeSpeed,
+    sentAt,
+    stepTimes: [900, 2100, 2900, 3900, 5100].map((delay) => sentAt + delay),
+    replyAt,
+    loopEnd: replyAt + 7000
+  };
+}
+
+type Timeline = ReturnType<typeof timeline>;
 
 const spinnerTints = ['#b6d3ef', '#edb185', '#f888a0'];
 
@@ -54,9 +50,9 @@ function WorkingSpinner() {
   );
 }
 
-function useLoopTime() {
+function useLoopTime(loopEnd: number) {
   const frameRef = useRef<HTMLDivElement>(null);
-  const [time, setTime] = useState(LOOP_END - TICK);
+  const [time, setTime] = useState(loopEnd - TICK);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -70,20 +66,23 @@ function useLoopTime() {
 
   useEffect(() => {
     if (!visible) return;
-    const interval = setInterval(() => setTime((current) => (current + TICK) % LOOP_END), TICK);
+    const interval = setInterval(() => setTime((current) => (current + TICK) % loopEnd), TICK);
     return () => clearInterval(interval);
-  }, [visible]);
+  }, [visible, loopEnd]);
 
   return { frameRef, time };
 }
 
-function Chat({ time }: { time: number }) {
-  const sent = time >= SENT_AT;
-  const replied = time >= REPLY_AT;
-  const draft = sent ? '' : message.slice(0, Math.max(0, Math.floor((time - TYPE_START) / TYPE_SPEED)));
-  const shownSteps = steps.slice(0, STEP_TIMES.filter((at) => time >= at).length);
+function Chat({ time, schedule }: { time: number; schedule: Timeline }) {
+  const messages = useMessages();
+  const { message, steps, reply } = messages.agentWindow;
+  const t = messages.wuWindow.chat;
+  const sent = time >= schedule.sentAt;
+  const replied = time >= schedule.replyAt;
+  const draft = sent ? '' : message.slice(0, Math.max(0, Math.floor((time - TYPE_START) / schedule.typeSpeed)));
+  const shownSteps = steps.slice(0, schedule.stepTimes.filter((at) => time >= at).length);
   const working = sent && !replied;
-  const elapsed = Math.floor((time - SENT_AT) / 1000);
+  const elapsed = Math.floor((time - schedule.sentAt) / 1000);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[#181a21]">
@@ -105,7 +104,7 @@ function Chat({ time }: { time: number }) {
                     <Icon name="agent_arrow_down" size={14} />
                   </span>
                 </span>
-                <span className={working ? 'text-shimmer' : ''}>{stepsSummary(shownSteps)}</span>
+                <span className={working ? 'text-shimmer' : ''}>{stepsSummary(shownSteps, messages.wuWindow.summary)}</span>
               </div>
               {working &&
                 shownSteps.map((step, index) => (
@@ -123,7 +122,7 @@ function Chat({ time }: { time: number }) {
             <div className="flex items-center gap-2 pt-4 text-[11px]">
               <WorkingSpinner />
               <span className="text-[12px]" style={{ color: muted }}>
-                Pondering…
+                {t.working}
               </span>
               <span className="relative top-px text-[#aaa8b780]">{elapsed}s</span>
             </div>
@@ -143,7 +142,7 @@ function Chat({ time }: { time: number }) {
             <Icon name="agent_paperclip" size={18} color={muted} />
           </span>
           <span className="min-w-0 flex-1 truncate px-2 text-[14px]" style={{ color: draft ? text : placeholder }}>
-            {draft || 'Do anything…'}
+            {draft || t.placeholder}
             {!sent && time >= TYPE_START && (
               <span className="ml-px inline-block h-[17px] w-px translate-y-[3px]" style={{ background: text }} />
             )}
@@ -151,7 +150,7 @@ function Chat({ time }: { time: number }) {
           <span className="flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium text-[#f0eef4e6]">
             <Icon name="agent_claude" size={16} color={claude} />
             Opus 5.5
-            <span className="text-[#aaa8b7b3]">High</span>
+            <span className="text-[#aaa8b7b3]">{t.effort}</span>
           </span>
           <span className="flex shrink-0 items-center gap-2 pl-0.5">
             <span className="grid size-7 place-items-center">
@@ -170,7 +169,7 @@ function Chat({ time }: { time: number }) {
           <span className="flex items-center gap-1 pl-2.5">
             <span className="flex h-5 items-center gap-1.5 px-2">
               <Icon name="agent_folder" size={12} />
-              Local checkout
+              {t.checkout}
             </span>
             <span className="flex h-5 items-center gap-1.5 px-2">
               <Icon name="agent_git_branch" size={12} />
@@ -188,8 +187,11 @@ function Chat({ time }: { time: number }) {
 }
 
 export function AgentWindow() {
-  const { frameRef, time } = useLoopTime();
-  const title = time >= SENT_AT ? chatTitle : 'New chat';
+  const messages = useMessages();
+  const { message, chatTitle } = messages.agentWindow;
+  const schedule = timeline(message);
+  const { frameRef, time } = useLoopTime(schedule.loopEnd);
+  const title = time >= schedule.sentAt ? chatTitle : messages.wuWindow.tabs.newChat;
 
   return (
     <div ref={frameRef} className={`${mediaFrame} grid card-raised aspect-[16/10] place-items-center`} aria-hidden="true" inert>
@@ -206,7 +208,7 @@ export function AgentWindow() {
               <span className="truncate pr-1">{title}</span>
             </div>
           </div>
-          <Chat time={time} />
+          <Chat time={time} schedule={schedule} />
         </div>
       </div>
     </div>

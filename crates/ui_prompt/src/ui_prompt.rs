@@ -42,6 +42,7 @@ fn zed_prompt_renderer(
             _level: level,
             message: cx.new(|cx| Markdown::new(SharedString::new(message), None, None, cx)),
             actions: actions.iter().map(|a| a.label().to_string()).collect(),
+            cancel_action_id: actions.iter().position(PromptButton::is_cancel),
             focus: cx.focus_handle(),
             active_action_id: 0,
             detail: detail
@@ -57,6 +58,7 @@ pub struct ZedPromptRenderer {
     _level: PromptLevel,
     message: Entity<Markdown>,
     actions: Vec<String>,
+    cancel_action_id: Option<usize>,
     focus: FocusHandle,
     active_action_id: usize,
     detail: Option<Entity<Markdown>>,
@@ -68,7 +70,7 @@ impl ZedPromptRenderer {
     }
 
     fn cancel(&mut self, _: &menu::Cancel, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(ix) = self.actions.iter().position(|a| a == "Cancel") {
+        if let Some(ix) = self.cancel_action_id {
             cx.emit(PromptResponse(ix));
         }
     }

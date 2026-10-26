@@ -1,0 +1,54 @@
+{
+  "dev::CopyAccessibilityTree": {
+    "description": "将当前的无障碍树以 JSON 格式复制到剪贴板，不打开缓冲区。参见 [`DumpAccessibilityTree`]。",
+    "name": "复制无障碍树"
+  },
+  "dev::CopyDebugAdapterArguments": {
+    "description": "将调试适配器的启动参数复制到剪贴板。",
+    "name": "复制调试适配器参数"
+  },
+  "dev::DumpAccessibilityTree": {
+    "description": "将当前的无障碍树（最近一次发送给系统适配器的内容）以 JSON 格式导出到新的缓冲区，用于调试辅助技术能看到哪些内容。",
+    "name": "导出无障碍树"
+  },
+  "dev::OpenDebugAdapterLogs": {
+    "description": "打开调试适配器协议日志查看器。",
+    "name": "打开调试适配器日志"
+  },
+  "dev::OpenHighlightsTreeView": {
+    "description": "打开当前文件的高亮树视图。",
+    "name": "打开高亮树视图"
+  },
+  "dev::OpenKeyContextView": {
+    "description": "打开按键上下文视图，用于调试快捷键。",
+    "name": "打开按键上下文视图"
+  },
+  "dev::OpenLanguageServerLogs": {
+    "description": "打开语言服务器协议日志查看器。",
+    "name": "打开语言服务器日志"
+  },
+  "dev::OpenSyntaxTreeView": {
+    "description": "打开当前文件的语法树视图。",
+    "name": "打开语法树视图"
+  },
+  "dev::OpenThemePreview": {
+    "description": "打开主题预览窗口。",
+    "name": "打开主题预览"
+  },
+  "dev::OpenUrlPrompt": {
+    "description": "打开一个输入框，输入要打开的 URL。",
+    "name": "打开 URL 输入框"
+  },
+  "dev::ShowGitJobQueue": {
+    "description": "显示当前仓库 Git 任务队列的调试状态。",
+    "name": "显示 Git 任务队列"
+  },
+  "dev::ShowWorkspaceError": {
+    "description": "在工作区级别显示一个错误。",
+    "name": "显示工作区错误"
+  },
+  "dev::ToggleInspector": {
+    "description": "打开或关闭用于调试界面元素的开发者检查器。",
+    "name": "切换检查器"
+  }
+}

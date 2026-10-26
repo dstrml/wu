@@ -1,4 +1,5 @@
 import { memoryScenarios } from '../data/memory';
+import { useMessages } from '../i18n/locale';
 import { mediaFrame } from './Section';
 
 const largestMib = Math.max(...memoryScenarios.flatMap((scenario) => scenario.results.map((result) => result.mib)));
@@ -6,12 +7,13 @@ const largestMib = Math.max(...memoryScenarios.flatMap((scenario) => scenario.re
 const formatMib = (mib: number) => `${Math.round(mib).toLocaleString('en-US')} MiB`;
 
 export function MemoryChart() {
+  const t = useMessages().memoryChart;
   return (
     <div className={`${mediaFrame} flex items-center card-raised px-[6%] py-10 max-sm:px-4 max-sm:py-6`}>
-      <figure className="m-0 flex w-full flex-col gap-7" aria-label="Memory use in MiB, lower is better">
+      <figure className="m-0 flex w-full flex-col gap-7" aria-label={t.label}>
         {memoryScenarios.map((scenario) => (
-          <div key={scenario.title} className="grid gap-2.5">
-            <h3 className="mb-0.5 text-[15px] font-medium text-secondary">{scenario.title}</h3>
+          <div key={scenario.id} className="grid gap-2.5">
+            <h3 className="mb-0.5 text-[15px] font-medium text-secondary">{t.scenarios[scenario.id]}</h3>
             {scenario.results.map((result) => {
               const isWu = result.editor === 'Wu';
               const tone = isWu ? 'font-semibold' : 'text-secondary';
@@ -34,9 +36,7 @@ export function MemoryChart() {
             })}
           </div>
         ))}
-        <figcaption className="text-[13px] leading-[1.4] text-tertiary">
-          Total process memory, lower is better.
-        </figcaption>
+        <figcaption className="text-[13px] leading-[1.4] text-tertiary">{t.caption}</figcaption>
       </figure>
     </div>
   );

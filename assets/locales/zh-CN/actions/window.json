@@ -1,0 +1,14 @@
+{
+  "window::MergeAllWindows": {
+    "name": "合并所有窗口"
+  },
+  "window::MoveTabToNewWindow": {
+    "name": "将标签页移到新窗口"
+  },
+  "window::ShowNextWindowTab": {
+    "name": "显示下一个窗口标签页"
+  },
+  "window::ShowPreviousWindowTab": {
+    "name": "显示上一个窗口标签页"
+  }
+}

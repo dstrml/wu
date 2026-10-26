@@ -1,0 +1,14 @@
+{
+  "app_menu::ActivateMenuLeft": {
+    "description": "激活应用内置菜单中左侧的菜单。\n\n不适用于系统菜单栏（例如 macOS 上的菜单栏）。",
+    "name": "激活左侧菜单"
+  },
+  "app_menu::ActivateMenuRight": {
+    "description": "激活应用内置菜单中右侧的菜单。\n\n不适用于系统菜单栏（例如 macOS 上的菜单栏）。",
+    "name": "激活右侧菜单"
+  },
+  "app_menu::OpenApplicationMenu": {
+    "description": "打开应用内置菜单中指定名称的菜单。\n\n不适用于系统菜单栏（例如 macOS 上的菜单栏）。",
+    "name": "打开应用菜单"
+  }
+}

@@ -1,3 +1,5 @@
+<p align="center">English | <a href="README.zh-CN.md">中文</a></p>
+
 <div align="center">
   <img src="crates/wu/resources/app-icon.png" alt="Wu" width="128">
   <h1>Wu</h1>

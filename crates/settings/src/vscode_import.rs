@@ -934,6 +934,7 @@ impl VsCodeSettings {
     fn theme_settings_content(&self) -> ThemeSettingsContent {
         let (buffer_font_family, buffer_font_fallbacks) = self.read_fonts("editor.fontFamily");
         ThemeSettingsContent {
+            ui_language: None,
             ui_font_size: None,
             ui_font_family: None,
             ui_font_fallbacks: None,

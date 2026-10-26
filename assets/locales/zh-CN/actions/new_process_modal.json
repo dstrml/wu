@@ -1,0 +1,14 @@
+{
+  "new_process_modal::ActivateAttachTab": {
+    "name": "切换到“附加”标签页"
+  },
+  "new_process_modal::ActivateDebugTab": {
+    "name": "切换到“调试”标签页"
+  },
+  "new_process_modal::ActivateLaunchTab": {
+    "name": "切换到“启动”标签页"
+  },
+  "new_process_modal::ActivateTaskTab": {
+    "name": "切换到“任务”标签页"
+  }
+}

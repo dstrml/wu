@@ -9,8 +9,11 @@ use language::{
 };
 use parking_lot::RwLock;
 use project::{LspStore, lsp_store::LocalLspAdapterDelegate};
-use settings::{LSP_SETTINGS_SCHEMA_URL_PREFIX, Settings as _, SettingsLocation};
-use util::schemars::{AllowTrailingCommas, DefaultDenyUnknownFields};
+use settings::{LSP_SETTINGS_SCHEMA_URL_PREFIX, Settings as _, SettingsLocation, SettingsStore};
+use util::{
+    ResultExt as _,
+    schemars::{AllowTrailingCommas, DefaultDenyUnknownFields},
+};
 
 const SCHEMA_URI_PREFIX: &str = "wu://schemas/";
 
@@ -37,10 +40,7 @@ static INSPECTOR_STYLE_SCHEMA: LazyLock<String> = LazyLock::new(|| {
         .expect("Inspector style schema should serialize")
 });
 
-static KEYMAP_SCHEMA: LazyLock<String> = LazyLock::new(|| {
-    serde_json::to_string(&settings::KeymapFile::generate_json_schema_from_inventory())
-        .expect("Keymap schema should serialize")
-});
+static KEYMAP_SCHEMA: RwLock<Option<(i18n::Language, String)>> = RwLock::new(None);
 
 static ACTION_SCHEMA_CACHE: LazyLock<RwLock<HashMap<String, String>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
@@ -54,7 +54,10 @@ static DYNAMIC_SCHEMA_CACHE: LazyLock<RwLock<HashMap<String, String>>> =
     LazyLock::new(|| RwLock::new(HashMap::default()));
 
 pub fn init(cx: &mut App) {
-    cx.set_global(SchemaStore::default());
+    cx.set_global(SchemaStore {
+        lsp_stores: Vec::new(),
+        language: i18n::language(),
+    });
     project::lsp_store::json_language_server_ext::register_schema_handler(
         handle_schema_request,
         cx,
@@ -85,11 +88,25 @@ pub fn init(cx: &mut App) {
         });
     })
     .detach();
+
+    cx.observe_global::<SettingsStore>(|cx| {
+        // The UI language is applied by another settings observer, which may run after this one.
+        cx.defer(|cx| {
+            cx.update_global::<SchemaStore, _>(|schema_store, cx| {
+                let language = i18n::language();
+                if schema_store.language != language {
+                    schema_store.language = language;
+                    schema_store.notify_schema_changed(ChangedSchemas::Language, cx);
+                }
+            });
+        });
+    })
+    .detach();
 }
 
-#[derive(Default)]
 pub struct SchemaStore {
     lsp_stores: Vec<WeakEntity<LspStore>>,
+    language: i18n::Language,
 }
 
 impl gpui::Global for SchemaStore {}
@@ -97,6 +114,7 @@ impl gpui::Global for SchemaStore {}
 enum ChangedSchemas {
     Settings,
     DebugTasks,
+    Language,
 }
 
 impl SchemaStore {
@@ -117,6 +135,15 @@ impl SchemaStore {
                 .write()
                 .remove_entry(&format!("{SCHEMA_URI_PREFIX}debug_tasks"))
                 .map_or_else(Vec::new, |(uri, _)| vec![uri]),
+            ChangedSchemas::Language => {
+                let localized_uris = ["settings", "project_settings", "keymap"]
+                    .map(|schema_name| format!("{SCHEMA_URI_PREFIX}{schema_name}"));
+                let mut cache = DYNAMIC_SCHEMA_CACHE.write();
+                for uri in &localized_uris {
+                    cache.remove(uri);
+                }
+                localized_uris.into()
+            }
         };
 
         if uris_to_invalidate.is_empty() {
@@ -177,7 +204,7 @@ fn resolve_static_schema(path: &str) -> Option<String> {
         "tasks" => Some(TASKS_SCHEMA.clone()),
         "snippets" => Some(SNIPPETS_SCHEMA.clone()),
         "jsonc" => Some(JSONC_SCHEMA.clone()),
-        "keymap" => Some(KEYMAP_SCHEMA.clone()),
+        "keymap" => keymap_schema(),
         "zed_inspector_style" => {
             #[cfg(debug_assertions)]
             {
@@ -219,6 +246,20 @@ fn resolve_static_schema(path: &str) -> Option<String> {
 
         _ => None,
     }
+}
+
+fn keymap_schema() -> Option<String> {
+    let language = i18n::language();
+    if let Some((cached_language, schema)) = &*KEYMAP_SCHEMA.read()
+        && *cached_language == language
+    {
+        return Some(schema.clone());
+    }
+    let schema =
+        serde_json::to_string(&settings::KeymapFile::generate_json_schema_from_inventory())
+            .log_err()?;
+    *KEYMAP_SCHEMA.write() = Some((language, schema.clone()));
+    Some(schema)
 }
 
 async fn resolve_dynamic_schema(

@@ -42,6 +42,7 @@ futures-lite.workspace = true
 fuzzy.workspace = true
 git.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 ignore.workspace = true
 language.workspace = true
 log.workspace = true

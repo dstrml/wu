@@ -10,6 +10,7 @@ use gpui::{
     App, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Render, SharedString, Styled,
     Subscription, div, prelude::*,
 };
+use i18n::t;
 use language::Buffer;
 use text::{Bias, Point};
 use theme::ActiveTheme;
@@ -133,18 +134,18 @@ impl GoToLine {
         });
         let line_editor_change = cx.subscribe_in(&line_editor, window, Self::on_line_editor_event);
 
-        let current_text = format!(
-            "Current Line: {} of {} (column {})",
-            line,
-            last_line + 1,
-            column
+        let current_text = t!(
+            "Current Line: {line} of {total} (column {column})",
+            line = line,
+            total = last_line + 1,
+            column = column
         );
 
         Self {
             line_editor,
             active_editor,
             active_buffer,
-            current_text: current_text.into(),
+            current_text,
             prev_scroll_position: Some(scroll_position),
             current_line: line,
             _subscriptions: vec![line_editor_change, cx.on_release_in(window, Self::release)],
@@ -313,13 +314,21 @@ impl Render for GoToLine {
             } else {
                 self.current_line.saturating_sub(offset.unsigned_abs())
             };
-            format!("Go to line {target_line} ({offset:+} from current)").into()
+            t!(
+                "Go to line {line} ({offset} from current)",
+                line = target_line,
+                offset = format!("{offset:+}")
+            )
         } else {
             match self.line_and_char_from_query(cx) {
                 Some((line, Some(character))) => {
-                    format!("Go to line {line}, character {character}").into()
+                    t!(
+                        "Go to line {line}, character {character}",
+                        line = line,
+                        character = character
+                    )
                 }
-                Some((line, None)) => format!("Go to line {line}").into(),
+                Some((line, None)) => t!("Go to line {line}", line = line),
                 None => self.current_text.clone(),
             }
         };

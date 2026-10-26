@@ -1,0 +1,14 @@
+{
+  "title_bar::SimulateUpdateAvailable": {
+    "description": "一个调试命令，模拟有可用的更新，用于测试更新横幅界面。",
+    "name": "模拟有可用更新"
+  },
+  "title_bar::SwitchBranch": {
+    "description": "切换到另一个 Git 分支。",
+    "name": "切换分支"
+  },
+  "title_bar::ToggleProjectMenu": {
+    "description": "打开或关闭项目下拉菜单。",
+    "name": "切换项目菜单"
+  }
+}

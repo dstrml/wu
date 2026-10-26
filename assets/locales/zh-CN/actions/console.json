@@ -1,0 +1,6 @@
+{
+  "console::WatchExpression": {
+    "name": "监视表达式",
+    "description": "将表达式添加到监视列表。"
+  }
+}

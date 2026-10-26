@@ -1,0 +1,10 @@
+{
+  "toolchain::AddToolchain": {
+    "name": "添加工具链",
+    "description": "为当前项目添加新的工具链。"
+  },
+  "toolchain::Select": {
+    "name": "选择工具链",
+    "description": "为当前项目选择工具链。"
+  }
+}

@@ -3,7 +3,9 @@ Version=1.0
 Type=Application
 Name=$APP_NAME
 GenericName=Text Editor
+GenericName[zh_CN]=文本编辑器
 Comment=A fast, native code editor.
+Comment[zh_CN]=快速的原生代码编辑器。
 TryExec=$APP_CLI
 StartupNotify=$DO_STARTUP_NOTIFY
 Exec=$APP_CLI $APP_ARGS
@@ -19,3 +21,4 @@ Actions=NewWorkspace;
 [Desktop Action NewWorkspace]
 Exec=$APP_CLI --new $APP_ARGS
 Name=Open a new workspace
+Name[zh_CN]=打开新工作区

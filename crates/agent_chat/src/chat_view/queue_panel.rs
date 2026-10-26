@@ -12,6 +12,7 @@ use gpui::{
     AnyElement, Context, Focusable as _, Hsla, IntoElement, ObjectFit, ParentElement, Render,
     SharedString, Styled, Subscription, Window, div, img, px,
 };
+use i18n::t;
 use ui::{IconName, Tooltip, prelude::*};
 
 const ROW_HEIGHT: f32 = 36.;
@@ -151,7 +152,7 @@ impl ChatView {
         let colors = cx.theme().colors();
         let muted_glyph = colors.text_muted.opacity(0.8);
         let action_hover = ink(0.07, cx);
-        let glyph_button = |key: &str, glyph: IconName, tooltip: &'static str| {
+        let glyph_button = |key: &str, glyph: IconName, tooltip: SharedString| {
             let group: SharedString = format!("agent-queued-{key}-group").into();
             div()
                 .id(SharedString::from(format!("agent-queued-{key}")))
@@ -171,7 +172,7 @@ impl ChatView {
                         .group_hover(group, |style| style.text_color(colors.text)),
                 )
         };
-        let primary_button = |key: &str, label: &'static str, tooltip: &'static str| {
+        let primary_button = |key: &str, label: SharedString, tooltip: SharedString| {
             div()
                 .id(SharedString::from(format!("agent-queued-{key}")))
                 .w(px(72.))
@@ -199,7 +200,7 @@ impl ChatView {
             .map(|(index, queued)| {
                 let id = queued.id;
                 let text: SharedString = if queued.prompt.text.trim().is_empty() {
-                    "Image".into()
+                    t!("Image")
                 } else {
                     agent_harness::view::single_line(&queued.prompt.text).into()
                 };
@@ -268,14 +269,20 @@ impl ChatView {
                             .flex_none()
                             .gap(px(3.))
                             .child(
-                                glyph_button(&format!("remove-{id}"), IconName::Trash, "Remove")
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                glyph_button(
+                                    &format!("remove-{id}"),
+                                    IconName::Trash,
+                                    t!("Remove"),
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
                                         this.session
                                             .update(cx, |session, cx| session.remove_queued(id, cx))
-                                    })),
+                                    },
+                                )),
                             )
                             .child(
-                                glyph_button(&format!("edit-{id}"), IconName::AgentPen, "Edit")
+                                glyph_button(&format!("edit-{id}"), IconName::AgentPen, t!("Edit"))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.edit_queued(id, window, cx)
                                     })),
@@ -283,8 +290,8 @@ impl ChatView {
                             .child(
                                 primary_button(
                                     &format!("now-{id}"),
-                                    "Send now",
-                                    "Stop the agent and send this right away",
+                                    t!("Send now"),
+                                    t!("Stop the agent and send this right away"),
                                 )
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.session
@@ -295,8 +302,8 @@ impl ChatView {
                                 this.child(
                                     primary_button(
                                         &format!("steer-{id}"),
-                                        "Steer",
-                                        "Send into the running turn without stopping it",
+                                        t!("Steer"),
+                                        t!("Send into the running turn without stopping it"),
                                     )
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.session.update(cx, |session, cx| {
@@ -329,23 +336,23 @@ impl ChatView {
                         .min_w_0()
                         .text_size(px(QUEUE_TEXT_SIZE))
                         .text_color(colors.text_muted)
-                        .child("Editing in composer"),
+                        .child(t!("Editing in composer")),
                 )
                 .child(
                     h_flex()
                         .flex_none()
                         .gap(px(3.))
                         .child(
-                            glyph_button("save", IconName::AgentCheck, "Save to queue").on_click(
-                                cx.listener(|this, _, window, cx| this.send(&Send, window, cx)),
-                            ),
+                            glyph_button("save", IconName::AgentCheck, t!("Save to queue"))
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.send(&Send, window, cx)),
+                                ),
                         )
                         .child(
-                            glyph_button("cancel-edit", IconName::AgentClose, "Cancel").on_click(
-                                cx.listener(|this, _, window, cx| {
+                            glyph_button("cancel-edit", IconName::AgentClose, t!("Cancel"))
+                                .on_click(cx.listener(|this, _, window, cx| {
                                     this.cancel_queued_edit(window, cx)
-                                }),
-                            ),
+                                })),
                         ),
                 )
                 .into_any_element();

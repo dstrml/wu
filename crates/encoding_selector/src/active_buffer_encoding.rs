@@ -6,6 +6,7 @@ use gpui::{
     App, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, WeakEntity,
     Window, div,
 };
+use i18n::t;
 use project::Project;
 use ui::{Button, ButtonCommon, Clickable, LabelSize, Tooltip};
 use workspace::{
@@ -73,11 +74,11 @@ impl Render for ActiveBufferEncoding {
         }
 
         let (disabled, tooltip_text) = if self.is_dirty {
-            (true, "Save file to change encoding")
+            (true, t!("Save file to change encoding"))
         } else if self.is_via_remote_server {
-            (true, "Cannot change encoding of remote server file")
+            (true, t!("Cannot change encoding of remote server file"))
         } else {
-            (false, "Reopen with Encoding")
+            (false, t!("Reopen with Encoding"))
         };
 
         div().child(
@@ -96,9 +97,9 @@ impl Render for ActiveBufferEncoding {
                 }))
                 .tooltip(move |_window, cx| {
                     if disabled {
-                        Tooltip::text(tooltip_text)(_window, cx)
+                        Tooltip::text(tooltip_text.clone())(_window, cx)
                     } else {
-                        Tooltip::for_action(tooltip_text, &Toggle, cx)
+                        Tooltip::for_action(tooltip_text.clone(), &Toggle, cx)
                     }
                 }),
         )

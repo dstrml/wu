@@ -9,6 +9,7 @@ use gpui::{
     AnyElement, App, BoxShadow, Context, Hsla, IntoElement, KeyUpEvent, ParentElement,
     SharedString, Styled, Task, Window, div, hsla, linear_color_stop, linear_gradient, point, px,
 };
+use i18n::t;
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -227,9 +228,10 @@ impl ChatView {
                 this.dictation_model_ready.set(None);
                 this.dictation = match result {
                     Ok(()) => DictationState::Idle,
-                    Err(error) => DictationState::Failed(
-                        format!("Couldn't download the speech model: {error}").into(),
-                    ),
+                    Err(error) => DictationState::Failed(t!(
+                        "Couldn't download the speech model: {error}",
+                        error = error
+                    )),
                 };
                 cx.notify();
             })
@@ -272,19 +274,19 @@ impl ChatView {
             return None;
         }
         let tooltip: SharedString = match &self.dictation {
-            DictationState::Recording { .. } => "Stop and transcribe".into(),
-            DictationState::Transcribing(_) => "Transcribing…".into(),
-            DictationState::Downloading(progress) => {
-                format!("Downloading speech model… {:.0}%", progress * 100.).into()
-            }
+            DictationState::Recording { .. } => t!("Stop and transcribe"),
+            DictationState::Transcribing(_) => t!("Transcribing…"),
+            DictationState::Downloading(progress) => t!(
+                "Downloading speech model… {percent}%",
+                percent = format!("{:.0}", progress * 100.)
+            ),
             DictationState::Failed(error) => error.clone(),
             DictationState::Idle => match self.dictation_model_ready() {
-                true => "Dictate (hold Cmd-D). Right-click to choose a microphone.".into(),
-                false => format!(
-                    "Download the on-device speech model ({} MB) to dictate",
-                    dictation::model_download_size() / 1_000_000
-                )
-                .into(),
+                true => t!("Dictate (hold Cmd-D). Right-click to choose a microphone."),
+                false => t!(
+                    "Download the on-device speech model ({size} MB) to dictate",
+                    size = dictation::model_download_size() / 1_000_000
+                ),
             },
         };
         let content = div()
@@ -333,8 +335,8 @@ impl ChatView {
                 let devices = dictation::input_devices().log_err().unwrap_or_default();
                 let chosen = store.read(cx).list_prefs().dictation_device.clone();
                 ContextMenu::build(window, cx, move |menu, _, _| {
-                    let mut menu = menu.header("Microphone").toggleable_entry(
-                        "System Default",
+                    let mut menu = menu.header(t!("Microphone")).toggleable_entry(
+                        t!("System Default"),
                         chosen.is_none(),
                         ui::IconPosition::Start,
                         None,
@@ -467,11 +469,11 @@ impl ChatView {
     pub(super) fn render_dictation_status(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let (title, detail, failed): (SharedString, SharedString, bool) = match &self.dictation {
             DictationState::Downloading(progress) => (
-                "Downloading speech model…".into(),
+                t!("Downloading speech model…"),
                 format!("{:.0}%", progress * 100.).into(),
                 false,
             ),
-            DictationState::Failed(error) => ("Dictation stopped".into(), error.clone(), true),
+            DictationState::Failed(error) => (t!("Dictation stopped"), error.clone(), true),
             _ => return None,
         };
         let colors = cx.theme().colors();
@@ -520,7 +522,7 @@ impl ChatView {
                             .text_color(colors.text_muted)
                             .cursor_pointer()
                             .hover(move |style| style.bg(hover).text_color(colors.text))
-                            .child("Dismiss")
+                            .child(t!("Dismiss"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dictation = DictationState::Idle;
                                 cx.notify();

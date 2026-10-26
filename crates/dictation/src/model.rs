@@ -6,6 +6,7 @@ use futures::{
     io::{AllowStdIo, BufReader},
 };
 use http_client::{AsyncBody, HttpClient};
+use i18n::{SharedString, t};
 use parakeet_rs::{ParakeetTDT, Transcriber as _};
 use sha2::{Digest, Sha256};
 use std::{
@@ -221,11 +222,11 @@ fn current_onnx_runtime() -> Option<&'static OnnxRuntime> {
     })
 }
 
-fn unsupported_platform_message() -> String {
-    format!(
-        "Dictation is not available on {} {}",
-        std::env::consts::OS,
-        std::env::consts::ARCH
+fn unsupported_platform_message() -> SharedString {
+    t!(
+        "Dictation is not available on {os} {arch}",
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH
     )
 }
 
@@ -261,7 +262,7 @@ async fn install(
 ) -> Result<()> {
     let download = ActiveDownload::register(directory)?;
     std::fs::create_dir_all(directory)
-        .with_context(|| format!("Could not create {}", directory.display()))?;
+        .with_context(|| t!("Could not create {path}", path = directory.display()))?;
     remove_if_present(&directory.join(VERIFIED_MARKER_FILE))?;
     for file in model_files {
         download_file(
@@ -273,7 +274,7 @@ async fn install(
         )
         .await
         .and_then(|staging| staging.commit(&directory.join(file.name)))
-        .with_context(|| format!("Could not download {}", file.name))?;
+        .with_context(|| t!("Could not download {file}", file = file.name))?;
     }
     let archive = download_file(
         http_client,
@@ -283,10 +284,10 @@ async fn install(
         &download.downloaded_bytes,
     )
     .await
-    .context("Could not download ONNX Runtime")?;
+    .context(t!("Could not download ONNX Runtime"))?;
     extract_library(&archive.path, runtime, directory)
         .await
-        .context("Could not unpack ONNX Runtime")?;
+        .context(t!("Could not unpack ONNX Runtime"))?;
     drop(archive);
     std::fs::write(directory.join(VERIFIED_MARKER_FILE), marker)?;
     Ok(())
@@ -295,7 +296,7 @@ async fn install(
 fn remove_if_present(path: &Path) -> Result<()> {
     match std::fs::remove_file(path) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            Err(error).with_context(|| format!("Could not remove {}", path.display()))
+            Err(error).with_context(|| t!("Could not remove {path}", path = path.display()))
         }
         _ => Ok(()),
     }
@@ -311,8 +312,10 @@ async fn download_file(
     let mut response = http_client.get(url, AsyncBody::empty(), true).await?;
     ensure!(
         response.status().is_success(),
-        "The server responded with {}",
-        response.status()
+        t!(
+            "The server responded with {status}",
+            status = response.status()
+        )
     );
     receive_verified(
         response.body_mut(),
@@ -343,7 +346,7 @@ async fn receive_verified(
         received_bytes += chunk.len() as u64;
         ensure!(
             received_bytes <= file.size,
-            "The file is larger than expected"
+            t!("The file is larger than expected")
         );
         hasher.update(chunk);
         staging.file.write_all(chunk)?;
@@ -351,7 +354,7 @@ async fn receive_verified(
     }
     ensure!(
         received_bytes == file.size && format!("{:x}", hasher.finalize()) == file.sha256,
-        "Checksum verification failed"
+        t!("Checksum verification failed")
     );
     Ok(staging)
 }
@@ -363,7 +366,12 @@ async fn extract_library(
 ) -> Result<()> {
     let archive = BufReader::new(AllowStdIo::new(std::fs::File::open(archive_path)?));
     let staging_path = directory.join(format!("{}.part", runtime.library.name));
-    let missing_library = || anyhow!("The archive has no {}", runtime.library_path_in_archive);
+    let missing_library = || {
+        anyhow!(t!(
+            "The archive has no {file}",
+            file = runtime.library_path_in_archive
+        ))
+    };
     let library = match runtime.archive_format {
         ArchiveFormat::TarGz => {
             let mut entries = async_tar::Archive::new(GzipDecoder::new(archive)).entries()?;
@@ -412,7 +420,7 @@ impl ActiveDownload {
             .iter()
             .any(|(active_directory, _)| active_directory == directory)
         {
-            bail!("The speech model is already downloading");
+            bail!(t!("The speech model is already downloading"));
         }
         let downloaded_bytes = Arc::new(AtomicU64::new(0));
         active.push((directory.to_path_buf(), downloaded_bytes.clone()));
@@ -450,7 +458,7 @@ struct StagingFile {
 impl StagingFile {
     fn create(path: PathBuf) -> Result<Self> {
         let file = std::fs::File::create(&path)
-            .with_context(|| format!("Could not create {}", path.display()))?;
+            .with_context(|| t!("Could not create {path}", path = path.display()))?;
         Ok(Self {
             path,
             file,
@@ -490,21 +498,26 @@ impl Recognizer {
         )?;
         let library_path = model_directory.join(runtime.library.name);
         ort::init_from(&library_path)
-            .with_context(|| format!("Could not load {}", library_path.display()))?
+            .with_context(|| t!("Could not load {path}", path = library_path.display()))?
             .commit();
         ParakeetTDT::from_pretrained(model_directory, None)
             .map(Self)
-            .map_err(|error| anyhow!("Could not load the speech model: {error}"))
+            .map_err(|error| {
+                anyhow!(t!(
+                    "Could not load the speech model: {error}",
+                    error = error
+                ))
+            })
     }
 
     pub(crate) fn transcribe(&mut self, samples: Vec<f32>, sample_rate: u32) -> Result<String> {
         ensure!(
             resample::is_supported_sample_rate(sample_rate),
-            "Unsupported microphone sample rate"
+            t!("Unsupported microphone sample rate")
         );
         ensure!(
             samples.len() <= crate::max_recording_samples(sample_rate),
-            "The recording is longer than the limit"
+            t!("The recording is longer than the limit")
         );
         let shorter_than_a_fifth_of_a_second = samples.len() < sample_rate as usize / 5;
         if shorter_than_a_fifth_of_a_second || samples.iter().all(|sample| sample.abs() < 0.0001) {
@@ -514,7 +527,12 @@ impl Recognizer {
         self.0
             .transcribe_samples(samples, resample::MODEL_SAMPLE_RATE, 1, None)
             .map(|result| result.text)
-            .map_err(|error| anyhow!("Could not transcribe the recording: {error}"))
+            .map_err(|error| {
+                anyhow!(t!(
+                    "Could not transcribe the recording: {error}",
+                    error = error
+                ))
+            })
     }
 }
 
@@ -525,12 +543,12 @@ fn verify_checksums<'a>(
     for file in files {
         let path = directory.join(file.name);
         let mut input = std::fs::File::open(&path)
-            .with_context(|| format!("The speech model is missing {}", file.name))?;
+            .with_context(|| t!("The speech model is missing {file}", file = file.name))?;
         let mut hasher = Sha256::new();
         std::io::copy(&mut input, &mut hasher)?;
         ensure!(
             format!("{:x}", hasher.finalize()) == file.sha256,
-            "The speech model is damaged. Download it again."
+            t!("The speech model is damaged. Download it again.")
         );
     }
     Ok(())

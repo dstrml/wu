@@ -4,6 +4,7 @@ use gpui::{
     App, AsyncWindowContext, Context, DismissEvent, EventEmitter, FocusHandle, Focusable,
     PromptButton, PromptLevel, Render, WeakEntity, Window,
 };
+use i18n::t;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,17 +71,18 @@ impl MoveToApplicationsRequest {
         workspace: WeakEntity<MultiWorkspace>,
         cx: &mut AsyncWindowContext,
     ) -> Result<()> {
+        let detail = t!(
+            "Wu is running from a temporary location. Move it to Applications to finish installing it."
+        );
         let response = cx
             .prompt(
                 PromptLevel::Info,
-                "Move Wu to Applications?",
-                Some(
-                    "Wu is running from a temporary location. Move it to Applications to finish installing it.",
-                ),
+                &t!("Move Wu to Applications?"),
+                Some(detail.as_str()),
                 &[
-                    PromptButton::ok("Yes"),
-                    PromptButton::cancel("No"),
-                    PromptButton::new("Don't ask me again"),
+                    PromptButton::ok(t!("Yes")),
+                    PromptButton::cancel(t!("No")),
+                    PromptButton::new(t!("Don't ask me again")),
                 ],
             )
             .await?;
@@ -106,9 +108,9 @@ impl MoveToApplicationsRequest {
                 if let Err(error) = result {
                     cx.prompt(
                         PromptLevel::Critical,
-                        "Failed to move Wu to Applications",
+                        &t!("Failed to move Wu to Applications"),
                         Some(&error.to_string()),
-                        &["OK"],
+                        &[PromptButton::ok(t!("OK"))],
                     )
                     .await
                     .log_err();
@@ -181,7 +183,7 @@ impl Render for InstallingZedModal {
                     .py_3()
                     .border_b_1()
                     .border_color(theme.colors().border_variant)
-                    .child(Label::new("Installing Wu…")),
+                    .child(Label::new(t!("Installing Wu…"))),
             )
             .child(
                 h_flex()
@@ -199,9 +201,9 @@ impl Render for InstallingZedModal {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(Label::new("Moving Wu to Applications"))
+                            .child(Label::new(t!("Moving Wu to Applications")))
                             .child(
-                                Label::new("Wu will reopen when installation is complete.")
+                                Label::new(t!("Wu will reopen when installation is complete."))
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
                             ),

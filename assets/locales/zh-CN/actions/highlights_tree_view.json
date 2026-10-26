@@ -1,0 +1,14 @@
+{
+  "highlights_tree_view::ToggleSemanticTokens": {
+    "name": "切换语义标记",
+    "description": "切换是否显示语义标记高亮。"
+  },
+  "highlights_tree_view::ToggleSyntaxTokens": {
+    "name": "切换语法标记",
+    "description": "切换是否显示语法标记高亮。"
+  },
+  "highlights_tree_view::ToggleTextHighlights": {
+    "name": "切换文本高亮",
+    "description": "切换是否显示文本高亮。"
+  }
+}

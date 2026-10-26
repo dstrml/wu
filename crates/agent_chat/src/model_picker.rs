@@ -14,6 +14,7 @@ use gpui::{
     Transformation, Window, canvas, div, hsla, linear_color_stop, linear_gradient, point, px,
     radians, relative, rgb, size, svg,
 };
+use i18n::t;
 use settings::Settings as _;
 use std::{cell::Cell, rc::Rc};
 use theme::ActiveTheme as _;
@@ -142,7 +143,7 @@ fn selected_ring(cx: &App) -> Vec<BoxShadow> {
     }]
 }
 
-fn empty_list_note(copy: &'static str, cx: &App) -> AnyElement {
+fn empty_list_note(copy: SharedString, cx: &App) -> AnyElement {
     div()
         .px(px(8.))
         .py(px(24.))
@@ -468,7 +469,7 @@ impl ModelPicker {
     ) -> Self {
         let search = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Search models…", window, cx);
+            editor.set_placeholder_text(&t!("Search models…"), window, cx);
             editor.set_text_style_refinement(TextStyleRefinement {
                 font_size: Some(ui(13.).into()),
                 ..Default::default()
@@ -566,7 +567,7 @@ impl ModelPicker {
         menu_row("picker-setting-permissions", cx)
             .h(px(height))
             .py(px(0.))
-            .child(div().flex_1().min_w_0().truncate().child("Permissions"))
+            .child(div().flex_1().min_w_0().truncate().child(t!("Permissions")))
             .child(
                 div()
                     .max_w(px(120.))
@@ -632,7 +633,7 @@ impl ModelPicker {
                     .child(
                         menu_row("picker-permissions-back", cx)
                             .flex_none()
-                            .tooltip(Tooltip::text("Back"))
+                            .tooltip(Tooltip::text(t!("Back")))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.show_settings(window, cx)),
                             )
@@ -642,7 +643,7 @@ impl ModelPicker {
                         div()
                             .text_size(ui(13.))
                             .text_color(colors.text.opacity(0.9))
-                            .child("Permissions"),
+                            .child(t!("Permissions")),
                     ),
             )
             .child(v_flex().p(px(CARD_INSET)).gap(px(MENU_GAP)).children(rows))
@@ -774,8 +775,8 @@ impl ModelPicker {
             .unwrap_or(0);
         let effort: SharedString = ladder
             .get(selected_index)
-            .map(|level| view::reasoning_label(*level).into())
-            .unwrap_or_else(|| "Default".into());
+            .map(|level| view::reasoning_label(*level))
+            .unwrap_or_else(|| t!("Default"));
         let model_label = selection.model_label(settings, kind);
         let fast = selection.fast();
         let fast_id = fast.as_ref().map(|(id, ..)| id.clone());
@@ -876,9 +877,9 @@ impl ModelPicker {
                 .cursor_pointer()
                 .hover(|style| style.bg(ink(0.05, cx)))
                 .tooltip(Tooltip::text(if is_on {
-                    "Fast mode on · Turn off"
+                    t!("Fast mode on · Turn off")
                 } else {
-                    "Fast mode off · Turn on"
+                    t!("Fast mode off · Turn on")
                 }))
                 .child(
                     glyph(
@@ -1158,13 +1159,13 @@ impl ModelPicker {
     fn empty_rows(&self, models: &[Model], favorites_only: bool, cx: &Context<Self>) -> AnyElement {
         let searching = !self.search.read(cx).text(cx).trim().is_empty();
         if searching {
-            empty_list_note("No models found", cx)
+            empty_list_note(t!("No models found"), cx)
         } else if favorites_only {
-            empty_list_note("No starred models yet – hit a row's star", cx)
+            empty_list_note(t!("No starred models yet – hit a row's star"), cx)
         } else if models.is_empty() {
             skeleton_rows(cx)
         } else {
-            empty_list_note("No models found", cx)
+            empty_list_note(t!("No models found"), cx)
         }
     }
 
@@ -1189,9 +1190,9 @@ impl ModelPicker {
             .cursor_pointer()
             .hover(|style| style.bg(ink(0.08, cx)))
             .tooltip(Tooltip::text(if is_favorite {
-                "Remove from favorites"
+                t!("Remove from favorites")
             } else {
-                "Add to favorites"
+                t!("Add to favorites")
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
@@ -1411,7 +1412,7 @@ impl ModelPicker {
                     .child(
                         menu_row("picker-back", cx)
                             .flex_none()
-                            .tooltip(Tooltip::text("Back"))
+                            .tooltip(Tooltip::text(t!("Back")))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.show_settings(window, cx)),
                             )
@@ -1534,7 +1535,7 @@ impl ModelPicker {
         let slider = (!ladder.is_empty()).then(|| {
             let effort: SharedString = ladder
                 .get(selected_index)
-                .map(|level| view::reasoning_label(*level).into())
+                .map(|level| view::reasoning_label(*level))
                 .unwrap_or_default();
             v_flex()
                 .px(px(8.))
@@ -1543,7 +1544,7 @@ impl ModelPicker {
                         .h(px(FULL_SLIDER_LABEL_HEIGHT))
                         .text_size(ui(13.))
                         .text_color(colors.text.opacity(0.9))
-                        .child(div().flex_1().child("Reasoning"))
+                        .child(div().flex_1().child(t!("Reasoning")))
                         .child(div().text_color(colors.text_muted).child(effort)),
                 )
                 .child(self.render_slider(&ladder, selected_index, selection.fast_on(), cx))

@@ -1,0 +1,14 @@
+{
+  "remote_debug::SimulateDisconnect": {
+    "name": "模拟断开连接",
+    "description": "模拟与远程服务器断开连接，用于测试。这会触发重新连接逻辑。"
+  },
+  "remote_debug::SimulateTimeout": {
+    "name": "模拟超时",
+    "description": "模拟与远程服务器的连接超时或变慢，用于测试。这会导致心跳失败并触发重新连接。"
+  },
+  "remote_debug::SimulateTimeoutExhausted": {
+    "name": "模拟超时且重试耗尽",
+    "description": "模拟与远程服务器的连接超时或变慢，用于测试。这会导致心跳失败，并在所有重试次数都已用完的情况下尝试重新连接。"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "variable_list::AddWatch": {
+    "name": "添加监视",
+    "description": "将所选变量添加到监视列表。"
+  },
+  "variable_list::CollapseSelectedEntry": {
+    "name": "折叠所选项",
+    "description": "折叠所选变量，隐藏其子项。"
+  },
+  "variable_list::CopyVariableName": {
+    "name": "复制变量名",
+    "description": "将变量名复制到剪贴板。"
+  },
+  "variable_list::CopyVariableValue": {
+    "name": "复制变量值",
+    "description": "将变量值复制到剪贴板。"
+  },
+  "variable_list::EditVariable": {
+    "name": "编辑变量",
+    "description": "编辑所选变量的值。"
+  },
+  "variable_list::ExpandSelectedEntry": {
+    "name": "展开所选项",
+    "description": "展开所选变量，显示其子项。"
+  },
+  "variable_list::GoToMemory": {
+    "name": "转到内存",
+    "description": "跳转到变量所在的内存位置。"
+  },
+  "variable_list::RemoveWatch": {
+    "name": "移除监视",
+    "description": "从监视列表中移除所选变量。"
+  }
+}

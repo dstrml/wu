@@ -28,6 +28,7 @@ dap.workspace = true
 parking_lot.workspace = true
 extension.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 language.workspace = true
 paths.workspace = true
 project.workspace = true

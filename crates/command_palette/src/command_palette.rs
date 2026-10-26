@@ -2,7 +2,7 @@ mod persistence;
 
 use std::{
     cmp::{self, Reverse},
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
     time::Duration,
 };
@@ -17,6 +17,7 @@ use gpui::{
     Action, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     ParentElement, Render, Styled, Task, TaskExt, WeakEntity, Window,
 };
+use i18n::t;
 use persistence::CommandPaletteDB;
 use picker::Direction;
 use picker::{Picker, PickerDelegate};
@@ -120,6 +121,7 @@ impl CommandPalette {
 
                 Some(Command {
                     name: humanize_action_name(action.name()),
+                    localized_name: localized_action_name(action.name()),
                     action,
                 })
             })
@@ -183,6 +185,7 @@ pub struct CommandPaletteDelegate {
 
 struct Command {
     name: String,
+    localized_name: Option<String>,
     action: Box<dyn Action>,
 }
 
@@ -281,6 +284,7 @@ impl Clone for Command {
     fn clone(&self) -> Self {
         Self {
             name: self.name.clone(),
+            localized_name: self.localized_name.clone(),
             action: self.action.boxed_clone(),
         }
     }
@@ -334,6 +338,7 @@ impl CommandPaletteDelegate {
             }
             commands.push(Command {
                 name: string.clone(),
+                localized_name: None,
                 action,
             });
             new_matches.push(StringMatch {
@@ -405,7 +410,7 @@ impl PickerDelegate for CommandPaletteDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Execute a command...".into()
+        t!("Execute a command...").as_str().into()
     }
 
     fn select_history(
@@ -493,13 +498,16 @@ impl PickerDelegate for CommandPaletteDelegate {
                     )
                 });
 
-                let candidates = commands
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, command)| StringMatchCandidate::new(ix, &command.name))
-                    .collect::<Vec<_>>();
+                let mut candidate_commands = Vec::with_capacity(commands.len());
+                let mut candidates = Vec::with_capacity(commands.len());
+                for (command_ix, command) in commands.iter().enumerate() {
+                    for name in std::iter::once(&command.name).chain(&command.localized_name) {
+                        candidates.push(StringMatchCandidate::new(candidates.len(), name));
+                        candidate_commands.push(command_ix);
+                    }
+                }
 
-                let mut matches = fuzzy_nucleo::match_strings_async(
+                let matches = fuzzy_nucleo::match_strings_async(
                     &candidates,
                     &query,
                     fuzzy_nucleo::Case::Smart,
@@ -509,6 +517,16 @@ impl PickerDelegate for CommandPaletteDelegate {
                     executor,
                 )
                 .await;
+
+                let mut matched_commands = HashSet::new();
+                let mut matches = matches
+                    .into_iter()
+                    .filter_map(|mut string_match| {
+                        let command_ix = *candidate_commands.get(string_match.candidate_id)?;
+                        string_match.candidate_id = command_ix;
+                        matched_commands.insert(command_ix).then_some(string_match)
+                    })
+                    .collect::<Vec<_>>();
 
                 let used_commands = commands
                     .iter()
@@ -637,6 +655,32 @@ impl PickerDelegate for CommandPaletteDelegate {
     ) -> Option<Self::ListItem> {
         let matching_command = self.matches.get(ix)?;
         let command = self.commands.get(matching_command.candidate_id)?;
+        let positions = matching_command.positions.clone();
+        let command_label = match &command.localized_name {
+            Some(localized_name) => {
+                let (localized_positions, english_positions) =
+                    if matching_command.string.as_ref() == localized_name.as_str() {
+                        (positions, Vec::new())
+                    } else {
+                        (Vec::new(), positions)
+                    };
+                h_flex()
+                    .min_w_0()
+                    .gap_2()
+                    .child(HighlightedLabel::new(
+                        localized_name.clone(),
+                        localized_positions,
+                    ))
+                    .child(
+                        HighlightedLabel::new(command.name.clone(), english_positions)
+                            .color(Color::Muted)
+                            .size(LabelSize::Small)
+                            .truncate(),
+                    )
+                    .into_any_element()
+            }
+            None => HighlightedLabel::new(command.name.clone(), positions).into_any_element(),
+        };
 
         Some(
             ListItem::new(ix)
@@ -648,10 +692,7 @@ impl PickerDelegate for CommandPaletteDelegate {
                         .w_full()
                         .py_px()
                         .justify_between()
-                        .child(HighlightedLabel::new(
-                            command.name.clone(),
-                            matching_command.positions.clone(),
-                        ))
+                        .child(command_label)
                         .child(KeyBinding::for_action_in(
                             &*command.action,
                             &self.previous_focus_handle,
@@ -672,7 +713,7 @@ impl PickerDelegate for CommandPaletteDelegate {
 
         let focus_handle = &self.previous_focus_handle;
         let keybinding_buttons = if keybind.has_binding(window) {
-            Button::new("change", "Change Keybinding…")
+            Button::new("change", t!("Change Keybinding…"))
                 .key_binding(
                     KeyBinding::for_action_in(&menu::SecondaryConfirm, focus_handle, cx)
                         .map(|kb| kb.size(rems_from_px(12_f32))),
@@ -681,7 +722,7 @@ impl PickerDelegate for CommandPaletteDelegate {
                     window.dispatch_action(menu::SecondaryConfirm.boxed_clone(), cx);
                 })
         } else {
-            Button::new("add", "Add Keybinding…")
+            Button::new("add", t!("Add Keybinding…"))
                 .key_binding(
                     KeyBinding::for_action_in(&menu::SecondaryConfirm, focus_handle, cx)
                         .map(|kb| kb.size(rems_from_px(12_f32))),
@@ -701,7 +742,7 @@ impl PickerDelegate for CommandPaletteDelegate {
                 .border_color(cx.theme().colors().border_variant)
                 .child(keybinding_buttons)
                 .child(
-                    Button::new("run-action", "Run")
+                    Button::new("run-action", t!("Run"))
                         .key_binding(
                             KeyBinding::for_action_in(&menu::Confirm, &focus_handle, cx)
                                 .map(|kb| kb.size(rems_from_px(12_f32))),
@@ -713,6 +754,15 @@ impl PickerDelegate for CommandPaletteDelegate {
                 .into_any(),
         )
     }
+}
+
+pub fn localized_action_name(name: &str) -> Option<String> {
+    let localized_name = i18n::action_name(name)?;
+    let (namespace, _) = name.rsplit_once("::")?;
+    let localized_namespace = i18n::action_namespace(namespace)
+        .map(|namespace| namespace.to_string())
+        .unwrap_or_else(|| humanize_action_name(namespace));
+    Some(format!("{localized_namespace}: {localized_name}"))
 }
 
 pub fn humanize_action_name(name: &str) -> String {
@@ -803,6 +853,40 @@ mod tests {
     use settings::KeymapFile;
     use workspace::{AppState, MultiWorkspace, Workspace};
 
+    static LANGUAGE_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+    struct English {
+        _lock: std::sync::RwLockReadGuard<'static, ()>,
+    }
+
+    fn english() -> English {
+        English {
+            _lock: LANGUAGE_LOCK
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        }
+    }
+
+    struct SimplifiedChinese {
+        _lock: std::sync::RwLockWriteGuard<'static, ()>,
+    }
+
+    impl SimplifiedChinese {
+        fn enable() -> Self {
+            let lock = LANGUAGE_LOCK
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            i18n::set_language(i18n::Language::SimplifiedChinese);
+            Self { _lock: lock }
+        }
+    }
+
+    impl Drop for SimplifiedChinese {
+        fn drop(&mut self) {
+            i18n::set_language(i18n::Language::English);
+        }
+    }
+
     #[test]
     fn test_humanize_action_name() {
         assert_eq!(
@@ -870,6 +954,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_command_palette(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let db = cx.update(|cx| persistence::CommandPaletteDB::global(cx));
         db.clear_all().await.unwrap();
@@ -944,7 +1029,64 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_simplified_chinese_command_names(cx: &mut TestAppContext) {
+        let app_state = init_test(cx);
+        let project = Project::test(app_state.fs.clone(), [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+        let editor = cx.new_window_entity(|window, cx| Editor::single_line(window, cx));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.add_item_to_active_pane(Box::new(editor.clone()), None, true, window, cx);
+            editor.update(cx, |editor, cx| window.focus(&editor.focus_handle(cx), cx))
+        });
+
+        let _simplified_chinese = SimplifiedChinese::enable();
+        cx.simulate_keystrokes("cmd-shift-p");
+        let palette = workspace.update(cx, |workspace, cx| {
+            workspace.active_modal::<CommandPalette>(cx).unwrap()
+        });
+        let picker = palette.read_with(cx, |palette, _| palette.picker.clone());
+
+        let mut results = Vec::new();
+        for query in ["editor: backspace", "退格"] {
+            palette.update_in(cx, |palette, window, cx| {
+                palette.set_query(query, window, cx)
+            });
+            cx.run_until_parked();
+            results.push(picker.read_with(cx, |picker, _| {
+                let first_match = &picker.delegate.matches[0];
+                let command = &picker.delegate.commands[first_match.candidate_id];
+                (
+                    command.action.name(),
+                    command.localized_name.clone(),
+                    first_match.string.to_string(),
+                )
+            }));
+        }
+
+        let localized_name = Some("编辑器: 退格".to_string());
+        assert_eq!(
+            results,
+            [
+                (
+                    "editor::Backspace",
+                    localized_name.clone(),
+                    "editor: backspace".to_string()
+                ),
+                (
+                    "editor::Backspace",
+                    localized_name,
+                    "编辑器: 退格".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[gpui::test]
     async fn test_commands_sorted_by_recency(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         cx.update(|cx| cx.set_global(db::AppDatabase::test_new()));
         let db = cx.update(|cx| persistence::CommandPaletteDB::global(cx));
@@ -1000,6 +1142,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_used_commands_rank_above_unused_when_filtering(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         cx.update(|cx| cx.set_global(db::AppDatabase::test_new()));
         let db = cx.update(|cx| persistence::CommandPaletteDB::global(cx));
@@ -1065,6 +1208,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_selected_command_none_when_no_matches(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1091,6 +1235,7 @@ mod tests {
     }
     #[gpui::test]
     async fn test_normalized_matches(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1128,6 +1273,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_go_to_line(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1168,6 +1314,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_reopen_command_palette_over_another_modal(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1241,6 +1388,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_history_navigation_basic(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1285,6 +1433,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_history_mode_exit_on_typing(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1310,6 +1459,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_history_navigation_with_suggestions(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1353,6 +1503,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_history_prefix_search(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1407,6 +1558,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_history_prefix_search_no_matches(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =
@@ -1430,6 +1582,7 @@ mod tests {
 
     #[gpui::test]
     async fn test_history_empty_prefix_searches_all(cx: &mut TestAppContext) {
+        let _english = english();
         let app_state = init_test(cx);
         let project = Project::test(app_state.fs.clone(), [], cx).await;
         let (multi_workspace, cx) =

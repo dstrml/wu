@@ -26,6 +26,7 @@ use crate::{
     usage_rings::{ContextCard, UsageCard, context_chip, usage_chip},
 };
 use agent_harness::{ToolCall, UserInputAnswer, view};
+use i18n::{t, tc};
 use settings::{AgentChatSendKey, Settings as _};
 use gpui::Font;
 use theme_settings::ThemeSettings;
@@ -235,7 +236,7 @@ impl ChatView {
         let flavour = flavour_seed(&session.read(cx).metadata().id);
         let composer = cx.new(|cx| {
             let mut editor = Editor::auto_height(1, 10, window, cx);
-            editor.set_placeholder_text("Do anything…", window, cx);
+            editor.set_placeholder_text(&t!("Do anything…"), window, cx);
             editor.set_bar_cursor_width(px(1.), cx);
             editor.set_text_style_refinement(TextStyleRefinement {
                 font_size: Some(ui(14.).into()),
@@ -418,7 +419,7 @@ impl ChatView {
             }
             let editor = cx.new(|cx| {
                 let mut editor = Editor::auto_height(1, 6, window, cx);
-                editor.set_placeholder_text("Type your answer…", window, cx);
+                editor.set_placeholder_text(&t!("Type your answer…"), window, cx);
                 editor.set_text_style_refinement(TextStyleRefinement {
                     font_size: Some(ui(14.).into()),
                     line_height: Some(ui(22.75).into()),
@@ -627,12 +628,7 @@ impl ChatView {
         if let Some(subagent) = &self.subagent {
             return subagent.title.clone();
         }
-        let title = &self.session.read(cx).metadata().title;
-        if title.is_empty() {
-            "New chat".into()
-        } else {
-            title.clone().into()
-        }
+        crate::session::display_title(&self.session.read(cx).metadata().title)
     }
 
     fn send(&mut self, _: &Send, window: &mut Window, cx: &mut Context<Self>) {
@@ -969,7 +965,7 @@ impl ChatView {
                         .group_hover(TABLE_GROUP, |style| style.visible())
                 })
                 .hover(|style| style.bg(ink(0.08, cx)))
-                .tooltip(Tooltip::text("Copy table as Markdown"))
+                .tooltip(Tooltip::text(t!("Copy table as Markdown")))
                 .child(
                     icon(
                         if is_copied {
@@ -981,7 +977,7 @@ impl ChatView {
                     )
                     .text_color(muted),
                 )
-                .when(is_copied, |this| this.child("Copied"))
+                .when(is_copied, |this| this.child(t!("Copied")))
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     let key = key.clone();
@@ -1038,7 +1034,7 @@ impl ChatView {
                 });
                 let failure = diagram.as_ref().and_then(|(_, diagram)| match diagram {
                     Some(mermaid::Diagram::Failed(error)) => {
-                        Some(SharedString::from(format!("Couldn't draw this diagram: {error}")))
+                        Some(t!("Couldn't draw this diagram: {error}", error = error))
                     }
                     _ => None,
                 });
@@ -1107,9 +1103,9 @@ impl ChatView {
                                                 .cursor_pointer()
                                                 .hover(|style| style.bg(ink(0.08, cx)))
                                                 .tooltip(Tooltip::text(if shown_source {
-                                                    "Show diagram"
+                                                    t!("Show diagram")
                                                 } else {
-                                                    "Show source"
+                                                    t!("Show source")
                                                 }))
                                                 .child(
                                                     icon(
@@ -1147,7 +1143,7 @@ impl ChatView {
                                             .text_size(px(10.5))
                                             .text_color(muted)
                                             .hover(|style| style.bg(ink(0.08, cx)))
-                                            .tooltip(Tooltip::text("Copy code"))
+                                            .tooltip(Tooltip::text(t!("Copy code")))
                                             .child(
                                                 icon(
                                                     if is_copied {
@@ -1159,7 +1155,7 @@ impl ChatView {
                                                 )
                                                 .text_color(muted),
                                             )
-                                            .when(is_copied, |this| this.child("Copied"))
+                                            .when(is_copied, |this| this.child(t!("Copied")))
                                             .on_click(move |_, _, cx| {
                                                 cx.stop_propagation();
                                                 let key = key.clone();
@@ -1296,7 +1292,7 @@ impl ChatView {
             .filter(|_| at > 0)
             .map(|time| {
                 time.with_timezone(&chrono::Local)
-                    .format("%b %-d, %-I:%M %p")
+                    .format(&t!("%b %-d, %-I:%M %p"))
                     .to_string()
             });
         let muted = cx.theme().colors().text_muted;
@@ -1329,7 +1325,7 @@ impl ChatView {
                                 .rounded(px(6.))
                                 .cursor_pointer()
                                 .hover(|style| style.bg(ink(0.08, cx)))
-                                .tooltip(Tooltip::text("Edit message"))
+                                .tooltip(Tooltip::text(t!("Edit message")))
                                 .child(icon(IconName::AgentPen, 14.).text_color(muted))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     cx.stop_propagation();
@@ -1349,7 +1345,7 @@ impl ChatView {
                                 .rounded(px(6.))
                                 .cursor_pointer()
                                 .hover(|style| style.bg(ink(0.08, cx)))
-                                .tooltip(Tooltip::text("Copy message"))
+                                .tooltip(Tooltip::text(t!("Copy message")))
                                 .child(
                                     icon(
                                         if is_copied {
@@ -1388,9 +1384,9 @@ impl ChatView {
                         .visible_on_hover(group)
                         .hover(|style| style.bg(ink(0.08, cx)))
                         .tooltip(Tooltip::text(if saved {
-                            "Remove from saved"
+                            tc!("chat", "Remove from saved")
                         } else {
-                            "Save message"
+                            tc!("chat", "Save message")
                         }))
                         .child(
                             icon(
@@ -1576,7 +1572,11 @@ impl ChatView {
                                     .text_color(colors.text_muted)
                                     .cursor_pointer()
                                     .hover(|style| style.text_color(colors.text))
-                                    .child(if expanded { "Show less" } else { "Show more" })
+                                    .child(if expanded {
+                                        t!("Show less")
+                                    } else {
+                                        t!("Show more")
+                                    })
                                     .child(
                                         icon(
                                             if expanded {
@@ -1613,7 +1613,7 @@ impl ChatView {
             .text_size(ui(12.))
             .text_color(cx.theme().status().error)
             .cursor_pointer()
-            .child("Not delivered. Click to retry.")
+            .child(t!("Not delivered. Click to retry."))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.session
                     .update(cx, |session, cx| session.retry_undelivered(index, cx))
@@ -1710,10 +1710,12 @@ impl ChatView {
                 _ => None,
             });
             let label = match (started, finished) {
-                (Some(started), Some(finished)) if finished > started => {
-                    format!("Worked for {}", format_elapsed((finished - started) as u64))
-                }
-                _ => "Worked".to_string(),
+                (Some(started), Some(finished)) if finished > started => t!(
+                    "Worked for {duration}",
+                    duration = format_elapsed((finished - started) as u64)
+                )
+                .to_string(),
+                _ => t!("Worked").to_string(),
             };
             let open = self.expanded_work.contains(&turn_index);
             rows.push((
@@ -1800,15 +1802,16 @@ impl ChatView {
                     cursor += 1;
                 }
                 Entry::Notice { text, is_error } => {
+                    let text = crate::session::translated_notice(text);
                     rows.push((
                         TranscriptRow::Other,
                         if *is_error {
-                            self.render_error(index, text.clone(), cx)
+                            self.render_error(index, text, cx)
                         } else {
                             div()
                                 .text_size(ui(12.))
                                 .text_color(cx.theme().colors().text_muted)
-                                .child(text.clone())
+                                .child(text)
                                 .into_any_element()
                         },
                     ));
@@ -1836,9 +1839,9 @@ impl ChatView {
                             .hover(|style| style.bg(gpui::hsla(0., 0., 0., 0.75)))
                             .when(!downloaded, |this| this.visible_on_hover(group.clone()))
                             .tooltip(Tooltip::text(if downloaded {
-                                "Saved to Downloads"
+                                t!("Saved to Downloads")
                             } else {
-                                "Download"
+                                t!("Download")
                             }))
                             .child(
                                 ui::Icon::new(if downloaded {
@@ -1954,9 +1957,12 @@ impl ChatView {
             .map(|since| since.elapsed().as_secs())
             .unwrap_or(0);
         let label = if self.subagent.is_none() && self.session.read(cx).is_compacting() {
-            "Compacting conversation…".to_string()
+            t!("Compacting conversation…").to_string()
         } else {
-            format!("{}…", flavour_word(self.flavour_seed, elapsed))
+            format!(
+                "{}…",
+                i18n::translate(flavour_word(self.flavour_seed, elapsed))
+            )
         };
         let colors = cx.theme().colors();
         h_flex()
@@ -2024,7 +2030,7 @@ impl ChatView {
                                 div()
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(danger_muted)
-                                    .child("Error"),
+                                    .child(t!("Error")),
                             )
                             .child(div().flex_1())
                             .child(
@@ -2038,7 +2044,7 @@ impl ChatView {
                                     .rounded(px(6.))
                                     .cursor_pointer()
                                     .hover(|style| style.bg(danger.opacity(0.12)))
-                                    .tooltip(Tooltip::text("Copy message"))
+                                    .tooltip(Tooltip::text(t!("Copy message")))
                                     .child(
                                         icon(
                                             if is_copied {
@@ -2086,8 +2092,8 @@ impl ChatView {
         let mut segments: Vec<String> = Vec::new();
         match thoughts {
             0 => {}
-            1 => segments.push("thought process".into()),
-            count => segments.push(format!("thought {count} times")),
+            1 => segments.push(t!("thought process").to_string()),
+            count => segments.push(t!("thought {count} times", count = count).to_string()),
         }
         if !tools.is_empty() {
             segments.push(view::tool_group_summary(&tools));
@@ -2196,7 +2202,7 @@ impl ChatView {
                     (
                         format!("tool-{}", tool.id),
                         tool_icon(&tool.call),
-                        label.into(),
+                        label,
                         detail,
                         tool.status == ToolStatus::Failed,
                     )
@@ -2204,7 +2210,7 @@ impl ChatView {
                 Entry::Thinking(_) => (
                     format!("thought-{index}"),
                     IconName::AgentChatRoundLine,
-                    "Thought process".into(),
+                    t!("Thought process"),
                     String::new(),
                     false,
                 ),
@@ -2405,7 +2411,7 @@ impl ChatView {
                     .bg(ink(0.03, cx))
                     .cursor_pointer()
                     .hover(|style| style.bg(ink(0.05, cx)))
-                    .tooltip(Tooltip::text("Open subagent"))
+                    .tooltip(Tooltip::text(t!("Open subagent")))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_subagent(id.clone(), &call, window, cx)
                     }))
@@ -2541,12 +2547,18 @@ impl ChatView {
                         code_font(cx),
                     ))
                     .when(invocation_hidden > 0, |this| {
-                        this.child(self.render_show_full(
-                            format!("agent-full-input-{}", tool.id),
-                            format!("Show full input ({})", format_bytes(call_text.len())),
-                            &tool.id,
-                            cx,
-                        ))
+                        this.child(
+                            self.render_show_full(
+                                format!("agent-full-input-{}", tool.id),
+                                t!(
+                                    "Show full input ({size})",
+                                    size = format_bytes(call_text.len())
+                                )
+                                .to_string(),
+                                &tool.id,
+                                cx,
+                            ),
+                        )
                     })
             })
             .map(|this| match diff {
@@ -2562,12 +2574,18 @@ impl ChatView {
                         code_font(cx),
                     ))
                     .when(output_hidden > 0, |this| {
-                        this.child(self.render_show_full(
-                            format!("agent-full-output-{}", tool.id),
-                            format!("Show full output ({})", format_bytes(output_size)),
-                            &tool.id,
-                            cx,
-                        ))
+                        this.child(
+                            self.render_show_full(
+                                format!("agent-full-output-{}", tool.id),
+                                t!(
+                                    "Show full output ({size})",
+                                    size = format_bytes(output_size)
+                                )
+                                .to_string(),
+                                &tool.id,
+                                cx,
+                            ),
+                        )
                     }),
                 None => this,
             })
@@ -2700,7 +2718,7 @@ fn subagent_title(call: &ToolCall) -> SharedString {
     let (name, input) = match call {
         ToolCall::Unknown { name, input } => (name.as_str(), input.as_ref()),
         ToolCall::Mcp { tool, input, .. } => (tool.as_str(), input.as_ref()),
-        _ => return "Subagent".into(),
+        _ => return t!("Subagent"),
     };
     let candidates = [
         Some(name),
@@ -2713,7 +2731,7 @@ fn subagent_title(call: &ToolCall) -> SharedString {
         .map(|text| view::single_line(text.strip_prefix("Agent").unwrap_or(text)))
         .map(|text| text.trim_start_matches(':').trim().to_string())
         .find(|text| !text.is_empty())
-        .map_or_else(|| "Subagent".into(), Into::into)
+        .map_or_else(|| t!("Subagent"), Into::into)
 }
 
 fn icon(name: IconName, size: f32) -> Svg {
@@ -2970,7 +2988,7 @@ fn detail_lines(
                     .items_center()
                     .text_size(px(TOOL_TEXT_SIZE))
                     .text_color(color)
-                    .child(format!("… {hidden} more lines")),
+                    .child(t!("… {count} more lines", count = hidden)),
             )
         })
 }
@@ -3172,9 +3190,9 @@ impl ChatView {
             .children(self.render_link_menu());
         if self.entries(cx).is_empty() {
             let message = if self.is_working(cx) {
-                "Waiting for the subagent…"
+                t!("Waiting for the subagent…")
             } else {
-                "This subagent has no recorded activity."
+                t!("This subagent has no recorded activity.")
             };
             return root.child(
                 div()
@@ -3382,7 +3400,7 @@ impl Item for ChatView {
         if self.subagent.is_some() {
             return Vec::new();
         }
-        vec![("Rename".into(), Box::new(RenameChat))]
+        vec![(t!("Rename"), Box::new(RenameChat))]
     }
 
     fn tab_icon(&self, _: &Window, cx: &App) -> Option<Icon> {
@@ -3395,9 +3413,9 @@ impl Item for ChatView {
     fn tab_tooltip_text(&self, cx: &App) -> Option<SharedString> {
         let kind = self.session.read(cx).kind();
         let kind = if self.subagent.is_some() {
-            "Subagent"
+            t!("Subagent")
         } else {
-            kind.label()
+            kind.label().into()
         };
         Some(format!("{kind} · {}", self.title(cx)).into())
     }

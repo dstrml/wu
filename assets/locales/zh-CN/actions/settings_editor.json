@@ -1,0 +1,57 @@
+{
+  "settings_editor::CollapseNavEntry": {
+    "description": "折叠导航项。",
+    "name": "折叠导航项"
+  },
+  "settings_editor::ExpandNavEntry": {
+    "description": "展开导航项。",
+    "name": "展开导航项"
+  },
+  "settings_editor::FocusFile": {
+    "name": "聚焦文件"
+  },
+  "settings_editor::FocusFirstNavEntry": {
+    "description": "聚焦第一个导航项。",
+    "name": "聚焦第一个导航项"
+  },
+  "settings_editor::FocusLastNavEntry": {
+    "description": "聚焦最后一个导航项。",
+    "name": "聚焦最后一个导航项"
+  },
+  "settings_editor::FocusNextFile": {
+    "description": "聚焦文件列表中的下一个文件。",
+    "name": "聚焦下一个文件"
+  },
+  "settings_editor::FocusNextNavEntry": {
+    "description": "聚焦并打开下一个导航项，焦点不会移到内容区。",
+    "name": "聚焦下一个导航项"
+  },
+  "settings_editor::FocusNextRootNavEntry": {
+    "description": "聚焦下一个顶级导航项。",
+    "name": "聚焦下一个顶级导航项"
+  },
+  "settings_editor::FocusPreviousFile": {
+    "description": "聚焦文件列表中的上一个文件。",
+    "name": "聚焦上一个文件"
+  },
+  "settings_editor::FocusPreviousNavEntry": {
+    "description": "聚焦并打开上一个导航项，焦点不会移到内容区。",
+    "name": "聚焦上一个导航项"
+  },
+  "settings_editor::FocusPreviousRootNavEntry": {
+    "description": "聚焦上一个顶级导航项。",
+    "name": "聚焦上一个顶级导航项"
+  },
+  "settings_editor::Minimize": {
+    "description": "最小化设置窗口。",
+    "name": "最小化"
+  },
+  "settings_editor::OpenCurrentFile": {
+    "description": "在编辑器中打开当前文件。",
+    "name": "打开当前文件"
+  },
+  "settings_editor::ToggleFocusNav": {
+    "description": "在导航栏和主要内容之间切换焦点。",
+    "name": "切换导航焦点"
+  }
+}

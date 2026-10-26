@@ -5,6 +5,7 @@ use db::kvp::KeyValueStore;
 use editor::Editor;
 use extension_host::ExtensionStore;
 use gpui::{AppContext as _, Context, Entity, SharedString, Window};
+use i18n::t;
 use language::Buffer;
 use ui::prelude::*;
 use util::ResultExt;
@@ -172,13 +173,14 @@ pub(crate) fn suggest(buffer: Entity<Buffer>, window: &mut Window, cx: &mut Cont
         workspace.show_notification(notification_id, cx, |cx| {
             cx.new(move |cx| {
                 MessageNotification::new(
-                    format!(
-                        "Do you want to install the recommended '{}' extension for '{}' files?",
-                        extension_id, file_name_or_extension
+                    t!(
+                        "Do you want to install the recommended '{extension_id}' extension for '{file_name}' files?",
+                        extension_id = extension_id,
+                        file_name = file_name_or_extension
                     ),
                     cx,
                 )
-                .primary_message("Yes, install extension")
+                .primary_message(t!("Yes, install extension"))
                 .primary_icon(IconName::Check)
                 .primary_icon_color(Color::Success)
                 .primary_on_click({
@@ -191,7 +193,7 @@ pub(crate) fn suggest(buffer: Entity<Buffer>, window: &mut Window, cx: &mut Cont
                         });
                     }
                 })
-                .secondary_message("No, don't install it")
+                .secondary_message(t!("No, don't install it"))
                 .secondary_icon(IconName::Close)
                 .secondary_icon_color(Color::Error)
                 .secondary_on_click(move |_window, cx| {

@@ -163,7 +163,7 @@ pub(super) fn pick_variant(
 pub(super) fn agent_option(agents: &Value) -> ModelOption {
     let mut choices = vec![ModelOptionChoice {
         id: String::new(),
-        label: "Server default".into(),
+        label: i18n::t!("Server default").to_string(),
     }];
     for agent in agents
         .get("data")
@@ -189,7 +189,7 @@ pub(super) fn agent_option(agents: &Value) -> ModelOption {
     }
     ModelOption {
         id: "agent".into(),
-        label: "Agent".into(),
+        label: i18n::t!("Agent").to_string(),
         choices,
         default_choice: String::new(),
     }

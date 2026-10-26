@@ -11,6 +11,7 @@ use gpui::{
     AsyncWindowContext, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, SharedString,
     Task, TaskExt, WeakEntity,
 };
+use i18n::t;
 use project::Project;
 use project::git_store::Repository;
 use project::project_settings::ProjectSettings;
@@ -88,7 +89,7 @@ impl WorktreeCreateTarget {
             WorktreeCreateTarget::DefaultBranch(default_branch) => default_branch.display_name(),
             WorktreeCreateTarget::CurrentBranch => {
                 if has_multiple_repositories {
-                    "current branches".to_string()
+                    t!("current branches").to_string()
                 } else {
                     current_branch_name.unwrap_or("HEAD").to_string()
                 }
@@ -252,14 +253,14 @@ impl Render for WorktreeFetchFailedToast {
                     .size(IconSize::Small)
                     .color(Color::Error),
             )
-            .child(Label::new(format!(
-                "git fetch failed for {}",
-                self.remote_branch_name
+            .child(Label::new(t!(
+                "git fetch failed for {branch}",
+                branch = self.remote_branch_name
             )))
             .child(
                 Button::new(
                     "use-local-worktree-base",
-                    format!("Use local {}", self.remote_branch_name),
+                    t!("Use local {branch}", branch = self.remote_branch_name),
                 )
                 .color(Color::Muted)
                 .on_click(cx.listener(move |_, _event, window, cx| {
@@ -285,7 +286,7 @@ impl Render for WorktreeFetchFailedToast {
                 })),
             )
             .child(
-                Button::new("view-worktree-fetch-log", "Show Error Logs")
+                Button::new("view-worktree-fetch-log", t!("Show Error Logs"))
                     .color(Color::Muted)
                     .on_click(cx.listener(move |_, _event, window, cx| {
                         cx.emit(DismissEvent);
@@ -492,7 +493,13 @@ fn start_worktree_creations(
             let new_path =
                 repo.path_for_new_linked_worktree(&worktree_name, worktree_directory_setting)?;
             if existing_worktree_paths.contains(&new_path) {
-                anyhow::bail!("A worktree already exists at {}", new_path.display());
+                anyhow::bail!(
+                    "{}",
+                    t!(
+                        "A worktree already exists at {path}",
+                        path = new_path.display()
+                    )
+                );
             }
             let work_dir = repo.work_directory_abs_path.clone();
             // Only the first repo that resolves to a given target path
@@ -547,7 +554,7 @@ pub async fn await_and_rollback_on_failure(
             }
             Err(_canceled) => {
                 if first_error.is_none() {
-                    first_error = Some(anyhow!("Worktree creation was canceled"));
+                    first_error = Some(anyhow!("{}", t!("Worktree creation was canceled")));
                 }
             }
         }
@@ -618,10 +625,13 @@ pub async fn await_and_rollback_on_failure(
             }
         }
     }
-    let mut error_message = format!("Failed to create worktree: {err}");
+    let mut error_message = t!("Failed to create worktree: {error}", error = err).to_string();
     if !rollback_failures.is_empty() {
-        error_message.push_str("\n\nFailed to clean up: ");
-        error_message.push_str(&rollback_failures.join(", "));
+        error_message.push_str("\n\n");
+        error_message.push_str(&t!(
+            "Failed to clean up: {failures}",
+            failures = rollback_failures.join(", ")
+        ));
     }
     Err(anyhow!(error_message))
 }
@@ -790,7 +800,7 @@ fn create_worktree_workspace_inner(
         show_error_toast(
             toast_workspace,
             "worktree create",
-            anyhow!("No git repositories found in the project"),
+            anyhow!("{}", t!("No git repositories found in the project")),
             cx,
         );
         return Task::ready(Err(anyhow!("No git repositories found in the project")));
@@ -806,7 +816,10 @@ fn create_worktree_workspace_inner(
             show_error_toast(
                 toast_workspace,
                 "worktree create",
-                anyhow!("Cannot create worktree: remote connection is not active"),
+                anyhow!(
+                    "{}",
+                    t!("Cannot create worktree: remote connection is not active")
+                ),
                 cx,
             );
             return Task::ready(Err(anyhow!(
@@ -1261,8 +1274,10 @@ async fn open_worktree_workspace(
                     workspace.show_toast(
                         workspace::Toast::new(
                             toast_id,
-                            "Some project folders are not git repositories. \
-                             They were included as-is without creating a worktree.",
+                            t!(
+                                "Some project folders are not git repositories. They were included as-is without creating a worktree."
+                            )
+                            .to_string(),
                         ),
                         cx,
                     );

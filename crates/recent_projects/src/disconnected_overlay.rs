@@ -1,4 +1,5 @@
 use gpui::{ClickEvent, DismissEvent, EventEmitter, FocusHandle, Focusable, Render, WeakEntity};
+use i18n::t;
 use project::project_settings::ProjectSettings;
 use remote::RemoteConnectionOptions;
 use settings::Settings;
@@ -127,7 +128,7 @@ impl DisconnectedOverlay {
             .await?;
             Ok(())
         })
-        .detach_and_prompt_err("Failed to reconnect", window, cx, |_, _, _| None);
+        .detach_and_prompt_err(&t!("Failed to reconnect"), window, cx, |_, _, _| None);
     }
 
     fn cancel(&mut self, _: &menu::Cancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -142,23 +143,30 @@ impl Render for DisconnectedOverlay {
 
         let message = match &self.host {
             Host::RemoteServerProject(options, server_not_running) => {
-                let autosave = if ProjectSettings::get_global(cx)
+                let host = options.display_name();
+                let lost_connection = if *server_not_running {
+                    t!(
+                        "Your connection to {host} has been lost due to the server process exiting unexpectedly.",
+                        host = host
+                    )
+                } else {
+                    t!(
+                        "Your connection to {host} has been lost due to the server not responding.",
+                        host = host
+                    )
+                };
+                if ProjectSettings::get_global(cx)
                     .session
                     .restore_unsaved_buffers
                 {
-                    "\nUnsaved changes are stored locally."
+                    format!(
+                        "{lost_connection}\n{}",
+                        t!("Unsaved changes are stored locally.")
+                    )
+                    .into()
                 } else {
-                    ""
-                };
-                let reason = if *server_not_running {
-                    "process exiting unexpectedly"
-                } else {
-                    "not responding"
-                };
-                format!(
-                    "Your connection to {} has been lost due to the server {reason}.{autosave}",
-                    options.display_name(),
-                )
+                    lost_connection
+                }
             }
         };
 
@@ -174,7 +182,7 @@ impl Render for DisconnectedOverlay {
                     .header(
                         ModalHeader::new()
                             .show_dismiss_button(true)
-                            .child(Headline::new("Disconnected").size(HeadlineSize::Small)),
+                            .child(Headline::new(t!("Disconnected")).size(HeadlineSize::Small)),
                     )
                     .section(Section::new().child(Label::new(message)))
                     .footer(
@@ -182,7 +190,7 @@ impl Render for DisconnectedOverlay {
                             h_flex()
                                 .gap_2()
                                 .child(
-                                    Button::new("close-window", "Close Window")
+                                    Button::new("close-window", t!("Close Window"))
                                         .style(ButtonStyle::Filled)
                                         .layer(ElevationIndex::ModalSurface)
                                         .on_click(cx.listener(move |_, _, window, _| {
@@ -191,7 +199,7 @@ impl Render for DisconnectedOverlay {
                                 )
                                 .when(can_reconnect, |el| {
                                     el.child(
-                                        Button::new("reconnect", "Reconnect")
+                                        Button::new("reconnect", t!("Reconnect"))
                                             .style(ButtonStyle::Filled)
                                             .layer(ElevationIndex::ModalSurface)
                                             .start_icon(Icon::new(IconName::ArrowCircle))

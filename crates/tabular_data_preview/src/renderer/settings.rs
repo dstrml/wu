@@ -1,4 +1,5 @@
 use gpui::{Anchor, Entity};
+use i18n::{n, t};
 use ui::{
     ContextMenu, ContextMenuEntry, DocumentationSide, IconButton, IconName, IconPosition, IconSize,
     Label, PopoverMenu, Tooltip, prelude::*,
@@ -22,7 +23,7 @@ fn toggle_entry(
     set: impl Fn(&mut TabularDataPreviewSettings) + 'static,
 ) -> ContextMenu {
     let view_entity = view_entity.clone();
-    let entry = ContextMenuEntry::new(label)
+    let entry = ContextMenuEntry::new(i18n::translate(label))
         .toggleable(IconPosition::Start, selected)
         .handler(move |_, cx| {
             view_entity.update(cx, |this, cx| {
@@ -32,7 +33,7 @@ fn toggle_entry(
         });
     let entry = if let Some(description) = description {
         entry.documentation_aside(DocumentationSide::Right, move |_| {
-            Label::new(description).into_any_element()
+            Label::new(i18n::translate(description)).into_any_element()
         })
     } else {
         entry
@@ -48,7 +49,7 @@ pub(crate) fn settings_popover_menu(
             IconButton::new("table-settings-trigger", IconName::Filter)
                 .icon_size(IconSize::Small)
                 .size(ButtonSize::Compact),
-            Tooltip::text("Table Settings"),
+            Tooltip::text(t!("Table Settings")),
         )
         .anchor(Anchor::TopRight)
         .menu(move |window, cx| {
@@ -60,34 +61,34 @@ pub(crate) fn settings_popover_menu(
                     let settings = view_entity.read(cx).settings.clone();
 
                     let menu = toggle_entry(
-                        menu.header("Text Alignment"),
-                        "Top",
-                        Some("Choose vertical text alignment within cells"),
+                        menu.header(t!("Text Alignment")),
+                        n!("Top"),
+                        Some(n!("Choose vertical text alignment within cells")),
                         matches!(settings.vertical_alignment, VerticalAlignment::Top),
                         &view_entity,
                         |settings| settings.vertical_alignment = VerticalAlignment::Top,
                     );
                     let menu = toggle_entry(
                         menu,
-                        "Center",
+                        n!("Center"),
                         None,
                         matches!(settings.vertical_alignment, VerticalAlignment::Center),
                         &view_entity,
                         |settings| settings.vertical_alignment = VerticalAlignment::Center,
                     );
 
-                    let menu = menu.separator().header("Filter Sort");
+                    let menu = menu.separator().header(t!("Filter Sort"));
                     let menu = toggle_entry(
                         menu,
-                        "A-Z, then Count",
-                        Some("Choose how filter values are sorted in the filter menu"),
+                        n!("A-Z, then Count"),
+                        Some(n!("Choose how filter values are sorted in the filter menu")),
                         settings.filter_sort_order == FilterSortOrder::AlphaThenCount,
                         &view_entity,
                         |settings| settings.filter_sort_order = FilterSortOrder::AlphaThenCount,
                     );
                     let menu = toggle_entry(
                         menu,
-                        "Count, then A-Z",
+                        n!("Count, then A-Z"),
                         None,
                         settings.filter_sort_order == FilterSortOrder::CountThenAlpha,
                         &view_entity,
@@ -96,11 +97,10 @@ pub(crate) fn settings_popover_menu(
 
                     let menu = toggle_entry(
                         menu.separator(),
-                        "Display multiline rows",
-                        Some(
-                            "When enabled, row height grows to show all content. \
-                             When disabled, only the first line is visible — hover a cell to see the rest.",
-                        ),
+                        n!("Display multiline rows"),
+                        Some(n!(
+                            "When enabled, row height grows to show all content. When disabled, only the first line is visible — hover a cell to see the rest."
+                        )),
                         settings.multiline_cells_enabled,
                         &view_entity,
                         |settings| settings.multiline_cells_enabled = !settings.multiline_cells_enabled,

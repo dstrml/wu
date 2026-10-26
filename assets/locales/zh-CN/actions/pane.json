@@ -1,0 +1,146 @@
+{
+  "pane::ActivateItem": {
+    "description": "按序号激活窗格中的指定项。",
+    "name": "激活项"
+  },
+  "pane::ActivateLastItem": {
+    "description": "激活窗格中的最后一项。",
+    "name": "激活最后一项"
+  },
+  "pane::ActivateNextItem": {
+    "description": "激活窗格中的下一项。",
+    "name": "激活下一项"
+  },
+  "pane::ActivatePreviousItem": {
+    "description": "激活窗格中的上一项。",
+    "name": "激活上一项"
+  },
+  "pane::AlternateFile": {
+    "description": "切换到上一个打开的文件。",
+    "name": "切换到上一个文件"
+  },
+  "pane::CloseActiveItem": {
+    "description": "关闭窗格中的当前项。",
+    "name": "关闭当前项"
+  },
+  "pane::CloseAllItems": {
+    "description": "关闭窗格中的所有项。",
+    "name": "关闭所有项"
+  },
+  "pane::CloseCleanItems": {
+    "description": "关闭所有没有未保存更改的项。",
+    "name": "关闭已保存的标签页"
+  },
+  "pane::CloseItemsToTheLeft": {
+    "description": "关闭当前项左侧的所有项。",
+    "name": "关闭左侧的项"
+  },
+  "pane::CloseItemsToTheRight": {
+    "description": "关闭当前项右侧的所有项。",
+    "name": "关闭右侧的项"
+  },
+  "pane::CloseMultibufferItems": {
+    "description": "关闭窗格中的所有多缓冲区。",
+    "name": "关闭多缓冲区"
+  },
+  "pane::CloseOtherItems": {
+    "description": "关闭窗格中所有非活动的项。",
+    "name": "关闭其他项"
+  },
+  "pane::DeploySearch": {
+    "description": "按指定配置打开搜索界面。",
+    "name": "打开搜索"
+  },
+  "pane::GoBack": {
+    "description": "在历史记录中后退。",
+    "name": "后退"
+  },
+  "pane::GoForward": {
+    "description": "在历史记录中前进。",
+    "name": "前进"
+  },
+  "pane::GoToNewerTag": {
+    "description": "在标签栈中前进。",
+    "name": "转到较新的标签"
+  },
+  "pane::GoToOlderTag": {
+    "description": "在标签栈中后退。",
+    "name": "转到较旧的标签"
+  },
+  "pane::JoinAll": {
+    "description": "将所有窗格合并为一个。",
+    "name": "合并所有窗格"
+  },
+  "pane::JoinIntoNext": {
+    "description": "将此窗格合并到下一个窗格。",
+    "name": "合并到下一个窗格"
+  },
+  "pane::ReopenClosedItem": {
+    "description": "重新打开最近关闭的项。",
+    "name": "重新打开已关闭的项"
+  },
+  "pane::RevealInProjectPanel": {
+    "description": "在项目面板中显示当前项。",
+    "name": "在项目面板中显示"
+  },
+  "pane::SplitAndMoveDown": {
+    "description": "向下拆分窗格，并将当前项移过去。",
+    "name": "向下拆分并移动"
+  },
+  "pane::SplitAndMoveLeft": {
+    "description": "向左拆分窗格，并将当前项移过去。",
+    "name": "向左拆分并移动"
+  },
+  "pane::SplitAndMoveRight": {
+    "description": "向右拆分窗格，并将当前项移过去。",
+    "name": "向右拆分并移动"
+  },
+  "pane::SplitAndMoveUp": {
+    "description": "向上拆分窗格，并将当前项移过去。",
+    "name": "向上拆分并移动"
+  },
+  "pane::SplitDown": {
+    "description": "向下拆分窗格。",
+    "name": "向下拆分"
+  },
+  "pane::SplitHorizontal": {
+    "description": "水平拆分窗格。",
+    "name": "水平拆分"
+  },
+  "pane::SplitLeft": {
+    "description": "向左拆分窗格。",
+    "name": "向左拆分"
+  },
+  "pane::SplitRight": {
+    "description": "向右拆分窗格。",
+    "name": "向右拆分"
+  },
+  "pane::SplitUp": {
+    "description": "向上拆分窗格。",
+    "name": "向上拆分"
+  },
+  "pane::SplitVertical": {
+    "description": "垂直拆分窗格。",
+    "name": "垂直拆分"
+  },
+  "pane::SwapItemLeft": {
+    "description": "将当前项与左侧的项交换。",
+    "name": "与左侧项交换"
+  },
+  "pane::SwapItemRight": {
+    "description": "将当前项与右侧的项交换。",
+    "name": "与右侧项交换"
+  },
+  "pane::TogglePinTab": {
+    "description": "固定或取消固定当前标签页。",
+    "name": "切换固定标签页"
+  },
+  "pane::TogglePreviewTab": {
+    "description": "开启或关闭当前标签页的预览模式。",
+    "name": "切换预览标签页"
+  },
+  "pane::UnpinAllTabs": {
+    "description": "取消固定窗格中的所有标签页。",
+    "name": "取消固定所有标签页"
+  }
+}

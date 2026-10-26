@@ -101,6 +101,7 @@ gpui_platform = { workspace = true, features = [
     "x11",
 ] }
 gpui_tokio.workspace = true
+i18n.workspace = true
 image = { workspace = true, optional = true }
 spin = "0.10.0"
 itertools.workspace = true
@@ -187,6 +188,10 @@ wu_env_vars.workspace = true
 zlog.workspace = true
 zlog_settings.workspace = true
 ztracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa.workspace = true
+objc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 etw_tracing.workspace = true

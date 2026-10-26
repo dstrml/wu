@@ -1,0 +1,30 @@
+{
+  "branch_picker::CycleBranchFilter": {
+    "name": "循环切换分支筛选",
+    "description": "循环切换分支筛选条件。"
+  },
+  "branch_picker::DeleteBranch": {
+    "name": "删除分支",
+    "description": "删除所选的 Git 分支或远程仓库。"
+  },
+  "branch_picker::ForceDeleteBranch": {
+    "name": "强制删除分支",
+    "description": "强制删除所选的 Git 分支或远程仓库。"
+  },
+  "branch_picker::ShowAllBranches": {
+    "name": "显示所有分支",
+    "description": "显示所有分支。"
+  },
+  "branch_picker::ShowLocalBranches": {
+    "name": "显示本地分支",
+    "description": "只显示本地分支。"
+  },
+  "branch_picker::ShowRemoteBranches": {
+    "name": "显示远程分支",
+    "description": "只显示远程分支。"
+  },
+  "branch_picker::ToggleFilterMenu": {
+    "name": "切换筛选菜单",
+    "description": "打开或关闭分支筛选菜单。"
+  }
+}

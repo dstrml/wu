@@ -7,6 +7,7 @@ use gpui::{
     Anchor, AnyElement, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     IntoElement, ParentElement, Render, SharedString, Styled, Task, Window, div, point, px,
 };
+use i18n::t;
 use std::time::Duration;
 use theme::ActiveTheme as _;
 use ui::{PopoverMenu, prelude::*};
@@ -21,11 +22,19 @@ struct TaskRow {
     elapsed: SharedString,
 }
 
-fn kind_label(kind: BackgroundTaskKind) -> &'static str {
+fn running_label(kind: BackgroundTaskKind) -> SharedString {
     match kind {
-        BackgroundTaskKind::Shell => "Command",
-        BackgroundTaskKind::Agent => "Agent",
-        BackgroundTaskKind::Other => "Task",
+        BackgroundTaskKind::Shell => t!("Command running"),
+        BackgroundTaskKind::Agent => t!("Agent running"),
+        BackgroundTaskKind::Other => t!("Task running"),
+    }
+}
+
+fn untitled_task(kind: BackgroundTaskKind) -> SharedString {
+    match kind {
+        BackgroundTaskKind::Shell => t!("Background command"),
+        BackgroundTaskKind::Agent => t!("Background agent"),
+        BackgroundTaskKind::Other => t!("Background task"),
     }
 }
 
@@ -60,8 +69,8 @@ impl ChatView {
         let tasks = self.session.read(cx).background_tasks();
         let oldest = tasks.iter().map(|task| task.started_at).min()?;
         let label: SharedString = match tasks {
-            [task] => format!("{} running", kind_label(task.kind)).into(),
-            _ => format!("{} tasks running", tasks.len()).into(),
+            [task] => running_label(task.kind),
+            _ => t!("{count} tasks running", count = tasks.len()),
         };
         let elapsed = format_elapsed(oldest.elapsed().as_secs());
         let colors = cx.theme().colors();
@@ -120,7 +129,7 @@ fn background_rows(session: &AgentSession) -> Vec<TaskRow> {
             } else if let Some(command) = &command {
                 command.clone()
             } else {
-                format!("Background {}", kind_label(task.kind).to_lowercase()).into()
+                untitled_task(task.kind)
             };
             TaskRow {
                 kind: task.kind,
@@ -176,7 +185,7 @@ impl Render for BackgroundTasksCard {
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| cx.emit(DismissEvent)))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
             .max_w(px(CARD_MAX_WIDTH))
-            .child(menu_heading("Background tasks", cx))
+            .child(menu_heading(&t!("Background tasks"), cx))
             .when(rows.is_empty(), |this| {
                 this.child(
                     div()
@@ -184,7 +193,7 @@ impl Render for BackgroundTasksCard {
                         .pb(px(6.))
                         .text_size(ui(12.))
                         .text_color(muted)
-                        .child("Nothing is running in the background."),
+                        .child(t!("Nothing is running in the background.")),
                 )
             })
             .child(

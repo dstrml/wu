@@ -1,5 +1,6 @@
 use editor::{Editor, MultiBuffer};
 use gpui::{AnyElement, Entity, Modifiers};
+use i18n::{n, t};
 use markdown_preview::markdown_preview_view::MarkdownPreviewView;
 use svg_preview::svg_preview_view::SvgPreviewView;
 use tabular_data_preview::TabularDataPreviewPane;
@@ -40,17 +41,17 @@ impl QuickActionBar {
         let (button_id, tooltip_text, open_action_for_tooltip) = match &preview_target {
             PreviewTarget::Markdown(_) => (
                 "toggle-markdown-preview",
-                "Preview Markdown",
+                n!("Preview Markdown"),
                 &markdown_preview::OpenPreview as &dyn gpui::Action,
             ),
             PreviewTarget::Svg(_) => (
                 "toggle-svg-preview",
-                "Preview SVG",
+                n!("Preview SVG"),
                 &svg_preview::OpenPreview as &dyn gpui::Action,
             ),
             PreviewTarget::TabularData(_) => (
                 "toggle-tabular-preview",
-                "Preview Tabular Data",
+                n!("Preview Tabular Data"),
                 &tabular_data_preview::OpenPreview as &dyn gpui::Action,
             ),
         };
@@ -66,11 +67,11 @@ impl QuickActionBar {
             .style(ButtonStyle::Subtle)
             .tooltip(move |_window, cx| {
                 Tooltip::with_meta(
-                    tooltip_text,
+                    i18n::translate(tooltip_text),
                     Some(open_action_for_tooltip),
-                    format!(
-                        "{} to open in a split",
-                        text_for_keystroke(&alt_click.modifiers, &alt_click.key, cx)
+                    t!(
+                        "{keystroke} to open in a split",
+                        keystroke = text_for_keystroke(&alt_click.modifiers, &alt_click.key, cx)
                     ),
                     cx,
                 )

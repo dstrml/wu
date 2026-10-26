@@ -1,0 +1,6 @@
+{
+  "icon_theme_selector::Toggle": {
+    "description": "打开或关闭图标主题选择器。",
+    "name": "切换图标主题选择器"
+  }
+}

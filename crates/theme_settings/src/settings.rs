@@ -45,6 +45,10 @@ pub struct ThemeSettings {
     ///
     /// Changing this will impact the size of all UI elements.
     ui_font_size: Pixels,
+    /// The language of the UI, with `system` already resolved.
+    pub ui_language: i18n::Language,
+    /// Whether the UI language was left to follow the system.
+    pub ui_language_follows_system: bool,
     /// The font used for UI elements.
     pub ui_font: Font,
     /// The font size used for buffers, and the terminal.
@@ -699,15 +703,35 @@ pub fn clamp_font_size(size: Pixels) -> Pixels {
 
 fn font_fallbacks_from_settings(
     fallbacks: Option<Vec<settings::FontFamilyName>>,
+    language: i18n::Language,
 ) -> Option<FontFallbacks> {
-    fallbacks.map(|fallbacks| {
-        FontFallbacks::from_fonts(
-            fallbacks
-                .into_iter()
-                .map(|font_family| font_family.0.to_string())
-                .collect(),
-        )
-    })
+    let mut fonts = fallbacks
+        .unwrap_or_default()
+        .into_iter()
+        .map(|font_family| font_family.0.to_string())
+        .collect::<Vec<_>>();
+    if language == i18n::Language::SimplifiedChinese
+        && !fonts.iter().any(|font| font == SIMPLIFIED_CHINESE_FONT)
+    {
+        fonts.push(SIMPLIFIED_CHINESE_FONT.to_string());
+    }
+    (!fonts.is_empty()).then(|| FontFallbacks::from_fonts(fonts))
+}
+
+// Without an explicit fallback, macOS can draw Chinese text with a Japanese font.
+#[cfg(target_os = "macos")]
+const SIMPLIFIED_CHINESE_FONT: &str = "PingFang SC";
+#[cfg(target_os = "windows")]
+const SIMPLIFIED_CHINESE_FONT: &str = "Microsoft YaHei UI";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const SIMPLIFIED_CHINESE_FONT: &str = "Noto Sans CJK SC";
+
+fn ui_language_from_settings(language: Option<settings::UiLanguage>) -> i18n::Language {
+    match language.unwrap_or_default() {
+        settings::UiLanguage::System => i18n::Language::system(),
+        settings::UiLanguage::English => i18n::Language::English,
+        settings::UiLanguage::SimplifiedChinese => i18n::Language::SimplifiedChinese,
+    }
 }
 
 impl settings::Settings for ThemeSettings {
@@ -715,12 +739,19 @@ impl settings::Settings for ThemeSettings {
         let content = &content.theme;
         let theme_selection: ThemeSelection = content.theme.clone().unwrap().into();
         let icon_theme_selection: IconThemeSelection = content.icon_theme.clone().unwrap().into();
+        let ui_language = ui_language_from_settings(content.ui_language);
         Self {
             ui_font_size: clamp_font_size(content.ui_font_size.unwrap().into_gpui()),
+            ui_language,
+            ui_language_follows_system: content.ui_language.unwrap_or_default()
+                == settings::UiLanguage::System,
             ui_font: Font {
                 family: content.ui_font_family.as_ref().unwrap().0.clone().into(),
                 features: content.ui_font_features.clone().unwrap().into_gpui(),
-                fallbacks: font_fallbacks_from_settings(content.ui_font_fallbacks.clone()),
+                fallbacks: font_fallbacks_from_settings(
+                    content.ui_font_fallbacks.clone(),
+                    ui_language,
+                ),
                 weight: content.ui_font_weight.unwrap().into_gpui(),
                 style: Default::default(),
             },
@@ -733,7 +764,10 @@ impl settings::Settings for ThemeSettings {
                     .clone()
                     .into(),
                 features: content.buffer_font_features.clone().unwrap().into_gpui(),
-                fallbacks: font_fallbacks_from_settings(content.buffer_font_fallbacks.clone()),
+                fallbacks: font_fallbacks_from_settings(
+                    content.buffer_font_fallbacks.clone(),
+                    ui_language,
+                ),
                 weight: content.buffer_font_weight.unwrap().into_gpui(),
                 style: FontStyle::default(),
             },

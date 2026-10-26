@@ -1,0 +1,4 @@
+{
+  "Could not install the Go language server `gopls`, because `go` was not found.": "无法安装 Go 语言服务器 `gopls`，因为找不到 `go`。",
+  "Virtual Environment": "虚拟环境"
+}

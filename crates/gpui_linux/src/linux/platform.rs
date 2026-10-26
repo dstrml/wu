@@ -380,15 +380,15 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
         self.foreground_executor()
             .spawn(async move {
                 let title = if options.directories {
-                    "Open Folder"
+                    i18n::t!("Open Folder")
                 } else {
-                    "Open File"
+                    i18n::t!("Open File")
                 };
 
                 let request = match ashpd::desktop::file_chooser::OpenFileRequest::default()
                     .identifier(identifier.await)
                     .modal(true)
-                    .title(title)
+                    .title(title.as_str())
                     .accept_label(options.prompt.as_ref().map(gpui::SharedString::as_str))
                     .multiple(options.multiple)
                     .directory(options.directories)
@@ -448,7 +448,7 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
                         ashpd::desktop::file_chooser::SaveFileRequest::default()
                             .identifier(identifier.await)
                             .modal(true)
-                            .title("Save File")
+                            .title(i18n::t!("Save File").as_str())
                             .current_folder(directory)
                             .expect("pathbuf should not be nul terminated");
 

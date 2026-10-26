@@ -1,0 +1,21 @@
+{
+  "Clear Filter": "清除筛选",
+  "Copy Path": "复制路径",
+  "Copy Relative Path": "复制相对路径",
+  "Fold Directory": "合并文件夹",
+  "Hide Symbols": "隐藏符号",
+  "Lines {start}- {end}": "第 {start}-{end} 行",
+  "No matches for query": "没有与查询匹配的结果",
+  "No outlines available": "没有可用的大纲",
+  "Open in Terminal": "在终端中打开",
+  "Outline Panel": "大纲面板",
+  "Pin Active Outline": "固定当前大纲",
+  "Search buffer symbols…": "搜索缓冲区符号…",
+  "Searching:": "正在搜索：",
+  "Show Symbols": "显示符号",
+  "Toggle Panel With": "切换面板：",
+  "Unfold Directory": "取消合并文件夹",
+  "Unknown buffer": "未知缓冲区",
+  "Unpin Outline": "取消固定大纲",
+  "Untitled": "未命名"
+}

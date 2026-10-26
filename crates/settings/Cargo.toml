@@ -22,6 +22,7 @@ ec4rs.workspace = true
 fs.workspace = true
 futures.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 inventory.workspace = true
 log.workspace = true
 paths.workspace = true

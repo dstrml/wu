@@ -1,0 +1,213 @@
+{
+  "wu::About": {
+    "description": "显示 Wu 的相关信息。",
+    "name": "关于"
+  },
+  "wu::CopySystemSpecsIntoClipboard": {
+    "description": "将系统信息复制到剪贴板，用于提交问题报告。",
+    "name": "复制系统信息到剪贴板"
+  },
+  "wu::DebugElements": {
+    "description": "打开元素检查器以调试界面。",
+    "name": "调试元素"
+  },
+  "wu::DecreaseBufferFontSize": {
+    "description": "减小编辑器缓冲区的字号。",
+    "name": "减小编辑器字号"
+  },
+  "wu::DecreaseUiFontSize": {
+    "description": "减小用户界面的字号。",
+    "name": "减小界面字号"
+  },
+  "wu::Extensions": {
+    "description": "打开扩展管理界面。",
+    "name": "扩展"
+  },
+  "wu::Hide": {
+    "description": "隐藏应用窗口。",
+    "name": "隐藏"
+  },
+  "wu::HideOthers": {
+    "description": "隐藏其他所有应用的窗口。",
+    "name": "隐藏其他"
+  },
+  "wu::ImportCursorSettings": {
+    "description": "从 Cursor 编辑器导入设置。",
+    "name": "导入 Cursor 设置"
+  },
+  "wu::ImportVsCodeSettings": {
+    "description": "从 Visual Studio Code 导入设置。",
+    "name": "导入 VS Code 设置"
+  },
+  "wu::IncreaseBufferFontSize": {
+    "description": "增大编辑器缓冲区的字号。",
+    "name": "增大编辑器字号"
+  },
+  "wu::IncreaseUiFontSize": {
+    "description": "增大用户界面的字号。",
+    "name": "增大界面字号"
+  },
+  "wu::InstallDevExtension": {
+    "description": "从本地文件夹安装扩展，用于开发。",
+    "name": "安装开发扩展"
+  },
+  "wu::Minimize": {
+    "description": "最小化当前窗口。",
+    "name": "最小化"
+  },
+  "wu::NoAction": {
+    "description": "一个有特殊处理的命令：如果它是优先级最高的匹配项，就会取消与之关联的快捷键。",
+    "name": "无操作"
+  },
+  "wu::OpenBrowser": {
+    "description": "在系统默认的网页浏览器中打开 URL。",
+    "name": "打开浏览器"
+  },
+  "wu::OpenDebugTasks": {
+    "description": "打开调试任务配置。",
+    "name": "打开调试任务"
+  },
+  "wu::OpenDefaultKeymap": {
+    "description": "打开默认键位映射文件。",
+    "name": "打开默认键位映射"
+  },
+  "wu::OpenDefaultSettings": {
+    "description": "打开默认设置文件。",
+    "name": "打开默认设置"
+  },
+  "wu::OpenDocs": {
+    "description": "打开文档网站。",
+    "name": "打开文档"
+  },
+  "wu::OpenKeymap": {
+    "description": "打开键位映射编辑器。",
+    "name": "打开键位映射"
+  },
+  "wu::OpenKeymapFile": {
+    "description": "打开用户键位映射文件。",
+    "name": "打开键位映射文件"
+  },
+  "wu::OpenLicenses": {
+    "description": "查看开源许可证。",
+    "name": "查看开源许可证"
+  },
+  "wu::OpenLog": {
+    "description": "打开 Wu 的日志文件。",
+    "name": "打开日志"
+  },
+  "wu::OpenOnboarding": {
+    "description": "打开新手引导页面。",
+    "name": "打开新手引导"
+  },
+  "wu::OpenPerformanceProfiler": {
+    "description": "打开性能分析器。",
+    "name": "打开性能分析器"
+  },
+  "wu::OpenProjectSettings": {
+    "description": "打开项目专属的设置。",
+    "name": "打开项目设置"
+  },
+  "wu::OpenProjectSettingsFile": {
+    "description": "打开项目专属的设置文件。",
+    "name": "打开项目设置文件"
+  },
+  "wu::OpenProjectTasks": {
+    "description": "打开项目任务配置。",
+    "name": "打开项目任务"
+  },
+  "wu::OpenServerSettings": {
+    "description": "打开服务器设置。",
+    "name": "打开服务器设置"
+  },
+  "wu::OpenSettings": {
+    "description": "打开设置编辑器。",
+    "name": "打开设置"
+  },
+  "wu::OpenSettingsAt": {
+    "description": "打开设置编辑器并定位到指定路径。",
+    "name": "打开设置到指定位置"
+  },
+  "wu::OpenSettingsFile": {
+    "description": "打开设置 JSON 文件。",
+    "name": "打开设置文件"
+  },
+  "wu::OpenSettingsPage": {
+    "name": "打开设置页面"
+  },
+  "wu::OpenTasks": {
+    "description": "打开任务面板。",
+    "name": "打开任务"
+  },
+  "wu::OpenWorktreeSetupTasks": {
+    "description": "打开项目任务配置，并附带工作树初始化的说明。",
+    "name": "打开工作树初始化任务"
+  },
+  "wu::OpenWuUrl": {
+    "description": "在应用内打开 wu:// 链接。",
+    "name": "打开 Wu 链接"
+  },
+  "wu::Quit": {
+    "description": "退出应用。",
+    "name": "退出"
+  },
+  "wu::RebuildDevExtension": {
+    "description": "重新构建已安装的开发扩展。",
+    "name": "重新构建开发扩展"
+  },
+  "wu::ReloadExtensions": {
+    "description": "重新加载所有已安装的扩展。",
+    "name": "重新加载扩展"
+  },
+  "wu::ResetAllZoom": {
+    "description": "将所有缩放级别（界面和编辑器字号，包括智能体面板中的）恢复为默认值。",
+    "name": "重置所有缩放"
+  },
+  "wu::ResetBufferFontSize": {
+    "description": "将编辑器缓冲区字号恢复为默认值。",
+    "name": "重置编辑器字号"
+  },
+  "wu::ResetDatabase": {
+    "description": "重置应用数据库。",
+    "name": "重置数据库"
+  },
+  "wu::ResetUiFontSize": {
+    "description": "将界面字号恢复为默认值。",
+    "name": "重置界面字号"
+  },
+  "wu::RevealLogInFileManager": {
+    "description": "在系统文件管理器中显示 Wu 的日志文件。",
+    "name": "在文件管理器中显示日志"
+  },
+  "wu::ShowAll": {
+    "description": "显示所有隐藏的窗口。",
+    "name": "全部显示"
+  },
+  "wu::ShowDefaultSemanticTokenRules": {
+    "description": "显示默认的语义标记规则（只读）。",
+    "name": "显示默认语义标记规则"
+  },
+  "wu::ShowUpdateNotification": {
+    "description": "显示自动更新通知，用于测试。",
+    "name": "显示更新通知"
+  },
+  "wu::ShowWelcome": {
+    "description": "显示 Wu 的欢迎页。",
+    "name": "显示欢迎页"
+  },
+  "wu::ToggleBaseKeymapSelector": {
+    "description": "打开或关闭基础键位映射选择对话框。",
+    "name": "切换基础键位映射选择器"
+  },
+  "wu::ToggleFullScreen": {
+    "description": "进入或退出全屏模式。",
+    "name": "切换全屏"
+  },
+  "wu::Unbind": {
+    "description": "一个有特殊处理的命令：当后续绑定到相同按键的快捷键要执行指定的命令时，取消这些绑定，不论该命令的上下文是什么。\n\n在键位映射 JSON 中写作：\n\n`[\"wu::Unbind\", \"editor::NewLine\"]`",
+    "name": "取消绑定"
+  },
+  "wu::Zoom": {
+    "description": "缩放窗口。",
+    "name": "缩放"
+  }
+}

@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use collections::HashMap;
 use dap::{StartDebuggingRequestArguments, adapters::DebugTaskDefinition};
 use gpui::AsyncApp;
+use i18n::t;
 use std::ffi::OsStr;
 use task::{DebugScenario, ZedDebugConfig};
 
@@ -205,7 +206,7 @@ impl DebugAdapter for GdbDebugAdapter {
                 .context("Could not find gdb in path");
 
             if gdb_path_result.is_err() && user_setting_path.is_none() {
-                bail!("Could not find gdb path or it's not installed");
+                bail!(t!("Could not find gdb path or it's not installed"));
             }
 
             user_setting_path.unwrap_or_else(|| gdb_path_result.unwrap())

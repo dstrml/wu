@@ -1,6 +1,7 @@
 //! Table Cell Rendering
 
 use gpui::{AnyElement, ClipboardItem, ElementId, MouseButton, StatefulInteractiveElement};
+use i18n::n;
 use ui::{Color, Divider, Label, LabelSize, SharedString, Tooltip, div, prelude::*};
 
 use crate::{TabularDataPreviewPane, settings::VerticalAlignment, types::DisplayCellId};
@@ -25,7 +26,11 @@ pub(crate) fn with_copy_on_right_click<E: StatefulInteractiveElement>(
                 .gap_1()
                 .child(div().font_buffer(cx).child(text.clone()))
                 .child(Divider::horizontal())
-                .child(Label::new(hint).size(LabelSize::Small).color(Color::Muted))
+                .child(
+                    Label::new(i18n::translate(hint))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
                 .into_any_element()
         }))
 }
@@ -65,6 +70,10 @@ fn create_table_cell(
             VerticalAlignment::Center => div.items_center(),
         })
         .font_buffer(cx);
-    with_copy_on_right_click(cell, cell_content.clone(), "Right click to copy content")
-        .child(div().child(cell_content))
+    with_copy_on_right_click(
+        cell,
+        cell_content.clone(),
+        n!("Right click to copy content"),
+    )
+    .child(div().child(cell_content))
 }

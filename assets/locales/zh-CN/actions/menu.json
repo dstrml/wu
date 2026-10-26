@@ -1,0 +1,45 @@
+{
+  "menu::Cancel": {
+    "description": "取消当前的菜单操作。",
+    "name": "取消"
+  },
+  "menu::Confirm": {
+    "description": "确认所选的菜单项。",
+    "name": "确认"
+  },
+  "menu::EndSlot": {
+    "name": "执行行尾按钮"
+  },
+  "menu::Restart": {
+    "description": "从头重新开始菜单。",
+    "name": "回到开头"
+  },
+  "menu::SecondaryConfirm": {
+    "description": "执行次要的确认操作。",
+    "name": "次要确认"
+  },
+  "menu::SelectChild": {
+    "description": "进入子菜单。",
+    "name": "进入子菜单"
+  },
+  "menu::SelectFirst": {
+    "description": "选择菜单中的第一项。",
+    "name": "选择第一项"
+  },
+  "menu::SelectLast": {
+    "description": "选择菜单中的最后一项。",
+    "name": "选择最后一项"
+  },
+  "menu::SelectNext": {
+    "description": "选择菜单中的下一项。",
+    "name": "选择下一项"
+  },
+  "menu::SelectParent": {
+    "description": "退出子菜单，回到上级菜单。",
+    "name": "返回上级菜单"
+  },
+  "menu::SelectPrevious": {
+    "description": "选择菜单中的上一项。",
+    "name": "选择上一项"
+  }
+}

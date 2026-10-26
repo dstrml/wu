@@ -5,6 +5,7 @@ use gpui::{
     AnyElement, App, Context, HighlightStyle, Hsla, IntoElement, ParentElement, SharedString,
     Styled, StyledText, div, hsla, px,
 };
+use i18n::t;
 use language::{HighlightId, Rope};
 use std::{ops::Range, path::Path, sync::Arc};
 use theme::ActiveTheme as _;
@@ -226,14 +227,15 @@ impl ChatView {
             .unwrap_or(1)
             .max(1);
         let gutter_width = ((max_line.ilog10() + 1) as f32 * 6.6 + 8. + 6.).max(GUTTER_WIDTH);
-        let mut notices: Vec<String> = Vec::new();
+        let mut notices: Vec<SharedString> = Vec::new();
         if view.new_file {
-            notices.push("New file".to_string());
+            notices.push(t!("New file"));
         }
         if view.hidden > 0 {
-            notices.push(format!(
-                "Diff truncated – showing first {MAX_DIFF_LINES} of {} lines",
-                MAX_DIFF_LINES + view.hidden
+            notices.push(t!(
+                "Diff truncated – showing first {shown} of {total} lines",
+                shown = MAX_DIFF_LINES,
+                total = MAX_DIFF_LINES + view.hidden
             ));
         }
         let mut rows: Vec<AnyElement> = notices

@@ -1,0 +1,10 @@
+{
+  "terminal_panel::Toggle": {
+    "name": "切换终端面板",
+    "description": "切换终端面板。"
+  },
+  "terminal_panel::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "切换终端面板的焦点。"
+  }
+}

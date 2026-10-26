@@ -3,6 +3,7 @@ use anyhow::Context as _;
 use collections::HashMap;
 use dap::{StartDebuggingRequestArguments, adapters::DebugTaskDefinition};
 use gpui::AsyncApp;
+use i18n::t;
 use serde_json::Value;
 use std::{path::PathBuf, sync::OnceLock};
 use task::DebugRequest;
@@ -509,7 +510,9 @@ impl DebugAdapter for JsDebugAdapter {
         cx: &mut AsyncApp,
     ) -> Result<DebugAdapterBinary> {
         if self.checked.set(()).is_ok() {
-            delegate.output_to_console(format!("Checking latest version of {}...", self.name()));
+            delegate.output_to_console(
+                t!("Checking latest version of {name}...", name = self.name()).to_string(),
+            );
             if let Some(version) = self.fetch_latest_adapter_version(delegate).await.log_err() {
                 adapters::download_adapter_from_github(
                     self.name(),
@@ -519,7 +522,9 @@ impl DebugAdapter for JsDebugAdapter {
                 )
                 .await?;
             } else {
-                delegate.output_to_console(format!("{} debug adapter is up to date", self.name()));
+                delegate.output_to_console(
+                    t!("{name} debug adapter is up to date", name = self.name()).to_string(),
+                );
             }
         }
 

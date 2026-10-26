@@ -5,6 +5,7 @@ use file_icons::FileIcons;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::{DismissEvent, EventEmitter, FocusHandle, Focusable, Task, rems};
+use i18n::t;
 use time::{OffsetDateTime, UtcOffset};
 use time_format::TimestampFormat;
 use ui::{ElevationIndex, Modal, ModalFooter, ModalHeader, Section, prelude::*};
@@ -146,8 +147,8 @@ impl FileInfoModal {
         }
     }
 
-    fn rows(&self) -> Vec<(&'static str, String)> {
-        let mut rows = vec![("Where", self.path.to_string_lossy().into_owned())];
+    fn rows(&self) -> Vec<(SharedString, String)> {
+        let mut rows = vec![(t!("Where"), self.path.to_string_lossy().into_owned())];
         let State::Loaded {
             details,
             size,
@@ -158,45 +159,44 @@ impl FileInfoModal {
         };
 
         let kind = match &details.kind {
-            Kind::File => "File".to_string(),
-            Kind::Folder => "Folder".to_string(),
-            Kind::Symlink(target) => format!("Symbolic link to {}", target.display()),
+            Kind::File => t!("File"),
+            Kind::Folder => t!("Folder"),
+            Kind::Symlink(target) => t!("Symbolic link to {target}", target = target.display()),
         };
-        rows.push(("Kind", kind));
+        rows.push((t!("Kind"), kind.to_string()));
 
         match totals {
             Some(totals) => {
-                let mut size_text = format_size(totals.size);
-                if totals.scanning {
-                    size_text.push_str(" (calculating…)");
-                }
-                rows.push(("Size", size_text));
+                let size_text = if totals.scanning {
+                    t!("{size} (calculating…)", size = format_size(totals.size)).to_string()
+                } else {
+                    format_size(totals.size)
+                };
+                rows.push((t!("Size"), size_text));
                 rows.push((
-                    "Contains",
-                    format!(
-                        "{} {}, {} {}",
-                        totals.files,
-                        plural(totals.files, "file"),
-                        totals.folders,
-                        plural(totals.folders, "folder"),
-                    ),
+                    t!("Contains"),
+                    t!(
+                        "{files}, {folders}",
+                        files = file_count_text(totals.files),
+                        folders = folder_count_text(totals.folders)
+                    )
+                    .to_string(),
                 ));
             }
-            None => rows.push(("Size", format_size(*size))),
+            None => rows.push((t!("Size"), format_size(*size))),
         }
 
-        rows.push(("Created", format_timestamp(details.created)));
-        rows.push(("Modified", format_timestamp(details.modified)));
+        rows.push((t!("Created"), format_timestamp(details.created)));
+        rows.push((t!("Modified"), format_timestamp(details.modified)));
 
-        let mut permissions = vec![];
-        if details.read_only {
-            permissions.push("Read only");
-        }
-        if details.executable {
-            permissions.push("Executable");
-        }
-        if !permissions.is_empty() {
-            rows.push(("Permissions", permissions.join(", ")));
+        let permissions = match (details.read_only, details.executable) {
+            (true, true) => Some(t!("Read only, Executable")),
+            (true, false) => Some(t!("Read only")),
+            (false, true) => Some(t!("Executable")),
+            (false, false) => None,
+        };
+        if let Some(permissions) = permissions {
+            rows.push((t!("Permissions"), permissions.to_string()));
         }
 
         rows
@@ -214,7 +214,7 @@ impl Render for FileInfoModal {
         let mut section = Section::new();
         match &self.state {
             State::Loading => {
-                section = section.child(Label::new("Loading…").color(Color::Muted));
+                section = section.child(Label::new(t!("Loading…")).color(Color::Muted));
             }
             State::Failed(error) => {
                 section = section.child(Label::new(error.clone()).color(Color::Error));
@@ -258,7 +258,7 @@ impl Render for FileInfoModal {
                     .section(section)
                     .footer(
                         ModalFooter::new().end_slot(
-                            Button::new("copy-path", "Copy Path")
+                            Button::new("copy-path", t!("Copy Path"))
                                 .style(ButtonStyle::Filled)
                                 .layer(ElevationIndex::ModalSurface)
                                 .on_click(
@@ -363,14 +363,18 @@ fn is_executable(_metadata: &std::fs::Metadata) -> bool {
 }
 
 fn format_size(size: u64) -> String {
-    if size < 1000 {
-        return format!("{} {}", size, plural(size as usize, "byte"));
+    if size == 1 {
+        return t!("1 byte").to_string();
     }
-    format!(
-        "{} ({} bytes)",
-        format_file_size(size, true),
-        with_thousands_separators(size)
+    if size < 1000 {
+        return t!("{count} bytes", count = size).to_string();
+    }
+    t!(
+        "{size} ({count} bytes)",
+        size = format_file_size(size, true),
+        count = with_thousands_separators(size)
     )
+    .to_string()
 }
 
 fn with_thousands_separators(value: u64) -> String {
@@ -398,10 +402,18 @@ fn format_timestamp(timestamp: Option<OffsetDateTime>) -> String {
     )
 }
 
-fn plural(count: usize, noun: &str) -> String {
+fn file_count_text(count: usize) -> SharedString {
     if count == 1 {
-        noun.to_string()
+        t!("1 file")
     } else {
-        format!("{noun}s")
+        t!("{count} files", count = count)
+    }
+}
+
+fn folder_count_text(count: usize) -> SharedString {
+    if count == 1 {
+        t!("1 folder")
+    } else {
+        t!("{count} folders", count = count)
     }
 }

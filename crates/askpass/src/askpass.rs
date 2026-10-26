@@ -527,8 +527,9 @@ fn generate_gpg_wrapper_script(
         .try_shell_safe(shell_kind)
         .context("Failed to shell-escape Askpass socket path")?;
 
+    let prompt_text = i18n::t!("Enter passphrase for your Git signing key:");
     let prompt = shell_kind
-        .try_quote_prefix_aware("Enter passphrase for your Git signing key:")
+        .try_quote_prefix_aware(&prompt_text)
         .context("Failed to shell-escape gpg passphrase prompt")?;
 
     // The wrapper only intervenes when git asks gpg to *sign* (e.g. `gpg -bsau

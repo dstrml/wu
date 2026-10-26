@@ -1,0 +1,6 @@
+{
+  "git_onboarding::OpenGitIntegrationOnboarding": {
+    "name": "打开 Git 集成新手引导",
+    "description": "打开 Git 集成新手引导对话框。"
+  }
+}

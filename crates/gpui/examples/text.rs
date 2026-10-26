@@ -358,6 +358,7 @@ fn run_example() {
             name: "GPUI Typography".into(),
             disabled: false,
             items: vec![],
+            window_menu: false,
         }]);
 
         let fonts = [include_bytes!(

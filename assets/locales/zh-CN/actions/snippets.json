@@ -1,0 +1,10 @@
+{
+  "snippets::ConfigureSnippets": {
+    "name": "配置代码片段",
+    "description": "打开代码片段配置文件。"
+  },
+  "snippets::OpenFolder": {
+    "name": "打开文件夹",
+    "description": "在文件管理器中打开代码片段文件夹。"
+  }
+}

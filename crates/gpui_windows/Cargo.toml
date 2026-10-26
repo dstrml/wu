@@ -17,6 +17,7 @@ test-support = ["gpui/test-support"]
 
 [dependencies]
 gpui.workspace = true
+i18n.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 accesskit.workspace = true

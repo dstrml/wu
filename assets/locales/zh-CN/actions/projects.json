@@ -1,0 +1,18 @@
+{
+  "projects::OpenFolderInWsl": {
+    "description": "在 WSL 中打开一个文件夹。",
+    "name": "在 WSL 中打开文件夹"
+  },
+  "projects::OpenRecent": {
+    "description": "打开最近的项目列表。",
+    "name": "打开最近的项目"
+  },
+  "projects::OpenRemote": {
+    "description": "从所选模板创建项目。",
+    "name": "打开远程项目"
+  },
+  "projects::OpenWsl": {
+    "description": "打开一个 WSL 发行版。",
+    "name": "打开 WSL"
+  }
+}

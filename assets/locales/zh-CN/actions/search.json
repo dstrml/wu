@@ -1,0 +1,62 @@
+{
+  "search::CycleMode": {
+    "name": "切换搜索模式",
+    "description": "循环切换搜索模式。"
+  },
+  "search::FocusSearch": {
+    "name": "聚焦搜索",
+    "description": "将焦点移到搜索输入框。"
+  },
+  "search::NextHistoryQuery": {
+    "name": "下一条搜索历史",
+    "description": "转到搜索历史记录中的下一条搜索内容。"
+  },
+  "search::PreviousHistoryQuery": {
+    "name": "上一条搜索历史",
+    "description": "转到搜索历史记录中的上一条搜索内容。"
+  },
+  "search::ReplaceAll": {
+    "name": "全部替换",
+    "description": "替换所有匹配项。"
+  },
+  "search::ReplaceNext": {
+    "name": "替换下一个",
+    "description": "替换下一个匹配项。"
+  },
+  "search::SelectAllMatches": {
+    "name": "选择所有匹配项",
+    "description": "选择所有搜索匹配项。"
+  },
+  "search::SelectNextMatch": {
+    "name": "选择下一个匹配项",
+    "description": "选择下一个搜索匹配项。"
+  },
+  "search::SelectPreviousMatch": {
+    "name": "选择上一个匹配项",
+    "description": "选择上一个搜索匹配项。"
+  },
+  "search::ToggleCaseSensitive": {
+    "name": "切换区分大小写",
+    "description": "切换是否区分大小写搜索。"
+  },
+  "search::ToggleIncludeIgnored": {
+    "name": "切换包含已忽略的文件",
+    "description": "切换是否在已忽略的文件中搜索。"
+  },
+  "search::ToggleRegex": {
+    "name": "切换正则表达式",
+    "description": "切换正则表达式模式。"
+  },
+  "search::ToggleReplace": {
+    "name": "切换替换",
+    "description": "切换替换界面。"
+  },
+  "search::ToggleSelection": {
+    "name": "切换在选区中搜索",
+    "description": "切换是否只在选区内搜索。"
+  },
+  "search::ToggleWholeWord": {
+    "name": "切换全字匹配",
+    "description": "切换全字匹配。"
+  }
+}

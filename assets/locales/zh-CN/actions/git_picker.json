@@ -1,0 +1,8 @@
+{
+  "git_picker::ActivateBranchesTab": {
+    "name": "切换到“分支”标签页"
+  },
+  "git_picker::ActivateStashTab": {
+    "name": "切换到“储藏”标签页"
+  }
+}

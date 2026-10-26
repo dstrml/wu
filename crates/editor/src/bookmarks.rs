@@ -3,6 +3,7 @@ use std::{cmp::Reverse, ops::Range};
 use collections::{HashMap, HashSet};
 use futures::{StreamExt as _, channel::mpsc};
 use gpui::{AppContext as _, Entity, EventEmitter, Subscription, Task};
+use i18n::t;
 use language::Buffer;
 use multi_buffer::{
     Anchor, Event as MultiBufferEvent, MultiBuffer, MultiBufferOffset, MultiBufferSnapshot,
@@ -221,7 +222,7 @@ impl Editor {
         self.add_edit_block(
             target.anchor,
             label,
-            "Enter bookmark label (Optional)",
+            &t!("Enter bookmark label (Optional)"),
             Some(Box::new(move |label, _, cx| {
                 bookmark_store.update(cx, |store, cx| {
                     store.edit_bookmark(&target.buffer, target.buffer_anchor, label, cx)
@@ -245,7 +246,7 @@ impl Editor {
             self.add_edit_block(
                 target.anchor,
                 "",
-                "Enter bookmark label (Optional)",
+                &t!("Enter bookmark label (Optional)"),
                 Some(Box::new(move |label: String, _, cx| {
                     bookmark_store.update(cx, |store, cx| {
                         store.toggle_bookmark(target.buffer, target.buffer_anchor, label, cx);
@@ -378,8 +379,9 @@ impl Editor {
                     }
 
                     let capability = workspace.project().read(cx).capability();
-                    let excerpt_buffer =
-                        cx.new(|_cx| MultiBuffer::new(capability).with_title("Bookmarks".into()));
+                    let excerpt_buffer = cx.new(|_cx| {
+                        MultiBuffer::new(capability).with_title(t!("Bookmarks").to_string())
+                    });
                     let bookmarks_tab_state = cx.new(|cx| {
                         BookmarksTabState::new(
                             excerpt_buffer.clone(),

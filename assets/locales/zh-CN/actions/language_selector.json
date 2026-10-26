@@ -1,0 +1,6 @@
+{
+  "language_selector::Toggle": {
+    "name": "切换语言选择器",
+    "description": "切换语言选择器弹窗。"
+  }
+}

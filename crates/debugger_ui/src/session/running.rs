@@ -35,6 +35,7 @@ use gpui::{
     Action as _, AnyView, AppContext, Axis, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
     NoAction, Pixels, Point, Subscription, Task, TaskExt, WeakEntity,
 };
+use i18n::t;
 use language::Buffer;
 use loaded_source_list::LoadedSourceList;
 use module_list::ModuleList;
@@ -377,10 +378,7 @@ impl Item for SubView {
 impl Render for SubView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
-            .id(format!(
-                "subview-container-{}",
-                self.kind.to_shared_string()
-            ))
+            .id(format!("subview-container-{:?}", self.kind))
             .size_full()
             .border_1()
             .when(self.item_focus_handle.contains_focused(window, cx), |el| {
@@ -593,7 +591,7 @@ fn render_debugger_tab_bar(
                     .tooltip({
                         let focus_handle = focus_handle.clone();
                         move |_window, cx| {
-                            let zoomed_text = if zoomed { "Minimize" } else { "Expand" };
+                            let zoomed_text = if zoomed { t!("Minimize") } else { t!("Expand") };
                             Tooltip::for_action_in(
                                 zoomed_text,
                                 &ToggleExpandItem,
@@ -1096,7 +1094,7 @@ impl RunningState {
                 }).ok();
 
                 let Some(process_id) = rx.await.ok().flatten() else {
-                    bail!("No process selected with config that contains {}", PROCESS_ID_PLACEHOLDER.as_str())
+                    bail!(t!("No process selected with config that contains {placeholder}", placeholder = PROCESS_ID_PLACEHOLDER.as_str()))
                 };
 
                 Self::substitute_process_id_in_config(&mut config, process_id);
@@ -1104,7 +1102,7 @@ impl RunningState {
 
             let request_type = match dap_registry
                 .adapter(&adapter)
-                .with_context(|| format!("{adapter}: is not a valid adapter name")) {
+                .with_context(|| t!("{adapter}: is not a valid adapter name", adapter = adapter)) {
                     Ok(adapter) => adapter.request_kind(&config).await,
                     Err(e) => Err(e)
                 };
@@ -1132,12 +1130,12 @@ impl RunningState {
                         let task = match task {
                             Some(task) => task.await,
                             None => None,
-                        }.with_context(|| format!("Couldn't find task template for {build:?}"))?;
+                        }.with_context(|| t!("Couldn't find task template for {build}", build = format!("{build:?}")))?;
                         (task, None)
                     }
                 };
                 let Some(mut task) = task_template.resolve_task("debug-build-task", &task_context) else {
-                    anyhow::bail!("Could not resolve task variables within a debug scenario");
+                    anyhow::bail!(t!("Could not resolve task variables within a debug scenario"));
                 };
 
                 let locator_name = if let Some(locator_name) = locator_name {
@@ -1224,7 +1222,7 @@ impl RunningState {
                     .context("Failed to wait for completed task")?;
 
                 if !exit_status.success() {
-                    anyhow::bail!("Build failed");
+                    anyhow::bail!(t!("Build failed"));
                 }
                 Some((task.resolved.clone(), locator_name, extra_config))
             } else {
@@ -1235,7 +1233,7 @@ impl RunningState {
             } else if let Some((task, locator_name, extra_config)) = build_output {
                 let locator_name =
                     locator_name.with_context(|| {
-                        format!("Could not find a valid locator for a build task and configure is invalid with error: {}", request_type.err()
+                        t!("Could not find a valid locator for a build task and configure is invalid with error: {error}", error = request_type.err()
                             .map(|err| err.to_string())
                             .unwrap_or_default())
                     })?;
@@ -1254,7 +1252,7 @@ impl RunningState {
 
                 let scenario = dap_registry
                     .adapter(&adapter)
-                    .with_context(|| anyhow!("{adapter}: is not a valid adapter name"))?.config_from_zed_format(zed_config)
+                    .with_context(|| t!("{adapter}: is not a valid adapter name", adapter = adapter))?.config_from_zed_format(zed_config)
                     .await?;
                 config = scenario.config;
                 util::merge_non_null_json_value_into(extra_config, &mut config);
@@ -1264,7 +1262,7 @@ impl RunningState {
                 let Err(e) = request_type else {
                     unreachable!();
                 };
-                anyhow::bail!("Wu cannot determine how to run this debug scenario. `build` field was not provided and Debug Adapter won't accept provided configuration because: {e}");
+                anyhow::bail!(t!("Wu cannot determine how to run this debug scenario. `build` field was not provided and Debug Adapter won't accept provided configuration because: {error}", error = e));
             };
 
             Ok(DebugTaskDefinition {
@@ -1340,7 +1338,7 @@ impl RunningState {
             .clone()
             .filter(|title| !title.is_empty())
             .or_else(|| command.clone())
-            .unwrap_or_else(|| "Debug terminal".to_string());
+            .unwrap_or_else(|| t!("Debug terminal").to_string());
         let kind = task::SpawnInTerminal {
             id: task::TaskId("debug".to_string()),
             full_label: title.clone(),

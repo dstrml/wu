@@ -1,0 +1,18 @@
+{
+  "text_finder::Fold": {
+    "name": "折叠"
+  },
+  "text_finder::ToProjectSearch": {
+    "name": "转为项目搜索"
+  },
+  "text_finder::Toggle": {
+    "name": "切换文本查找器",
+    "description": "打开项目搜索选择器。"
+  },
+  "text_finder::ToggleFoldAll": {
+    "name": "切换全部折叠"
+  },
+  "text_finder::Unfold": {
+    "name": "展开"
+  }
+}

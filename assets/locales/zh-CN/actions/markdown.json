@@ -1,0 +1,62 @@
+{
+  "markdown::CloseAndReturnToEditor": {
+    "name": "关闭并返回编辑器",
+    "description": "关闭 Markdown 预览，并将焦点移回源文件的编辑器。"
+  },
+  "markdown::Copy": {
+    "name": "复制",
+    "description": "将所选文本复制到剪贴板。"
+  },
+  "markdown::CopyAsMarkdown": {
+    "name": "复制为 Markdown",
+    "description": "将所选文本以 Markdown 格式复制到剪贴板。"
+  },
+  "markdown::OpenFollowingPreview": {
+    "name": "打开跟随预览",
+    "description": "打开与编辑器同步的跟随式 Markdown 预览。"
+  },
+  "markdown::OpenPreview": {
+    "name": "打开预览",
+    "description": "打开当前文件的 Markdown 预览。"
+  },
+  "markdown::OpenPreviewToTheSide": {
+    "name": "打开侧边预览",
+    "description": "在拆分窗格中打开 Markdown 预览。"
+  },
+  "markdown::ScrollDown": {
+    "name": "向下滚动",
+    "description": "向下滚动大约一个可见行。"
+  },
+  "markdown::ScrollDownByItem": {
+    "name": "按元素向下滚动",
+    "description": "在 Markdown 预览中向下滚动一个 Markdown 元素。"
+  },
+  "markdown::ScrollPageDown": {
+    "name": "向下翻页",
+    "description": "在 Markdown 预览中向下滚动一页。"
+  },
+  "markdown::ScrollPageUp": {
+    "name": "向上翻页",
+    "description": "在 Markdown 预览中向上滚动一页。"
+  },
+  "markdown::ScrollToBottom": {
+    "name": "滚动到底部",
+    "description": "滚动到 Markdown 预览的底部。"
+  },
+  "markdown::ScrollToTop": {
+    "name": "滚动到顶部",
+    "description": "滚动到 Markdown 预览的顶部。"
+  },
+  "markdown::ScrollUp": {
+    "name": "向上滚动",
+    "description": "向上滚动大约一个可见行。"
+  },
+  "markdown::ScrollUpByItem": {
+    "name": "按元素向上滚动",
+    "description": "在 Markdown 预览中向上滚动一个 Markdown 元素。"
+  },
+  "markdown::ToggleBlockQuote": {
+    "name": "切换引用块",
+    "description": "在 Markdown 文件中，为所选行（或当前行）添加或删除引用块前缀（`> `）。"
+  }
+}

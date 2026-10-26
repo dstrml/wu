@@ -1,4 +1,5 @@
 use agent_harness::SlashCommand;
+use i18n::{SharedString, t};
 use std::ops::Range;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,16 +115,16 @@ impl AppCommand {
         }
     }
 
-    fn description(self) -> &'static str {
+    fn description(self) -> SharedString {
         match self {
-            AppCommand::Model => "Wu: choose model and reasoning",
-            AppCommand::New => "Wu: start a new chat",
-            AppCommand::Resume => "Wu: open chat history",
-            AppCommand::Settings => "Wu: open settings",
-            AppCommand::Diff => "Wu: open changes",
-            AppCommand::Files => "Wu: open project files",
-            AppCommand::Terminal => "Wu: open a terminal",
-            AppCommand::Stop => "Wu: stop the agent",
+            AppCommand::Model => t!("Wu: choose model and reasoning"),
+            AppCommand::New => t!("Wu: start a new chat"),
+            AppCommand::Resume => t!("Wu: open chat history"),
+            AppCommand::Settings => t!("Wu: open settings"),
+            AppCommand::Diff => t!("Wu: open changes"),
+            AppCommand::Files => t!("Wu: open project files"),
+            AppCommand::Terminal => t!("Wu: open a terminal"),
+            AppCommand::Stop => t!("Wu: stop the agent"),
         }
     }
 

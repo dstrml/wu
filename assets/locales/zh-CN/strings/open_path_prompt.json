@@ -1,0 +1,12 @@
+{
+  "A file or folder with the same name already exists. Replacing it will overwrite its current contents.": "已存在同名的文件或文件夹。替换会覆盖其现有内容。",
+  "Cancel": "取消",
+  "No such file or directory": "没有这个文件或目录",
+  "Replace": "替换",
+  "Type a path…": "输入路径…",
+  "[directory{separator}]filename.ext": "[目录{separator}]文件名.ext",
+  "open this directory": "打开此目录",
+  "{label} (create)": "{label}（新建）",
+  "{label} (replace)": "{label}（替换）",
+  "{path} already exists. Do you want to replace it?": "{path} 已存在。是否替换？"
+}

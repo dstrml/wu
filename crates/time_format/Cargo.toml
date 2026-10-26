@@ -13,6 +13,7 @@ path = "src/time_format.rs"
 doctest = false
 
 [dependencies]
+i18n.workspace = true
 sys-locale.workspace = true
 time.workspace = true
 

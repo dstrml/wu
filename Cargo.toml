@@ -67,6 +67,7 @@ members = [
     "crates/grammars",
     "crates/http_client",
     "crates/http_client_tls",
+    "crates/i18n",
     "crates/icons",
     "crates/image_viewer",
     "crates/inspector_ui",
@@ -259,6 +260,7 @@ gpui_windows = { path = "crates/gpui_windows", default-features = false }
 grammars = { path = "crates/grammars" }
 http_client = { path = "crates/http_client" }
 http_client_tls = { path = "crates/http_client_tls" }
+i18n = { path = "crates/i18n" }
 icons = { path = "crates/icons" }
 image_viewer = { path = "crates/image_viewer" }
 inspector_ui = { path = "crates/inspector_ui" }

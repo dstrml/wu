@@ -2,75 +2,114 @@ use crate::{
     AgentEvent, BackgroundTaskInfo, BackgroundTaskKind, DoneStatus, HarnessId, TodoItem, TodoStatus,
     ToolCall,
 };
+use i18n::{SharedString, t};
 use serde_json::Value;
 
 use super::wire::{ContentBlock, Frame, SystemFrame};
 
 fn assistant_error_text(code: &str) -> String {
     match code {
-        "authentication_failed" => "Authentication failed. Sign in to Claude again.".into(),
-        "oauth_org_not_allowed" => "This organization isn't allowed to use Claude here.".into(),
-        "billing_error" => "Billing error. Check your Claude plan or payment method.".into(),
-        "rate_limit" => "Claude usage limit reached. Try again after the limit resets.".into(),
-        "overloaded" => "Claude is overloaded right now. Try again shortly.".into(),
-        "invalid_request" => "The request was rejected as invalid.".into(),
-        "model_not_found" => "The selected model isn't available.".into(),
-        "server_error" => "Claude had a server error. Try again.".into(),
-        "max_output_tokens" => "The reply hit the maximum output length.".into(),
-        "unknown" => "Claude returned an unspecified error.".into(),
-        other => format!("Claude error: {other}"),
+        "authentication_failed" => t!("Authentication failed. Sign in to Claude again."),
+        "oauth_org_not_allowed" => t!("This organization isn't allowed to use Claude here."),
+        "billing_error" => t!("Billing error. Check your Claude plan or payment method."),
+        "rate_limit" => t!("Claude usage limit reached. Try again after the limit resets."),
+        "overloaded" => t!("Claude is overloaded right now. Try again shortly."),
+        "invalid_request" => t!("The request was rejected as invalid."),
+        "model_not_found" => t!("The selected model isn't available."),
+        "server_error" => t!("Claude had a server error. Try again."),
+        "max_output_tokens" => t!("The reply hit the maximum output length."),
+        "unknown" => t!("Claude returned an unspecified error."),
+        other => t!("Claude error: {code}", code = other),
     }
+    .to_string()
 }
 
-fn rate_window_label(kind: &str) -> &'static str {
+fn rate_limit_blocked_text(kind: &str) -> String {
     match kind {
-        "five_hour" => "5-hour",
-        "seven_day" | "seven_day_overage_included" => "weekly",
-        "seven_day_opus" => "weekly (Opus)",
-        "seven_day_sonnet" => "weekly (Sonnet)",
-        "overage" => "overage",
-        _ => "usage",
+        "five_hour" => {
+            t!("Claude 5-hour limit reached and the turn was blocked. Try again after it resets.")
+        }
+        "seven_day" | "seven_day_overage_included" => {
+            t!("Claude weekly limit reached and the turn was blocked. Try again after it resets.")
+        }
+        "seven_day_opus" => t!(
+            "Claude weekly (Opus) limit reached and the turn was blocked. Try again after it resets."
+        ),
+        "seven_day_sonnet" => t!(
+            "Claude weekly (Sonnet) limit reached and the turn was blocked. Try again after it resets."
+        ),
+        "overage" => {
+            t!("Claude overage limit reached and the turn was blocked. Try again after it resets.")
+        }
+        _ => t!("Claude usage limit reached and the turn was blocked. Try again after it resets."),
     }
+    .to_string()
 }
 
-fn result_error_text(subtype: &str) -> &'static str {
+fn result_error_text(subtype: &str) -> SharedString {
     match subtype {
-        "error_max_turns" => "The run hit the maximum number of turns.",
-        "error_max_budget_usd" => "The run hit its cost budget.",
-        "error_max_structured_output_retries" => "The run exhausted its structured-output retries.",
-        _ => "The run ended with an error.",
+        "error_max_turns" => t!("The run hit the maximum number of turns."),
+        "error_max_budget_usd" => t!("The run hit its cost budget."),
+        "error_max_structured_output_retries" => {
+            t!("The run exhausted its structured-output retries.")
+        }
+        _ => t!("The run ended with an error."),
     }
 }
 
 fn api_retry_text(frame: &SystemFrame) -> String {
     let number = |value: &Option<Value>| value.as_ref().and_then(Value::as_u64);
     let reason = if frame.no_response.is_some() {
-        "Claude's API stopped responding".to_owned()
+        t!("Claude's API stopped responding")
     } else {
         match frame.error.as_ref().and_then(Value::as_str) {
-            Some("overloaded") => "Claude's API is overloaded".to_owned(),
-            Some("rate_limit") => "Claude hit a rate limit".to_owned(),
-            Some("authentication_failed") => "Claude couldn't sign in to its API".to_owned(),
+            Some("overloaded") => t!("Claude's API is overloaded"),
+            Some("rate_limit") => t!("Claude hit a rate limit"),
+            Some("authentication_failed") => t!("Claude couldn't sign in to its API"),
             _ => match number(&frame.error_status) {
-                Some(status) => format!("Claude's API returned an error ({status})"),
-                None => "Claude's API request failed".to_owned(),
+                Some(status) => t!("Claude's API returned an error ({status})", status = status),
+                None => t!("Claude's API request failed"),
             },
         }
     };
-    let mut text = format!("{reason}. Retrying");
-    if let Some(seconds) = number(&frame.retry_delay_ms)
+    let seconds = number(&frame.retry_delay_ms)
         .map(|milliseconds| milliseconds.div_ceil(1000))
-        .filter(|seconds| *seconds > 0)
-    {
-        text.push_str(&format!(" in {seconds}s"));
+        .filter(|seconds| *seconds > 0);
+    let attempt = number(&frame.attempt);
+    let max = number(&frame.max_retries);
+    match (seconds, attempt, max) {
+        (Some(seconds), Some(attempt), Some(max)) => t!(
+            "{reason}. Retrying in {seconds}s (attempt {attempt} of {max}).",
+            reason = reason,
+            seconds = seconds,
+            attempt = attempt,
+            max = max
+        ),
+        (Some(seconds), Some(attempt), None) => t!(
+            "{reason}. Retrying in {seconds}s (attempt {attempt}).",
+            reason = reason,
+            seconds = seconds,
+            attempt = attempt
+        ),
+        (Some(seconds), None, _) => t!(
+            "{reason}. Retrying in {seconds}s.",
+            reason = reason,
+            seconds = seconds
+        ),
+        (None, Some(attempt), Some(max)) => t!(
+            "{reason}. Retrying (attempt {attempt} of {max}).",
+            reason = reason,
+            attempt = attempt,
+            max = max
+        ),
+        (None, Some(attempt), None) => t!(
+            "{reason}. Retrying (attempt {attempt}).",
+            reason = reason,
+            attempt = attempt
+        ),
+        (None, None, _) => t!("{reason}. Retrying.", reason = reason),
     }
-    match (number(&frame.attempt), number(&frame.max_retries)) {
-        (Some(attempt), Some(max)) => text.push_str(&format!(" (attempt {attempt} of {max})")),
-        (Some(attempt), None) => text.push_str(&format!(" (attempt {attempt})")),
-        _ => {}
-    }
-    text.push('.');
-    text
+    .to_string()
 }
 
 fn is_internal_diagnostic(message: &str) -> bool {
@@ -408,9 +447,16 @@ impl Normalizer {
                         events.push(AgentEvent::Compacting { active: false });
                     }
                     if f.compact_result.as_deref() == Some("failed") {
-                        let reason = f.compact_error.as_deref().unwrap_or("unknown error");
+                        let reason = f
+                            .compact_error
+                            .clone()
+                            .unwrap_or_else(|| t!("unknown error").to_string());
                         events.push(AgentEvent::Error {
-                            message: format!("Couldn't compact the conversation: {reason}"),
+                            message: t!(
+                                "Couldn't compact the conversation: {reason}",
+                                reason = reason
+                            )
+                            .to_string(),
                         });
                     }
                     return events;
@@ -659,11 +705,9 @@ impl Normalizer {
                 if f.rate_limit_info.status != "rejected" {
                     return Vec::new();
                 }
-                let window =
-                    rate_window_label(f.rate_limit_info.rate_limit_type.as_deref().unwrap_or(""));
                 vec![AgentEvent::Error {
-                    message: format!(
-                        "Claude {window} limit reached and the turn was blocked. Try again after it resets."
+                    message: rate_limit_blocked_text(
+                        f.rate_limit_info.rate_limit_type.as_deref().unwrap_or(""),
                     ),
                 }]
             }
@@ -730,10 +774,10 @@ impl Normalizer {
                             "error_max_turns"
                             | "error_max_budget_usd"
                             | "error_max_structured_output_retries" => {
-                                Some(result_error_text(&f.subtype).to_owned())
+                                Some(result_error_text(&f.subtype).to_string())
                             }
                             _ if !diagnostics.is_empty() => None,
-                            _ => Some(result_error_text(&f.subtype).to_owned()),
+                            _ => Some(result_error_text(&f.subtype).to_string()),
                         }
                     };
                     AgentEvent::Done {

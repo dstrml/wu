@@ -8,6 +8,7 @@ use anyhow::{Context as _, Result};
 use collections::{HashMap, HashSet};
 use futures::{FutureExt as _, StreamExt as _, future::Shared};
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task};
+use i18n::{n, t};
 use language::LanguageRegistry;
 use markdown::Markdown;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,52 @@ const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 const USAGE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const USAGE_FORCED_MIN_INTERVAL: Duration = Duration::from_secs(30);
 const CATALOG_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const NEW_CHAT_TITLE: &str = n!("New chat");
+const FORKED_NOTICE: &str = n!("Forked from \"{title}\"");
+const SIDE_CHAT_NOTICE: &str = n!("Side chat of \"{title}\"");
+const CONTINUED_NOTICE: &str = n!("Continued from a saved {source} chat");
+const KEEPS_LIMITS_NOTICE: &str =
+    n!("{agent} keeps its current limits until this turn ends, then uses the new permission mode.");
+
+pub(crate) fn display_title(title: &str) -> SharedString {
+    if title.is_empty() {
+        i18n::translate(NEW_CHAT_TITLE)
+    } else if title == agent_harness::opencode::UNTITLED_CHAT {
+        i18n::translate(agent_harness::opencode::UNTITLED_CHAT)
+    } else {
+        SharedString::from(title.to_owned())
+    }
+}
+
+pub(crate) fn translated_notice(text: &SharedString) -> SharedString {
+    if let Some(translation) = i18n::lookup(text) {
+        return translation;
+    }
+    for template in [FORKED_NOTICE, SIDE_CHAT_NOTICE] {
+        for default_title in [NEW_CHAT_TITLE, agent_harness::opencode::UNTITLED_CHAT] {
+            let filled = i18n::format(
+                SharedString::new_static(template),
+                &[("title", &default_title)],
+            );
+            if filled == *text {
+                return i18n::format(
+                    i18n::translate(template),
+                    &[("title", &i18n::translate(default_title))],
+                );
+            }
+        }
+    }
+    i18n::translate_filled(
+        text,
+        &[
+            FORKED_NOTICE,
+            SIDE_CHAT_NOTICE,
+            CONTINUED_NOTICE,
+            KEEPS_LIMITS_NOTICE,
+        ],
+    )
+    .unwrap_or_else(|| text.clone())
+}
 
 fn metadata_path(directory: &Path, id: &str) -> PathBuf {
     directory.join(format!("{id}.meta.json"))
@@ -1324,14 +1371,11 @@ impl AgentSession {
                 self.answer_permission(&id, true, cx);
             }
         } else if self.working && self.kind() != AgentKind::Claude {
-            self.push_notice(
-                format!(
-                    "{} keeps its current limits until this turn ends, then uses the new permission mode.",
-                    self.kind().label()
-                ),
-                false,
-                cx,
+            let notice = i18n::format(
+                SharedString::new_static(KEEPS_LIMITS_NOTICE),
+                &[("agent", &self.kind().label())],
             );
+            self.push_notice(notice.to_string(), false, cx);
         }
     }
 
@@ -1615,9 +1659,10 @@ impl AgentSession {
                 if asked_for_auto && mode != "auto" && !self.noticed_auto_unavailable {
                     self.noticed_auto_unavailable = true;
                     self.push_notice(
-                        "Auto mode isn't available here, so Claude will ask before acting. \
-                         It's off with fast mode, and on some plans and models."
-                            .into(),
+                        n!(
+                            "Auto mode isn't available here, so Claude will ask before acting. It's off with fast mode, and on some plans and models."
+                        )
+                        .into(),
                         false,
                         cx,
                     );
@@ -1698,7 +1743,7 @@ impl AgentSession {
                         self.metadata.unseen = true;
                         cx.emit(SessionEvent::Finished { errored: true });
                         self.push_notice(
-                            error.unwrap_or_else(|| "The agent stopped with an error.".into()),
+                            error.unwrap_or_else(|| n!("The agent stopped with an error.").into()),
                             true,
                             cx,
                         )
@@ -1784,7 +1829,7 @@ impl AgentSession {
                     self.metadata.context = Some(context);
                     self.save_metadata(cx);
                 }
-                self.push_notice("Context compacted.".into(), false, cx);
+                self.push_notice(n!("Context compacted.").into(), false, cx);
             }
             AgentEvent::ContextUsage { tokens, window } => {
                 let mut context = self.metadata.context.unwrap_or_default();
@@ -1900,8 +1945,11 @@ impl AgentSession {
             subagent.status.get_or_insert(DoneStatus::Completed);
         }
         self.metadata.fork_context = fork_context(&self.transcript.serialize(cx));
-        self.transcript
-            .push_notice(format!("Continued from a saved {source} chat"), false);
+        let notice = i18n::format(
+            SharedString::new_static(CONTINUED_NOTICE),
+            &[("source", &source)],
+        );
+        self.transcript.push_notice(notice.to_string(), false);
         self.save_metadata(cx);
         self.save_entries(cx);
         cx.notify();
@@ -2362,8 +2410,8 @@ pub(crate) fn quit_warning(cx: &App) -> Option<String> {
     }
     match working_agent_count(cx) {
         0 => None,
-        1 => Some("An agent is still working.".into()),
-        count => Some(format!("{count} agents are still working.")),
+        1 => Some(t!("An agent is still working.").to_string()),
+        count => Some(t!("{count} agents are still working.", count = count).to_string()),
     }
 }
 
@@ -2811,18 +2859,22 @@ impl AgentStore {
             };
             let label = kind.label();
             let failed = |reason: String| AgentUpdateStatus::Failed {
-                message: format!("Couldn't update {label}").into(),
+                message: t!("Couldn't update {agent}", agent = label),
                 reason: reason.into(),
             };
             let status = match run.await {
                 Ok(Ok(agent_harness::update::UpdateOutcome::Updated(Some(version)))) => {
-                    AgentUpdateStatus::Finished(format!("{label} updated to {version}").into())
+                    AgentUpdateStatus::Finished(t!(
+                        "{agent} updated to {version}",
+                        agent = label,
+                        version = version
+                    ))
                 }
                 Ok(Ok(agent_harness::update::UpdateOutcome::Updated(None))) => {
-                    AgentUpdateStatus::Finished(format!("{label} updated").into())
+                    AgentUpdateStatus::Finished(t!("{agent} updated", agent = label))
                 }
                 Ok(Ok(agent_harness::update::UpdateOutcome::UpToDate)) => {
-                    AgentUpdateStatus::Finished(format!("{label} is up to date").into())
+                    AgentUpdateStatus::Finished(t!("{agent} is up to date", agent = label))
                 }
                 Ok(Err(error)) => failed(error.0),
                 Err(error) => failed(error.to_string()),
@@ -2958,11 +3010,7 @@ impl AgentStore {
                 SessionSummary {
                     id: metadata.id.clone(),
                     kind: metadata.kind,
-                    title: if metadata.title.is_empty() {
-                        "New chat".into()
-                    } else {
-                        metadata.title.clone().into()
-                    },
+                    title: display_title(&metadata.title),
                     created_at: metadata.created_at,
                     updated_at: metadata.updated_at,
                     working: live.is_some_and(|session| session.is_working()),
@@ -3145,19 +3193,23 @@ impl AgentStore {
                     metadata.fork_source = parent_metadata.native_session_id.clone();
                 }
                 let parent_title = if parent_metadata.title.is_empty() {
-                    "New chat".to_string()
+                    NEW_CHAT_TITLE.to_string()
                 } else {
                     parent_metadata.title.clone()
                 };
-                let notice = if side_chat {
+                let template = if side_chat {
                     entries.clear();
-                    format!("Side chat of \"{parent_title}\"")
+                    SIDE_CHAT_NOTICE
                 } else {
                     metadata.title = parent_metadata.title;
-                    format!("Forked from \"{parent_title}\"")
+                    FORKED_NOTICE
                 };
+                let notice = i18n::format(
+                    SharedString::new_static(template),
+                    &[("title", &parent_title)],
+                );
                 entries.push(SerializedEntry::Notice {
-                    text: notice,
+                    text: notice.to_string(),
                     is_error: false,
                 });
                 Ok(this.insert_session(metadata, SavedTranscript::EntriesOnly(entries), cx))
@@ -3457,7 +3509,8 @@ async fn fetch_plan_usage(
     for (name, value) in &request.headers {
         builder = builder.header(*name, value);
     }
-    let unavailable = |error: anyhow::Error| format!("Usage unavailable: {error}");
+    let unavailable =
+        |error: anyhow::Error| t!("Usage unavailable: {error}", error = error).to_string();
     let http_request = builder
         .body(http_client::AsyncBody::empty())
         .map_err(|error| unavailable(error.into()))?;
@@ -3477,7 +3530,7 @@ async fn fetch_plan_usage(
         serde_json::from_slice(&body).map_err(|error| unavailable(error.into()))?;
     request
         .parse(harness_id, &json)
-        .ok_or_else(|| "Usage unavailable: unexpected response".to_string())
+        .ok_or_else(|| t!("Usage unavailable: unexpected response").to_string())
 }
 
 fn load_all_metadata(directory: &Path) -> Result<Vec<SessionMetadata>> {

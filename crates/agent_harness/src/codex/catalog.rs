@@ -74,15 +74,15 @@ const XHIGH_LADDER: &[ReasoningLevel] = &[
 fn service_tier() -> ModelOption {
     ModelOption {
         id: "serviceTier".into(),
-        label: "Service Tier".into(),
+        label: i18n::t!("Service Tier").to_string(),
         choices: vec![
             ModelOptionChoice {
                 id: "default".into(),
-                label: "Standard".into(),
+                label: i18n::t!("Standard").to_string(),
             },
             ModelOptionChoice {
                 id: "fast".into(),
-                label: "Fast".into(),
+                label: i18n::t!("Fast").to_string(),
             },
         ],
         default_choice: "default".into(),

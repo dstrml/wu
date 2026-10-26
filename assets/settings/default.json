@@ -54,6 +54,9 @@
   //           "custom": 2
   //         },
   "buffer_line_height": "comfortable",
+  // The language of Wu's interface: "system" follows your system language,
+  // or set "en" for English or "zh-CN" for Simplified Chinese.
+  "ui_language": "system",
   // The name of a font to use for rendering text in the UI
   // You can set this to ".SystemUIFont" to use the system font, or to
   // "IBM Plex Sans" for the previous default

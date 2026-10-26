@@ -1,0 +1,5 @@
+{
+  "Basedpyright is now the only default language server for Python": "Basedpyright 现在是 Python 唯一的默认语言服务器",
+  "Learn More": "了解详情",
+  "We have disabled PyRight and pylsp by default. They can be re-enabled in your settings.": "我们已默认停用 PyRight 和 pylsp。你可以在设置中重新启用它们。"
+}

@@ -17,6 +17,7 @@ use gpui::{
     InteractiveElement, IntoElement, IsZero, Pixels, Render, Resource, RetainAllImageCache,
     ScrollHandle, SharedString, SharedUri, Subscription, Task, WeakEntity, Window, point, px,
 };
+use i18n::t;
 use language::{Buffer, LanguageRegistry};
 use markdown::{
     CodeBlockRenderer, CopyButtonVisibility, Markdown, MarkdownElement, MarkdownFont,
@@ -1528,9 +1529,9 @@ impl Item for MarkdownPreviewView {
             .map(|editor_state| {
                 let buffer = editor_state.editor.read(cx).buffer().read(cx);
                 let title = buffer.title(cx);
-                format!("Preview {}", title).into()
+                t!("Preview {title}", title = title)
             })
-            .unwrap_or_else(|| SharedString::from("Markdown Preview"))
+            .unwrap_or_else(|| t!("Markdown Preview"))
     }
 
     fn added_to_workspace(
@@ -1701,7 +1702,7 @@ impl Render for MarkdownPreviewView {
                                         menu.when_some(focus, |menu, focus| menu.context(focus))
                                             .when_some(selected_text, |menu, text| {
                                                 menu.entry(
-                                                    "Copy",
+                                                    t!("Copy"),
                                                     Some(Box::new(markdown::Copy)),
                                                     move |_, cx| {
                                                         cx.write_to_clipboard(
@@ -1714,7 +1715,7 @@ impl Render for MarkdownPreviewView {
                                             })
                                             .when_some(selected_markdown, |menu, text| {
                                                 menu.entry(
-                                                    "Copy as Markdown",
+                                                    t!("Copy as Markdown"),
                                                     Some(Box::new(markdown::CopyAsMarkdown)),
                                                     move |_, cx| {
                                                         cx.write_to_clipboard(
@@ -1726,7 +1727,7 @@ impl Render for MarkdownPreviewView {
                                                 )
                                             })
                                             .when_some(context_menu_link, |menu, url| {
-                                                menu.entry("Copy Link", None, move |_, cx| {
+                                                menu.entry(t!("Copy Link"), None, move |_, cx| {
                                                     cx.write_to_clipboard(
                                                         ClipboardItem::new_string(url.to_string()),
                                                     );

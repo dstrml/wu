@@ -3,9 +3,10 @@ use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, AnyElement, App, AppContext, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, Global, IntoElement, KeyContext, Render, ScrollHandle, SharedString,
-    Subscription, Task, WeakEntity, Window, actions, img,
+    FocusHandle, Focusable, Global, IntoElement, KeyContext, PromptButton, Render, ScrollHandle,
+    SharedString, Subscription, Task, WeakEntity, Window, actions, img,
 };
+use i18n::t;
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -283,11 +284,11 @@ impl Render for Onboarding {
                                             .child(
                                                 v_flex()
                                                     .child(
-                                                        Headline::new("Welcome to Wu")
+                                                        Headline::new(t!("Welcome to Wu"))
                                                             .size(HeadlineSize::Small),
                                                     )
                                                     .child(
-                                                        Label::new("The editor that doesn't get in your way")
+                                                        Label::new(t!("The editor that doesn't get in your way"))
                                                             .color(Color::Muted)
                                                             .size(LabelSize::Small)
                                                             .italic(),
@@ -295,7 +296,7 @@ impl Render for Onboarding {
                                             ),
                                     )
                                     .child({
-                                        Button::new("finish_setup", "Finish Setup")
+                                        Button::new("finish_setup", t!("Finish Setup"))
                                             .style(ButtonStyle::Filled)
                                             .size(ButtonSize::Medium)
                                             .width(rems_from_px(200_f32))
@@ -329,7 +330,7 @@ impl Item for Onboarding {
     type Event = ItemEvent;
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "Onboarding".into()
+        t!("Onboarding")
     }
 
     fn show_toolbar(&self) -> bool {
@@ -411,9 +412,12 @@ pub async fn handle_import_vscode_settings(
                 zlog::error!("{err:?}");
                 let _ = cx.prompt(
                     gpui::PromptLevel::Info,
-                    &format!("Could not find or load a {source} settings file"),
+                    &t!(
+                        "Could not find or load a {source} settings file",
+                        source = source
+                    ),
                     None,
-                    &["OK"],
+                    &[PromptButton::ok(t!("OK"))],
                 );
                 return;
             }
@@ -422,14 +426,16 @@ pub async fn handle_import_vscode_settings(
     if !skip_prompt {
         let prompt = cx.prompt(
             gpui::PromptLevel::Warning,
-            &format!(
-                "Importing {} settings may overwrite your existing settings. \
-                Will import settings from {}",
-                vscode_settings.source,
-                truncate_and_remove_front(&vscode_settings.path.to_string_lossy(), 128),
+            &t!(
+                "Importing {source} settings may overwrite your existing settings. Will import settings from {path}",
+                source = vscode_settings.source,
+                path = truncate_and_remove_front(&vscode_settings.path.to_string_lossy(), 128),
             ),
             None,
-            &["Import", "Cancel"],
+            &[
+                PromptButton::new(t!("Import")),
+                PromptButton::cancel(t!("Cancel")),
+            ],
         );
         let result = cx.spawn(async move |_| prompt.await.ok()).await;
         if result != Some(0) {
@@ -454,7 +460,10 @@ pub async fn handle_import_vscode_settings(
         .update_in(cx, |workspace, _, cx| match result {
             Ok(_) => {
                 let confirmation_toast = StatusToast::new(
-                    format!("Your {} settings were successfully imported.", source),
+                    t!(
+                        "Your {source} settings were successfully imported.",
+                        source = source
+                    ),
                     cx,
                     |this, _| {
                         this.icon(
@@ -477,7 +486,7 @@ pub async fn handle_import_vscode_settings(
             }
             Err(_) => {
                 let error_toast = StatusToast::new(
-                    "Failed to import settings. See log for details",
+                    t!("Failed to import settings. See log for details"),
                     cx,
                     |this, _| {
                         this.icon(
@@ -485,7 +494,7 @@ pub async fn handle_import_vscode_settings(
                                 .size(IconSize::Small)
                                 .color(Color::Error),
                         )
-                        .action("Open Log", |window, cx| {
+                        .action(t!("Open Log"), |window, cx| {
                             window.dispatch_action(workspace::OpenLog.boxed_clone(), cx)
                         })
                         .dismiss_button(true)

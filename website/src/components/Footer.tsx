@@ -4,42 +4,45 @@ import {
   MEMORY_BENCHMARK_URL,
   RAYCAST_URL,
   RELEASES_URL,
-  REPO_URL,
-  ZED_URL
+  REPO_URL
 } from '../consts';
+import { localePath, useMessages, usePage } from '../i18n/locale';
+import { LanguageSwitch } from './Header';
 import { AppIcon } from './icons';
 
-const columns = [
-  {
-    title: 'Wu',
-    links: [
-      { label: 'Download', href: '/#download' },
-      { label: 'Docs', href: '/docs/' },
-      { label: 'Releases', href: RELEASES_URL }
-    ]
-  },
-  {
-    title: 'Resources',
-    links: [
-      { label: 'Install guide', href: INSTALL_GUIDE_URL },
-      { label: 'Memory benchmark', href: MEMORY_BENCHMARK_URL },
-      { label: 'Raycast extension', href: RAYCAST_URL }
-    ]
-  },
-  {
-    title: 'Source',
-    links: [
-      { label: 'GitHub', href: REPO_URL },
-      { label: 'Report an issue', href: ISSUES_URL },
-      // { label: 'Support Wu', href: '/support/' }
-    ]
-  }
-];
-
 export function Footer() {
+  const { locale } = usePage();
+  const t = useMessages().footer;
+  const columns = [
+    {
+      title: t.product.title,
+      links: [
+        { label: t.product.download, href: localePath(locale, '/#download') },
+        { label: t.product.docs, href: localePath(locale, '/docs/') },
+        { label: t.product.releases, href: RELEASES_URL }
+      ]
+    },
+    {
+      title: t.resources.title,
+      links: [
+        { label: t.resources.installGuide, href: INSTALL_GUIDE_URL },
+        { label: t.resources.memoryBenchmark, href: MEMORY_BENCHMARK_URL },
+        { label: t.resources.raycast, href: RAYCAST_URL }
+      ]
+    },
+    {
+      title: t.source.title,
+      links: [
+        { label: t.source.github, href: REPO_URL },
+        { label: t.source.reportIssue, href: ISSUES_URL },
+        // { label: t.source.support, href: localePath(locale, '/support/') }
+      ]
+    }
+  ];
+
   return (
     <footer className="mx-auto flex max-w-[1240px] flex-col items-center gap-12 px-8 pt-24 pb-12 max-sm:px-4">
-      <nav className="flex flex-wrap justify-center gap-x-[clamp(32px,10vw,120px)] gap-y-8" aria-label="Footer">
+      <nav className="flex flex-wrap justify-center gap-x-[clamp(32px,10vw,120px)] gap-y-8" aria-label={t.navLabel}>
         {columns.map((column) => (
           <div key={column.title} className="flex min-w-[120px] flex-col gap-2.5">
             <div className="mb-1 text-sm text-tertiary">{column.title}</div>
@@ -56,9 +59,14 @@ export function Footer() {
           </div>
         ))}
       </nav>
-      <div className="flex items-center gap-2.5 text-center text-sm text-tertiary">
-        <AppIcon className="size-7 rounded-[24%]" />
-        Wu is licensed under GPL-3.0-or-later.
+      <div className="flex flex-col items-center gap-4">
+        <div className="text-sm text-tertiary">
+          <LanguageSwitch className="text-secondary no-underline hover:underline" />
+        </div>
+        <div className="flex items-center gap-2.5 text-center text-sm text-tertiary">
+          <AppIcon className="size-7 rounded-[24%]" />
+          {t.license}
+        </div>
       </div>
     </footer>
   );

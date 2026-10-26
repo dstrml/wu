@@ -3,6 +3,7 @@ use gpui::{
     AnyView, App, Context, Decorations, Entity, FocusHandle, Focusable, IntoElement, ParentElement,
     Render, Role, SharedString, Styled, Subscription, WeakEntity, Window,
 };
+use i18n::t;
 use settings::{SettingsContent, update_settings_file};
 use std::{any::TypeId, sync::Arc};
 use theme::CLIENT_SIDE_DECORATION_ROUNDING;
@@ -95,7 +96,7 @@ impl Render for StatusBar {
             // steps through them, and arrow keys move between them once focus is
             // inside.
             .role(Role::Toolbar)
-            .aria_label("Status bar")
+            .aria_label(t!("Status bar"))
             .tab_group()
             .on_key_down(
                 cx.listener(|status_bar, event: &gpui::KeyDownEvent, window, cx| {
@@ -202,7 +203,7 @@ fn render_hideable_item(
 /// Appends a "Hide Button" entry aligned with surrounding toggleable entries.
 pub fn add_hide_button_entry(menu: ContextMenu, hide: HideStatusItem) -> ContextMenu {
     menu.toggleable_entry(
-        "Hide Button",
+        t!("Hide Button"),
         false,
         IconPosition::Start,
         None,

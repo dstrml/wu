@@ -7,6 +7,7 @@ use gpui::{
     Anchor, AnyElement, Context, IntoElement, ListOffset, ParentElement, SharedString, Styled,
     anchored, deferred, div, px,
 };
+use i18n::t;
 use ui::prelude::*;
 
 const MIN_CONTAINER_WIDTH: f32 = 768.;
@@ -43,7 +44,7 @@ fn ticks(entries: &[Entry], cx: &gpui::App) -> Vec<Tick> {
             } => ticks.push(Tick {
                 entry_index: index,
                 prompt: if text.trim().is_empty() && !attachments.is_empty() {
-                    "Attached images".into()
+                    t!("Attached images").to_string()
                 } else {
                     clip(text, PREVIEW_PROMPT_CHARS)
                 },
@@ -211,8 +212,9 @@ impl ChatView {
                                                         div()
                                                             .text_size(ui(10.))
                                                             .text_color(colors.text_muted)
-                                                            .child(format!(
-                                                                "{bucket_len} prompts"
+                                                            .child(t!(
+                                                                "{count} prompts",
+                                                                count = bucket_len
                                                             )),
                                                     )
                                                 }),

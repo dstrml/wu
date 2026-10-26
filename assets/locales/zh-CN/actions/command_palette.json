@@ -1,0 +1,6 @@
+{
+  "command_palette::Toggle": {
+    "description": "打开或关闭命令面板。",
+    "name": "切换命令面板"
+  }
+}

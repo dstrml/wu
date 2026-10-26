@@ -1,0 +1,18 @@
+{
+  "Adding rustup target for cross-compilation": "正在添加用于交叉编译的 rustup 目标",
+  "Building remote binary from source for {triple} with Zig": "正在使用 Zig 从源码为 {triple} 构建远程二进制文件",
+  "Building remote server binary from source": "正在从源码构建远程服务器二进制文件",
+  "Compressing binary": "正在压缩二进制文件",
+  "Connecting": "正在连接",
+  "Connecting (reusing session)": "正在连接（复用会话）",
+  "Detecting WSL environment": "正在检测 WSL 环境",
+  "Downloading remote development server on host": "正在主机上下载远程开发服务器",
+  "Extracting remote development server": "正在解压远程开发服务器",
+  "Extracting remote server": "正在解压远程服务器",
+  "Installing cargo-zigbuild for cross-compilation": "正在安装用于交叉编译的 cargo-zigbuild",
+  "Starting proxy": "正在启动代理",
+  "Streaming remote server into WSL": "正在将远程服务器流式传输到 WSL",
+  "Uploading remote development server": "正在上传远程开发服务器",
+  "Uploading remote server": "正在上传远程服务器",
+  "Waiting for existing connection attempt": "正在等待现有的连接尝试"
+}

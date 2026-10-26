@@ -8,6 +8,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, ParentElement,
     Render, TaskExt, WeakEntity, Window, actions,
 };
+use i18n::t;
 use language::{Buffer, LanguageMatcher, LanguageName, LanguageRegistry};
 use open_path_prompt::file_finder_settings::FileFinderSettings;
 use picker::{Picker, PickerDelegate};
@@ -110,6 +111,7 @@ pub struct LanguageSelectorDelegate {
     buffer: Entity<Buffer>,
     project: Entity<Project>,
     language_registry: Arc<LanguageRegistry>,
+    language_names: Vec<LanguageName>,
     candidates: Vec<StringMatchCandidate>,
     matches: Vec<StringMatch>,
     selected_index: usize,
@@ -124,24 +126,27 @@ impl LanguageSelectorDelegate {
         language_registry: Arc<LanguageRegistry>,
         current_language_name: Option<String>,
     ) -> Self {
-        let candidates = language_registry
+        let language_names = language_registry
             .language_names()
             .into_iter()
-            .filter_map(|name| {
+            .filter(|name| {
                 language_registry
-                    .available_language_for_name(name.as_ref())?
-                    .hidden()
-                    .not()
-                    .then_some(name)
+                    .available_language_for_name(name.as_ref())
+                    .is_some_and(|language| language.hidden().not())
             })
+            .collect::<Vec<_>>();
+        let candidates = language_names
+            .iter()
             .enumerate()
-            .map(|(candidate_id, name)| StringMatchCandidate::new(candidate_id, name.as_ref()))
+            .map(|(candidate_id, name)| {
+                StringMatchCandidate::new(candidate_id, &language_display_name(name.as_ref()))
+            })
             .collect::<Vec<_>>();
 
         let current_language_candidate_index = current_language_name.as_ref().and_then(|name| {
-            candidates
+            language_names
                 .iter()
-                .position(|candidate| candidate.string == *name)
+                .position(|language_name| language_name.as_ref() == name.as_str())
         });
 
         Self {
@@ -149,6 +154,7 @@ impl LanguageSelectorDelegate {
             buffer,
             project,
             language_registry,
+            language_names,
             candidates,
             matches: vec![],
             selected_index: current_language_candidate_index.unwrap_or(0),
@@ -157,14 +163,15 @@ impl LanguageSelectorDelegate {
     }
 
     fn language_data_for_match(&self, mat: &StringMatch, cx: &App) -> (String, Option<Icon>) {
-        let mut label = mat.string.clone();
+        let label = mat.string.clone();
+        let language_name = self.language_names.get(mat.candidate_id);
         let buffer_language = self.buffer.read(cx).language();
         let need_icon = FileFinderSettings::get_global(cx).file_icons;
 
-        if let Some(buffer_language) = buffer_language
-            .filter(|buffer_language| buffer_language.name().as_ref() == mat.string.as_str())
-        {
-            label.push_str(" (current)");
+        if let Some(buffer_language) = buffer_language.filter(|buffer_language| {
+            language_name.is_some_and(|language_name| buffer_language.name() == *language_name)
+        }) {
+            let label = t!("{name} (current)", name = label).to_string();
             let icon = need_icon
                 .then(|| self.language_icon(&buffer_language.config().matcher, cx))
                 .flatten();
@@ -172,9 +179,8 @@ impl LanguageSelectorDelegate {
         } else {
             let icon = need_icon
                 .then(|| {
-                    let language_name = LanguageName::new(mat.string.as_str());
                     self.language_registry
-                        .available_language_for_name(language_name.as_ref())
+                        .available_language_for_name(language_name?.as_ref())
                         .and_then(|available_language| {
                             self.language_icon(available_language.matcher(), cx)
                         })
@@ -194,6 +200,13 @@ impl LanguageSelectorDelegate {
     }
 }
 
+pub(crate) fn language_display_name(name: &str) -> SharedString {
+    match name {
+        "Plain Text" => t!("Plain Text"),
+        _ => SharedString::from(name.to_owned()),
+    }
+}
+
 impl PickerDelegate for LanguageSelectorDelegate {
     type ListItem = ListItem;
 
@@ -202,7 +215,7 @@ impl PickerDelegate for LanguageSelectorDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Select a language…".into()
+        t!("Select a language…").as_ref().into()
     }
 
     fn match_count(&self) -> usize {
@@ -210,9 +223,14 @@ impl PickerDelegate for LanguageSelectorDelegate {
     }
 
     fn confirm(&mut self, _: bool, window: &mut Window, cx: &mut Context<Picker<Self>>) {
-        if let Some(mat) = self.matches.get(self.selected_index) {
-            let language_name = &self.candidates[mat.candidate_id].string;
-            let language = self.language_registry.language_for_name(language_name);
+        if let Some(language_name) = self
+            .matches
+            .get(self.selected_index)
+            .and_then(|mat| self.language_names.get(mat.candidate_id))
+        {
+            let language = self
+                .language_registry
+                .language_for_name(language_name.as_ref());
             let project = self.project.downgrade();
             let buffer = self.buffer.downgrade();
             cx.spawn_in(window, async move |_, cx| {

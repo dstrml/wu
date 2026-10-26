@@ -3,6 +3,7 @@ use std::process::ExitStatus;
 use anyhow::Result;
 use collections::HashSet;
 use gpui::{AppContext, AsyncWindowContext, Context, Entity, Task, TaskExt, WeakEntity};
+use i18n::t;
 use language::Buffer;
 use project::{TaskSourceKind, WorktreeId};
 use remote::ConnectionState;
@@ -152,7 +153,8 @@ impl Workspace {
                             log::error!("Task spawn failed: {e:#}");
                             _ = workspace.update(cx, |w, cx| {
                                 let id = NotificationId::unique::<ResolvedTask>();
-                                w.show_toast(Toast::new(id, format!("Task spawn failed: {e}")), cx);
+                                let message = t!("Task spawn failed: {error}", error = e);
+                                w.show_toast(Toast::new(id, message.to_string()), cx);
                             });
                             ScheduledTaskResult::SpawnFailed
                         }

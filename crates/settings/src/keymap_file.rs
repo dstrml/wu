@@ -6,6 +6,7 @@ use gpui::{
     KeyBinding, KeyBindingContextPredicate, KeyBindingMetaIndex, KeybindingKeystroke, Keystroke,
     NoAction, SharedString, Unbind, generate_list_of_all_registered_actions, register_action,
 };
+use i18n::t;
 use schemars::{JsonSchema, json_schema};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -18,7 +19,10 @@ use util::{
     schemars::AllowTrailingCommas,
 };
 
-use crate::SettingsAssets;
+use crate::{
+    SettingsAssets,
+    settings_store::{localize_schema_descriptions, localized_action_documentation},
+};
 use settings_content::{ActionName, ActionWithArguments};
 use settings_json::{
     append_top_level_array_value_in_json_text, parse_json_with_comments,
@@ -289,7 +293,13 @@ impl KeymapFile {
                         // the error occurred in.
                         errors.push((
                             context.clone(),
-                            format!(" Parse error in section `context` field: {}", err),
+                            format!(
+                                " {}",
+                                t!(
+                                    "Parse error in section `context` field: {error}",
+                                    error = err
+                                )
+                            ),
                         ));
                         continue;
                     }
@@ -301,8 +311,11 @@ impl KeymapFile {
             if !unrecognized_fields.is_empty() {
                 write!(
                     section_errors,
-                    "\n\n - Unrecognized fields: {}",
-                    MarkdownInlineCode(&format!("{:?}", unrecognized_fields.keys()))
+                    "\n\n - {}",
+                    t!(
+                        "Unrecognized fields: {fields}",
+                        fields = MarkdownInlineCode(&format!("{:?}", unrecognized_fields.keys()))
+                    )
                 )
                 .unwrap();
             }
@@ -330,8 +343,12 @@ impl KeymapFile {
                             }
                             write!(
                                 section_errors,
-                                "\n\n- In unbind {}, {indented_err}",
-                                MarkdownInlineCode(&format!("\"{}\"", keystrokes))
+                                "\n\n- {}",
+                                t!(
+                                    "In unbind {keystrokes}, {error}",
+                                    keystrokes = MarkdownInlineCode(&format!("\"{}\"", keystrokes)),
+                                    error = indented_err
+                                )
                             )
                             .unwrap();
                         }
@@ -362,8 +379,12 @@ impl KeymapFile {
                             }
                             write!(
                                 section_errors,
-                                "\n\n- In binding {}, {indented_err}",
-                                MarkdownInlineCode(&format!("\"{}\"", keystrokes))
+                                "\n\n- {}",
+                                t!(
+                                    "In binding {keystrokes}, {error}",
+                                    keystrokes = MarkdownInlineCode(&format!("\"{}\"", keystrokes)),
+                                    error = indented_err
+                                )
                             )
                             .unwrap();
                         }
@@ -379,19 +400,19 @@ impl KeymapFile {
         if errors.is_empty() {
             KeymapFileLoadResult::Success { key_bindings }
         } else {
-            let mut error_message = "Errors in user keymap file.".to_owned();
+            let mut error_message = t!("Errors in user keymap file.").to_string();
 
             for (context, section_errors) in errors {
+                error_message.push('\n');
                 if context.is_empty() {
-                    let _ = write!(error_message, "\nIn section without context predicate:");
+                    error_message.push_str(&t!("In section without context predicate:"));
                 } else {
-                    let _ = write!(
-                        error_message,
-                        "\nIn section with {}:",
-                        MarkdownInlineCode(&format!("context = \"{}\"", context))
-                    );
+                    error_message.push_str(&t!(
+                        "In section with {context}:",
+                        context = MarkdownInlineCode(&format!("context = \"{}\"", context))
+                    ));
                 }
-                let _ = write!(error_message, "{section_errors}");
+                error_message.push_str(&section_errors);
             }
 
             KeymapFileLoadResult::SomeFailedToLoad {
@@ -678,6 +699,12 @@ impl KeymapFile {
         deprecations: &HashMap<&'a str, &'a str>,
         deprecation_messages: &HashMap<&'a str, &'a str>,
     ) -> serde_json::Value {
+        let localized_documentation = localized_action_documentation(action_documentation);
+        let action_documentation = &localized_documentation
+            .iter()
+            .map(|(name, description)| (*name, description.as_str()))
+            .collect::<HashMap<_, _>>();
+
         fn add_deprecation(schema: &mut schemars::Schema, message: String) {
             schema.insert(
                 // deprecationMessage is not part of the JSON Schema spec, but
@@ -688,7 +715,10 @@ impl KeymapFile {
         }
 
         fn add_deprecation_preferred_name(schema: &mut schemars::Schema, new_name: &str) {
-            add_deprecation(schema, format!("Deprecated, use {new_name}"));
+            add_deprecation(
+                schema,
+                t!("Deprecated, use {new_name}", new_name = new_name).to_string(),
+            );
         }
 
         fn add_description(schema: &mut schemars::Schema, description: &str) {
@@ -711,8 +741,8 @@ impl KeymapFile {
             "type": "string",
             "const": ""
         });
-        let no_action_message = "No action named this.";
-        add_description(&mut empty_action_name, no_action_message);
+        let no_action_message = t!("No action named this.");
+        add_description(&mut empty_action_name, &no_action_message);
         add_deprecation(&mut empty_action_name, no_action_message.to_string());
         let empty_action_name_with_input = json_schema!({
             "type": "array",
@@ -817,7 +847,7 @@ impl KeymapFile {
             });
             add_deprecation(
                 &mut actions_with_empty_input,
-                "This action does not take input - just the action name string should be used."
+                t!("This action does not take input - just the action name string should be used.")
                     .to_string(),
             );
             action_with_arguments_alternatives.push(actions_with_empty_input);
@@ -837,7 +867,7 @@ impl KeymapFile {
             });
             add_deprecation(
                 &mut actions_with_empty_input,
-                "This action does not take input - just the action name string should be used."
+                t!("This action does not take input - just the action name string should be used.")
                     .to_string(),
             );
             unbind_target_action_alternatives.push(actions_with_empty_input);
@@ -867,7 +897,9 @@ impl KeymapFile {
             }),
         );
 
-        generator.root_schema_for::<KeymapFile>().to_value()
+        let mut schema = generator.root_schema_for::<KeymapFile>().to_value();
+        localize_schema_descriptions(&mut schema);
+        schema
     }
 
     pub fn sections(&self) -> impl DoubleEndedIterator<Item = &KeymapSection> {

@@ -16,6 +16,7 @@ use gpui::{
     Hsla, IntoElement, ParentElement, SharedString, Styled, Window, canvas, deferred, div,
     pulsating_between, px, relative,
 };
+use i18n::t;
 use project::{Candidates, PathMatchCandidateSet, ProjectPath};
 use std::{
     ops::Range,
@@ -671,7 +672,11 @@ impl ChatView {
             "model" | "effort" | "fast" => self.run_app_command(AppCommand::Model, window, cx),
             "resume" => self.run_app_command(AppCommand::Resume, window, cx),
             _ => {
-                let message = format!("/{name} only works in Claude Code in the terminal.");
+                let message = t!(
+                    "/{name} only works in Claude Code in the terminal.",
+                    name = name
+                )
+                .to_string();
                 self.workspace
                     .update(cx, |workspace, cx| {
                         workspace.show_toast(
@@ -692,25 +697,25 @@ impl ChatView {
         let colors = cx.theme().colors();
         let (kind, cwd) = self.session_kind_and_cwd(cx);
         let store = self.store.read(cx);
-        let (loading, error, empty_message): (bool, Option<SharedString>, &str) = match menu.kind {
+        let (loading, error, empty_message) = match menu.kind {
             TokenKind::Command => {
                 let catalog = store.commands(kind, &cwd);
                 (
                     catalog.is_none_or(|catalog| catalog.is_loading() && !catalog.loaded),
                     catalog.and_then(|catalog| catalog.error.clone()),
-                    "No matching commands",
+                    t!("No matching commands"),
                 )
             }
             TokenKind::Skill => {
                 let (skills, loaded) = self.available_skills(cx);
                 let message = if loaded && skills.is_empty() {
-                    "No skills found"
+                    t!("No skills found")
                 } else {
-                    "No matching skills"
+                    t!("No matching skills")
                 };
                 (!loaded, None, message)
             }
-            TokenKind::Mention => (false, None, "No matching files"),
+            TokenKind::Mention => (false, None, t!("No matching files")),
         };
         let rows = self.rows(cx);
         let message_row = |text: SharedString, color: Hsla| {
@@ -815,7 +820,7 @@ impl ChatView {
                         },
                     )))
                 } else if empty {
-                    this.child(message_row(empty_message.into(), colors.text_muted))
+                    this.child(message_row(empty_message, colors.text_muted))
                 } else {
                     this.child(
                         v_flex()

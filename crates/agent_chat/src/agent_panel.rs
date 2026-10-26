@@ -12,10 +12,12 @@ use gpui::{
     Action, Animation, AnimationExt as _, AnyElement, App, AsyncWindowContext, Bounds, ClickEvent,
     ClipboardItem, Context, CursorStyle, DismissEvent, EdgeFade, Element, ElementId, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, GlobalElementId, Hsla, InspectorElementId,
-    IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, PromptLevel,
-    Render, RenderOnce, ScrollHandle, SharedString, Styled, Subscription, Svg, TextStyleRefinement,
-    Transformation, WeakEntity, Window, anchored, deferred, div, percentage, point, px, rgb, svg,
+    IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, PromptButton,
+    PromptLevel, Render, RenderOnce, ScrollHandle, SharedString, Styled, Subscription, Svg,
+    TextStyleRefinement, Transformation, WeakEntity, Window, anchored, deferred, div, percentage,
+    point, px, rgb, svg,
 };
+use i18n::{n, t, tc};
 use project::Project;
 use settings::{DockSide, Settings as _};
 use std::{
@@ -118,7 +120,7 @@ fn new_chat(
         workspace.show_toast(
             Toast::new(
                 NotificationId::unique::<AgentPanel>(),
-                "Agent chats only work in local projects for now.",
+                t!("Agent chats only work in local projects for now.").to_string(),
             )
             .autohide(),
             cx,
@@ -217,7 +219,7 @@ impl AgentPanel {
             cx.new(|cx| {
                 let search = cx.new(|cx| {
                     let mut editor = Editor::single_line(window, cx);
-                    editor.set_placeholder_text("Search chats…", window, cx);
+                    editor.set_placeholder_text(&t!("Search chats…"), window, cx);
                     editor.set_text_style_refinement(TextStyleRefinement {
                         font_size: Some(ui(13.).into()),
                         ..Default::default()
@@ -317,9 +319,14 @@ impl AgentPanel {
     ) {
         let answer = window.prompt(
             PromptLevel::Warning,
-            &format!("Delete \"{title}\"?"),
-            Some("The chat and its history are removed from Wu. This can't be undone."),
-            &["Delete", "Cancel"],
+            &t!("Delete \"{title}\"?", title = title),
+            Some(&t!(
+                "The chat and its history are removed from Wu. This can't be undone."
+            )),
+            &[
+                PromptButton::new(t!("Delete")),
+                PromptButton::cancel(t!("Cancel")),
+            ],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -412,8 +419,13 @@ impl AgentPanel {
                         .log_err();
                 }
             };
+            let pin_label = if pinned {
+                tc!("chat", "Unpin")
+            } else {
+                tc!("chat", "Pin")
+            };
             let menu = menu
-                .entry("Rename", None, {
+                .entry(t!("Rename"), None, {
                     let (id, title) = (id.clone(), title.clone());
                     action(
                         &panel,
@@ -427,7 +439,7 @@ impl AgentPanel {
                         }),
                     )
                 })
-                .entry(if pinned { "Unpin" } else { "Pin" }, None, {
+                .entry(pin_label, None, {
                     let id = id.clone();
                     action(
                         &panel,
@@ -439,7 +451,7 @@ impl AgentPanel {
                     )
                 })
                 .separator()
-                .entry("Fork Chat", None, {
+                .entry(t!("Fork Chat"), None, {
                     let id = id.clone();
                     action(
                         &panel,
@@ -447,12 +459,12 @@ impl AgentPanel {
                     )
                 });
             let menu = match native_id.clone() {
-                Some(native_id) => menu.entry("Copy Agent Session ID", None, move |_, cx| {
+                Some(native_id) => menu.entry(t!("Copy Agent Session ID"), None, move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(native_id.clone()))
                 }),
                 None => menu,
             };
-            menu.separator().entry("Delete…", None, {
+            menu.separator().entry(t!("Delete…"), None, {
                 let (id, title) = (id.clone(), title.clone());
                 action(
                     &panel,
@@ -481,7 +493,7 @@ impl AgentPanel {
             .trigger(HeaderButton::new(
                 "agent-panel-new-chat-trigger",
                 IconName::Plus,
-                "New Chat",
+                t!("New Chat"),
             ))
             .anchor(gpui::Anchor::TopRight)
             .menu(move |window, cx| {
@@ -503,7 +515,7 @@ impl AgentPanel {
                         )
                     });
                     menu.separator().entry(
-                        "Continue Saved Chat…",
+                        t!("Continue Saved Chat…"),
                         Some(ContinueSavedChat.boxed_clone()),
                         move |window, cx| {
                             workspace
@@ -520,12 +532,12 @@ impl AgentPanel {
     fn toggle_saved_messages(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.showing_saved = !self.showing_saved;
         let placeholder = if self.showing_saved {
-            "Search saved messages…"
+            t!("Search saved messages…")
         } else {
-            "Search chats…"
+            t!("Search chats…")
         };
         self.search.update(cx, |editor, cx| {
-            editor.set_placeholder_text(placeholder, window, cx)
+            editor.set_placeholder_text(&placeholder, window, cx)
         });
         cx.notify();
     }
@@ -554,9 +566,9 @@ impl AgentPanel {
                                 "agent-panel-title",
                                 false,
                                 if self.showing_saved {
-                                    "Saved Messages"
+                                    t!("Saved Messages")
                                 } else {
-                                    "Chats"
+                                    t!("Chats")
                                 },
                             )),
                     )
@@ -565,9 +577,9 @@ impl AgentPanel {
                             "agent-panel-saved-messages",
                             IconName::Bookmark,
                             if self.showing_saved {
-                                "Back to Chats"
+                                t!("Back to Chats")
                             } else {
-                                "Saved Messages"
+                                t!("Saved Messages")
                             },
                         )
                         .toggle_state(self.showing_saved)
@@ -622,7 +634,7 @@ impl AgentPanel {
                     glyph(IconName::Plus, 14., muted)
                         .group_hover(group, move |style| style.text_color(text)),
                 )
-                .child(format!("New {} chat", kind.label()))
+                .child(t!("New {agent} chat", agent = kind.label()))
         };
         v_flex()
             .px(px(SPACE_SM))
@@ -633,7 +645,7 @@ impl AgentPanel {
                     .pb(px(SPACE_SM))
                     .text_size(ui(12.))
                     .text_color(text_faint(cx))
-                    .child("No chats in this project yet."),
+                    .child(t!("No chats in this project yet.")),
             )
             .child(
                 v_flex().gap(px(LIST_GAP)).children(
@@ -697,7 +709,11 @@ impl AgentPanel {
             RowAction::Pin { pinned } => (
                 "pin",
                 IconName::AgentPin,
-                if pinned { "Unpin" } else { "Pin" },
+                if pinned {
+                    tc!("chat", "Unpin")
+                } else {
+                    tc!("chat", "Pin")
+                },
                 false,
                 if pinned { colors.text } else { text_muted },
             ),
@@ -729,7 +745,12 @@ impl AgentPanel {
                 icon_color,
             ))
             .when(show_label, |this| {
-                this.child(div().text_size(ui(10.)).text_color(text_muted).child(text))
+                this.child(
+                    div()
+                        .text_size(ui(10.))
+                        .text_color(text_muted)
+                        .child(text.clone()),
+                )
             })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -1064,7 +1085,7 @@ impl AgentPanel {
         let (key, label, top_gap): (SharedString, SharedString, bool) = match &group.kind {
             GroupKind::Pinned => (
                 PINNED_KEY.into(),
-                disclosure_label("Pinned", collapsed, group.total),
+                disclosure_label(&t!("Pinned"), collapsed, group.total),
                 false,
             ),
             GroupKind::Project(project) => (
@@ -1074,7 +1095,7 @@ impl AgentPanel {
             ),
             GroupKind::Chats => (
                 CHATS_KEY.into(),
-                disclosure_label("Chats", collapsed, group.total),
+                disclosure_label(&t!("Chats"), collapsed, group.total),
                 follows_group,
             ),
         };
@@ -1255,7 +1276,7 @@ fn project_key(project: &Path) -> String {
 
 fn disclosure_label(label: &str, collapsed: bool, count: usize) -> SharedString {
     if collapsed {
-        format!("{label} ({count})").into()
+        t!("{label} ({count})", label = label, count = count)
     } else {
         SharedString::from(label.to_string())
     }
@@ -1284,27 +1305,27 @@ fn row_height(compact: bool, shows_branch: bool) -> f32 {
 pub(crate) fn format_time_ago(then: i64, now: i64) -> String {
     let seconds = (now - then).max(0);
     if seconds < 60 {
-        return "now".to_string();
+        return t!("now").to_string();
     }
     let minutes = seconds / 60;
     if minutes < 60 {
-        return format!("{minutes}m");
+        return t!("{count}m", count = minutes).to_string();
     }
     let hours = minutes / 60;
     if hours < 24 {
-        return format!("{hours}h");
+        return t!("{count}h", count = hours).to_string();
     }
     let days = hours / 24;
     if days < 7 {
-        return format!("{days}d");
+        return t!("{count}d", count = days).to_string();
     }
     if days < 30 {
-        return format!("{}w", days / 7);
+        return t!("{count}w", count = days / 7).to_string();
     }
     if days < 365 {
-        return format!("{}mo", days / 30);
+        return t!("{count}mo", count = days / 30).to_string();
     }
-    format!("{}y", days / 365)
+    t!("{count}y", count = days / 365).to_string()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1331,12 +1352,12 @@ impl RowStatus {
         }
     }
 
-    fn label(self) -> Option<&'static str> {
+    fn label(self) -> Option<SharedString> {
         match self {
-            Self::Working => Some("Working"),
-            Self::Input => Some("Input"),
-            Self::Failed => Some("Failed"),
-            Self::Done => Some("Done"),
+            Self::Working => Some(t!("Working")),
+            Self::Input => Some(t!("Input")),
+            Self::Failed => Some(t!("Failed")),
+            Self::Done => Some(t!("Done")),
             Self::Idle => None,
         }
     }
@@ -1679,9 +1700,9 @@ impl Render for AgentPanel {
                         .text_size(ui(12.))
                         .text_color(text_faint(cx))
                         .child(if list.searching {
-                            "No matching chats"
+                            t!("No matching chats")
                         } else {
-                            "No chats yet"
+                            t!("No chats yet")
                         })
                         .into_any_element(),
                 )
@@ -1770,7 +1791,7 @@ impl Panel for AgentPanel {
     }
 
     fn icon_tooltip(&self, _: &Window, _: &App) -> Option<&'static str> {
-        Some("Agent Chats")
+        Some(n!("Agent Chats"))
     }
 
     fn toggle_action(&self) -> Box<dyn Action> {

@@ -6,6 +6,7 @@ use gpui::{
     AnyElement, Context, Image, ImageSource, IntoElement, MouseButton, ObjectFit, ParentElement,
     Pixels, ScrollWheelEvent, SharedString, Styled, Window, deferred, div, hsla, img, px, relative,
 };
+use i18n::t;
 use std::{
     fs::{File, OpenOptions},
     io::{ErrorKind, Write as _},
@@ -124,7 +125,7 @@ impl ChatView {
     ) {
         self.lightbox = Some(Lightbox {
             source: image.clone().into(),
-            name: "Mermaid diagram".into(),
+            name: t!("Mermaid diagram"),
             zoom: 1.,
             image: ChatImage::Data(image),
         });
@@ -170,7 +171,7 @@ impl ChatView {
                 .update(cx, |this, cx| this.show_done(key, DOWNLOADED_FEEDBACK, cx))
                 .log_err(),
             Err(error) => {
-                let message = format!("Couldn't save the image: {error}");
+                let message = t!("Couldn't save the image: {error}", error = error).to_string();
                 workspace
                     .update(cx, |workspace, cx| {
                         workspace.show_toast(
@@ -308,9 +309,9 @@ impl ChatView {
                                     },
                                 )
                                 .tooltip(Tooltip::text(if downloaded {
-                                    "Saved to Downloads"
+                                    t!("Saved to Downloads")
                                 } else {
-                                    "Download"
+                                    t!("Download")
                                 }))
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {

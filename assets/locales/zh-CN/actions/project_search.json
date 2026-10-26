@@ -1,0 +1,26 @@
+{
+  "project_search::NextField": {
+    "name": "下一个输入框",
+    "description": "移到下一个输入框。"
+  },
+  "project_search::OpenTextFinder": {
+    "name": "打开文本查找器",
+    "description": "在弹窗中打开文本选择器，显示当前结果。"
+  },
+  "project_search::SearchInNew": {
+    "name": "在新标签页中搜索",
+    "description": "在新的项目搜索标签页中搜索。"
+  },
+  "project_search::ToggleAllSearchResults": {
+    "name": "切换折叠全部结果",
+    "description": "切换所有搜索结果摘录的折叠或展开状态。"
+  },
+  "project_search::ToggleFilters": {
+    "name": "切换筛选器",
+    "description": "切换搜索筛选器面板。"
+  },
+  "project_search::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "在搜索栏和搜索结果之间切换焦点。"
+  }
+}

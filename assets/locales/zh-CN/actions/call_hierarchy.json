@@ -1,0 +1,11 @@
+{
+  "call_hierarchy::ShowIncomingCalls": {
+    "name": "显示传入调用"
+  },
+  "call_hierarchy::ShowOutgoingCalls": {
+    "name": "显示传出调用"
+  },
+  "call_hierarchy::ToggleDirection": {
+    "name": "切换方向"
+  }
+}

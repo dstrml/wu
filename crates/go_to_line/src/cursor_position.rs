@@ -1,7 +1,8 @@
 use editor::{Editor, EditorEvent, MBTextSummary, MultiBufferSnapshot};
 use gpui::{App, Entity, FocusHandle, Focusable, Styled, Subscription, Task, WeakEntity};
+use i18n::t;
 use settings::{RegisterSetting, Settings};
-use std::{fmt::Write, num::NonZeroU32, time::Duration};
+use std::{num::NonZeroU32, time::Duration};
 use text::{Point, Selection};
 use ui::{
     Button, ButtonCommon, Clickable, Context, FluentBuilder, IntoElement, LabelSize, ParentElement,
@@ -171,28 +172,38 @@ impl CursorPosition {
         } = self.selected_count;
         let format = LineIndicatorFormat::get(None, cx);
         let is_short_format = format == &LineIndicatorFormat::Short;
-        let lines = (lines > 1).then_some((lines, "line"));
-        let selections = (selections > 1).then_some((selections, "selection"));
-        let characters = (characters > 0).then_some((characters, "character"));
-        if (None, None, None) == (characters, selections, lines) {
-            // Nothing to display.
+        let selections = (selections > 1).then(|| {
+            if is_short_format {
+                t!("{count} s", count = selections)
+            } else {
+                t!("{count} selections", count = selections)
+            }
+        });
+        let lines = (lines > 1).then(|| {
+            if is_short_format {
+                t!("{count} l", count = lines)
+            } else {
+                t!("{count} lines", count = lines)
+            }
+        });
+        let characters = (characters > 0).then(|| {
+            if is_short_format {
+                t!("{count} c", count = characters)
+            } else if characters == 1 {
+                t!("1 character")
+            } else {
+                t!("{count} characters", count = characters)
+            }
+        });
+        let parts = [selections, lines, characters]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if parts.is_empty() {
             return;
         }
-        write!(text, " (").unwrap();
-        let mut wrote_once = false;
-        for (count, name) in [selections, lines, characters].into_iter().flatten() {
-            if wrote_once {
-                write!(text, ", ").unwrap();
-            }
-            let name = if is_short_format { &name[..1] } else { name };
-            let plural_suffix = if count > 1 && !is_short_format {
-                "s"
-            } else {
-                ""
-            };
-            write!(text, "{count} {name}{plural_suffix}").unwrap();
-            wrote_once = true;
-        }
+        text.push_str(" (");
+        text.push_str(&parts.join(", "));
         text.push(')');
     }
 
@@ -226,9 +237,10 @@ impl Render for CursorPosition {
                 Button::new("go-to-line-column", text)
                     .label_size(LabelSize::Small)
                     .tab_index(0isize)
-                    .aria_label(format!(
-                        "Line {}, column {}",
-                        position.line, position.character
+                    .aria_label(t!(
+                        "Line {line}, column {column}",
+                        line = position.line,
+                        column = position.character
                     ))
                     .on_click(cx.listener(|this, _, window, cx| {
                         if let Some(workspace) = this.workspace.upgrade() {
@@ -247,13 +259,13 @@ impl Render for CursorPosition {
                     }))
                     .tooltip(move |_window, cx| match context.as_ref() {
                         Some(context) => Tooltip::for_action_in(
-                            "Go to Line/Column",
+                            t!("Go to Line/Column"),
                             &editor::actions::ToggleGoToLine,
                             context,
                             cx,
                         ),
                         None => Tooltip::for_action(
-                            "Go to Line/Column",
+                            t!("Go to Line/Column"),
                             &editor::actions::ToggleGoToLine,
                             cx,
                         ),

@@ -15,6 +15,7 @@ doctest = false
 [dependencies]
 editor.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 language.workspace = true
 menu.workspace = true
 multi_buffer.workspace = true

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use i18n::{n, t};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
@@ -39,10 +40,13 @@ const RETRY_ABORT_ATTEMPT: u64 = 8;
 const DEFAULT_STALL_BOUND: Duration = Duration::from_secs(60);
 const STALL_ENV: &str = "WU_OPENCODE_STALL_MS";
 const COMMAND_CACHE_TTL: Duration = Duration::from_secs(10);
+pub const UNTITLED_CHAT: &str = n!("Untitled chat");
 
-const STALL_HINT: &str = "The model provider is likely unreachable or rejecting requests. \
-     Check the model/provider setup (`opencode auth list`, opencode.json) or the opencode \
-     log (~/.local/share/opencode/log).";
+fn stall_hint() -> i18n::SharedString {
+    t!(
+        "The model provider is likely unreachable or rejecting requests. Check the model/provider setup (`opencode auth list`, opencode.json) or the opencode log (~/.local/share/opencode/log)."
+    )
+}
 
 const INSTALL_HINT: &str = "opencode (searched PATH, ~/.opencode/bin, ~/.local/bin, ~/.bun/bin, \
      ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin, and fnm/nvm/volta/pnpm/bun install \
@@ -204,29 +208,39 @@ fn permission_question(properties: &Value) -> UserInputQuestion {
     };
     let first_pattern = patterns.first().copied();
     let specific = match permission {
-        "bash" => metadata("command").map(|command| format!("Run `{command}`?")),
+        "bash" => metadata("command").map(|command| t!("Run `{command}`?", command = command)),
         "edit" => metadata("filepath")
             .or(first_pattern)
-            .map(|path| format!("Edit {path}?")),
+            .map(|path| t!("Edit {path}?", path = path)),
         "read" => metadata("filepath")
             .or(first_pattern)
-            .map(|path| format!("Read {path}?")),
+            .map(|path| t!("Read {path}?", path = path)),
         "webfetch" => metadata("url")
             .or(first_pattern)
-            .map(|url| format!("Fetch {url}?")),
+            .map(|url| t!("Fetch {url}?", url = url)),
         "websearch" => metadata("query")
             .or(first_pattern)
-            .map(|query| format!("Search the web for \"{query}\"?")),
-        "task" => first_pattern.map(|agent| format!("Start a {agent} subagent?")),
-        "external_directory" => (!patterns.is_empty())
-            .then(|| format!("Access {} outside the project?", patterns.join(", "))),
+            .map(|query| t!("Search the web for \"{query}\"?", query = query)),
+        "task" => first_pattern.map(|agent| t!("Start a {agent} subagent?", agent = agent)),
+        "external_directory" => (!patterns.is_empty()).then(|| {
+            t!(
+                "Access {paths} outside the project?",
+                paths = patterns.join(", ")
+            )
+        }),
         _ => None,
     };
-    let question = specific.unwrap_or_else(|| match (permission, patterns.is_empty()) {
-        ("", _) => "OpenCode wants permission to continue. Allow it?".to_owned(),
-        (permission, true) => format!("Allow {permission}?"),
-        (permission, false) => format!("Allow {permission} for {}?", patterns.join(", ")),
-    });
+    let question = specific
+        .unwrap_or_else(|| match (permission, patterns.is_empty()) {
+            ("", _) => t!("OpenCode wants permission to continue. Allow it?"),
+            (permission, true) => t!("Allow {permission}?", permission = permission),
+            (permission, false) => t!(
+                "Allow {permission} for {paths}?",
+                permission = permission,
+                paths = patterns.join(", ")
+            ),
+        })
+        .to_string();
     UserInputQuestion {
         id: uuid::Uuid::new_v4().to_string(),
         header: crate::claude::PERMISSION_HEADER.into(),
@@ -564,7 +578,9 @@ impl Harness for OpencodeHarness {
         result?
             .map(|messages| feed::history_events(&messages))
             .ok_or_else(|| {
-                HarnessError::Protocol("This OpenCode version can't share its saved chats.".into())
+                HarnessError::Protocol(
+                    n!("This OpenCode version can't share its saved chats.").into(),
+                )
             })
     }
 
@@ -634,7 +650,7 @@ fn utf8_directory(cwd: &Path) -> Result<Option<&str>, HarnessError> {
     }
     cwd.to_str()
         .map(Some)
-        .ok_or_else(|| HarnessError::Protocol("Project path is not UTF-8".into()))
+        .ok_or_else(|| HarnessError::Protocol(n!("Project path is not UTF-8").into()))
 }
 
 fn new_message_id() -> String {
@@ -824,10 +840,13 @@ async fn run_session(session: Session) {
             match agent_session_rules(&server, dir, agent, permission).await {
                 Ok(rules) => Some(rules),
                 Err(error) => {
-                    rules_warning = Some(format!(
-                        "Couldn't read OpenCode's permission rules, so OpenCode's own rules apply: \
-                         {error}"
-                    ));
+                    rules_warning = Some(
+                        t!(
+                            "Couldn't read OpenCode's permission rules, so OpenCode's own rules apply: {error}",
+                            error = error
+                        )
+                        .to_string(),
+                    );
                     None
                 }
             }
@@ -885,9 +904,13 @@ async fn run_session(session: Session) {
                 if let Some(prompt) = &request.drop_prompt
                     && let Err(error) = server.revert_to(&id, prompt, dir).await
                 {
-                    drop_problem = Some(format!(
-                        "OpenCode couldn't forget your earlier message, so it may still see it. {error}"
-                    ));
+                    drop_problem = Some(
+                        t!(
+                            "OpenCode couldn't forget your earlier message, so it may still see it. {error}",
+                            error = error
+                        )
+                        .to_string(),
+                    );
                 }
                 id
             }
@@ -1047,14 +1070,18 @@ async fn run_session(session: Session) {
     .await;
     match connect_wait {
         Ok(true) => {}
-        Ok(false) => end_before_turn!(format!(
-            "Couldn't connect to opencode's event stream. {}",
-            crate::crash_message(
-                "opencode serve",
-                server.child_exit_status(),
-                &server.stderr_tail
+        Ok(false) => {
+            let message = t!(
+                "Couldn't connect to opencode's event stream. {reason}",
+                reason = crate::crash_message(
+                    "opencode serve",
+                    server.child_exit_status(),
+                    &server.stderr_tail
+                )
             )
-        )),
+            .to_string();
+            end_before_turn!(message)
+        }
         Err(_) => {
             tracing::debug!(target: "agent_harness::opencode", "event bus not connected within 15s; prompting anyway")
         }
@@ -1391,10 +1418,13 @@ async fn run_session(session: Session) {
                 if let Err(error) = server.abort_session(&session_id, dir).await {
                     tracing::debug!(target: "agent_harness::opencode", "abort after stall failed: {error}");
                 }
-                fail_turn!(format!(
-                    "opencode made no progress for {}s after the prompt. {STALL_HINT}",
-                    stall.unwrap_or(DEFAULT_STALL_BOUND).as_secs()
-                ));
+                let message = t!(
+                    "opencode made no progress for {seconds}s after the prompt. {hint}",
+                    seconds = stall.unwrap_or(DEFAULT_STALL_BOUND).as_secs(),
+                    hint = stall_hint()
+                )
+                .to_string();
+                fail_turn!(message);
                 break 'main;
             }
 
@@ -1671,8 +1701,8 @@ async fn post_prompt(
     {
         if !spec.attachments.is_empty() {
             return Err(HarnessError::Protocol(
-                "OpenCode commands cannot include attachments; send them in a separate prompt"
-                    .into(),
+                t!("OpenCode commands cannot include attachments; send them in a separate prompt")
+                    .to_string(),
             ));
         }
         let (path, body) = match protocol {
@@ -1780,7 +1810,8 @@ fn native_command_request<'a>(
     let Some((name, arguments)) = crate::leading_command(prompt) else {
         return if selected {
             Err(HarnessError::Protocol(
-                "The selected OpenCode command is no longer available in this project".into(),
+                t!("The selected OpenCode command is no longer available in this project")
+                    .to_string(),
             ))
         } else {
             Ok(None)
@@ -1789,9 +1820,13 @@ fn native_command_request<'a>(
     if routable.iter().any(|command| command == name) {
         Ok(Some((name, arguments)))
     } else if selected {
-        Err(HarnessError::Protocol(format!(
-            "The selected OpenCode command /{name} is no longer available in this project"
-        )))
+        Err(HarnessError::Protocol(
+            t!(
+                "The selected OpenCode command /{name} is no longer available in this project",
+                name = name
+            )
+            .to_string(),
+        ))
     } else {
         Ok(None)
     }
@@ -1939,15 +1974,25 @@ async fn handle_bus_event(context: BusContext<'_>) -> BusOutcome {
                     let message = status
                         .get("message")
                         .and_then(Value::as_str)
-                        .unwrap_or("provider error");
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| t!("provider error").to_string());
                     if attempt >= RETRY_ABORT_ATTEMPT && !turn.aborted_for_retry {
                         turn.aborted_for_retry = true;
-                        turn.error = Some(format!(
-                            "the provider kept failing after {attempt} attempts: {message}"
-                        ));
-                        let chip = format!(
-                            "Giving up after {attempt} provider retries: {message}. {STALL_HINT}"
+                        turn.error = Some(
+                            t!(
+                                "the provider kept failing after {attempt} attempts: {message}",
+                                attempt = attempt,
+                                message = message
+                            )
+                            .to_string(),
                         );
+                        let chip = t!(
+                            "Giving up after {attempt} provider retries: {message}. {hint}",
+                            attempt = attempt,
+                            message = message,
+                            hint = stall_hint()
+                        )
+                        .to_string();
                         if !send(event_tx, AgentEvent::Error { message: chip }).await {
                             return BusOutcome::ConsumerGone;
                         }
@@ -1956,10 +2001,12 @@ async fn handle_bus_event(context: BusContext<'_>) -> BusOutcome {
                         }
                     } else if attempt >= RETRY_REPORT_ATTEMPT && !turn.retry_reported {
                         turn.retry_reported = true;
-                        let chip = format!(
-                            "The provider is failing and opencode is retrying (attempt \
-                             {attempt}): {message}"
-                        );
+                        let chip = t!(
+                            "The provider is failing and opencode is retrying (attempt {attempt}): {message}",
+                            attempt = attempt,
+                            message = message
+                        )
+                        .to_string();
                         if !send(event_tx, AgentEvent::Error { message: chip }).await {
                             return BusOutcome::ConsumerGone;
                         }
@@ -2355,7 +2402,11 @@ async fn answer_permission(
         report_turn_failure(
             failure_tx,
             generation,
-            format!("Couldn't answer OpenCode's permission request: {error}"),
+            t!(
+                "Couldn't answer OpenCode's permission request: {error}",
+                error = error
+            )
+            .to_string(),
         );
     }
 }

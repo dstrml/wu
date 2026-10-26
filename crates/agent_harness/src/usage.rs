@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use i18n::t;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -59,26 +60,26 @@ pub async fn usage_request(harness: HarnessId) -> Result<UsageRequest, String> {
         HarnessId::ClaudeCode => {
             let credentials = read_claude_credentials()
                 .await?
-                .ok_or_else(|| "Sign in to Claude Code to see usage".to_string())?;
+                .ok_or_else(|| t!("Sign in to Claude Code to see usage").to_string())?;
             claude_usage_request(&credentials)
         }
         HarnessId::Codex => {
             let auth = read_json(&codex_home().join("auth.json"))
-                .ok_or_else(|| "Sign in to Codex to see usage".to_string())?;
+                .ok_or_else(|| t!("Sign in to Codex to see usage").to_string())?;
             codex_usage_request(&auth)
         }
-        HarnessId::Opencode => Err(OPENCODE_NO_USAGE.into()),
+        HarnessId::Opencode => Err(i18n::translate(OPENCODE_NO_USAGE).to_string()),
     }
 }
 
-pub const OPENCODE_NO_USAGE: &str = "OpenCode doesn't report plan usage";
+pub const OPENCODE_NO_USAGE: &str = i18n::n!("OpenCode doesn't report plan usage");
 
 pub(crate) fn claude_usage_request(credentials: &Value) -> Result<UsageRequest, String> {
     let oauth = credentials
         .get("claudeAiOauth")
-        .ok_or_else(|| "Usage is only reported for Claude subscriptions".to_string())?;
+        .ok_or_else(|| t!("Usage is only reported for Claude subscriptions").to_string())?;
     let access_token = str_field(oauth, "accessToken")
-        .ok_or_else(|| "Sign in to Claude Code to see usage".to_string())?;
+        .ok_or_else(|| t!("Sign in to Claude Code to see usage").to_string())?;
     let plan_label = claude_plan(
         str_field(oauth, "subscriptionType")
             .map(|kind| format!("claude_{kind}"))
@@ -99,13 +100,13 @@ pub(crate) fn claude_usage_request(credentials: &Value) -> Result<UsageRequest, 
 pub(crate) fn codex_usage_request(auth: &Value) -> Result<UsageRequest, String> {
     let Some(tokens) = auth.get("tokens") else {
         return Err(if str_field(auth, "OPENAI_API_KEY").is_some() {
-            "Usage isn't reported for API keys".into()
+            t!("Usage isn't reported for API keys").to_string()
         } else {
-            "Sign in to Codex to see usage".into()
+            t!("Sign in to Codex to see usage").to_string()
         });
     };
     let access_token = str_field(tokens, "access_token")
-        .ok_or_else(|| "Sign in to Codex to see usage".to_string())?;
+        .ok_or_else(|| t!("Sign in to Codex to see usage").to_string())?;
     Ok(UsageRequest {
         url: CODEX_USAGE_URL,
         headers: vec![
@@ -121,9 +122,9 @@ pub(crate) fn codex_usage_request(auth: &Value) -> Result<UsageRequest, String> 
 
 pub fn status_message(status: u16) -> String {
     match status {
-        401 | 403 => "Sign in again to see usage".into(),
-        429 => "Usage is rate limited, try again soon".into(),
-        _ => format!("Usage unavailable (HTTP {status})"),
+        401 | 403 => t!("Sign in again to see usage").to_string(),
+        429 => t!("Usage is rate limited, try again soon").to_string(),
+        _ => t!("Usage unavailable (HTTP {status})", status = status).to_string(),
     }
 }
 
@@ -219,11 +220,11 @@ pub(crate) mod keychain {
         }
         let (ok, stdout) = exec(&["find-generic-password", "-s", service, "-w"]).await;
         if !ok {
-            return Err("macOS Keychain denied access to the Claude Code login".into());
+            return Err(t!("macOS Keychain denied access to the Claude Code login").to_string());
         }
         serde_json::from_str(stdout.trim())
             .map(Some)
-            .map_err(|_| "The Claude Code Keychain entry could not be read".into())
+            .map_err(|_| t!("The Claude Code Keychain entry could not be read").to_string())
     }
 }
 
@@ -276,14 +277,14 @@ pub(crate) fn codex_plan(plan: Option<&str>) -> Option<String> {
     ))
 }
 
-fn codex_window_label(span_seconds: i64) -> &'static str {
+fn codex_window_label(span_seconds: i64) -> i18n::SharedString {
     const DAY: i64 = 86_400;
     if span_seconds >= 28 * DAY {
-        "Month"
+        t!("Month")
     } else if span_seconds >= 5 * DAY {
-        "Week"
+        t!("Week")
     } else {
-        "Session"
+        t!("Session")
     }
 }
 
@@ -316,7 +317,7 @@ fn codex_usage_snapshot(body: &Value) -> Option<PlanUsage> {
 
 fn claude_usage_windows(body: &Value) -> Option<PlanUsage> {
     let mut windows = Vec::new();
-    for (key, label) in [("five_hour", "Session"), ("seven_day", "Week")] {
+    for (key, label) in [("five_hour", t!("Session")), ("seven_day", t!("Week"))] {
         if let Some(w) = body.get(key)
             && let Some(utilization) = w.get("utilization").and_then(|v| v.as_f64())
         {

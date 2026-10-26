@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use i18n::t;
 use ui::{SpinnerLabel, div, prelude::*};
 
 use crate::TabularDataPreviewPane;
@@ -51,10 +52,10 @@ impl Render for TabularDataPreviewPane {
                                         h_flex()
                                             .gap_2()
                                             .child(SpinnerLabel::new())
-                                            .child("Loading…"),
+                                            .child(t!("Loading…")),
                                     )
                                 })
-                                .when(!is_parsing, |div| div.child("No data to display")),
+                                .when(!is_parsing, |div| div.child(t!("No data to display"))),
                         )
                         .into_any_element()
                 } else {

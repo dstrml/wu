@@ -7,7 +7,8 @@ use anyhow::{Context as _, Result};
 use askpass::EncryptedPassword;
 use editor::Editor;
 use futures::{FutureExt as _, channel::oneshot, select};
-use gpui::{AppContext, AsyncApp, PromptLevel, WindowHandle};
+use gpui::{AppContext, AsyncApp, PromptButton, PromptLevel, SharedString, WindowHandle};
+use i18n::t;
 
 use project::trusted_worktrees;
 use remote::{Interactive, RemoteConnection, RemoteConnectionOptions, SshConnectionOptions};
@@ -299,16 +300,12 @@ pub async fn open_remote_project(
                     .update(cx, |_, window, cx| {
                         window.prompt(
                             PromptLevel::Critical,
-                            match connection_options {
-                                RemoteConnectionOptions::Ssh(_) => "Failed to connect over SSH",
-                                RemoteConnectionOptions::Wsl(_) => "Failed to connect to WSL",
-                                #[cfg(any(test, feature = "test-support"))]
-                                RemoteConnectionOptions::Mock(_) => {
-                                    "Failed to connect to mock server"
-                                }
-                            },
+                            &connection_failed_message(&connection_options),
                             Some(&format!("{e:#}")),
-                            &["Retry", "Cancel"],
+                            &[
+                                PromptButton::new(t!("Retry")),
+                                PromptButton::cancel(t!("Cancel")),
+                            ],
                             cx,
                         )
                     })?
@@ -357,16 +354,12 @@ pub async fn open_remote_project(
                     .update(cx, |_, window, cx| {
                         window.prompt(
                             PromptLevel::Critical,
-                            match connection_options {
-                                RemoteConnectionOptions::Ssh(_) => "Failed to connect over SSH",
-                                RemoteConnectionOptions::Wsl(_) => "Failed to connect to WSL",
-                                #[cfg(any(test, feature = "test-support"))]
-                                RemoteConnectionOptions::Mock(_) => {
-                                    "Failed to connect to mock server"
-                                }
-                            },
+                            &connection_failed_message(&connection_options),
                             Some(&format!("{e:#}")),
-                            &["Retry", "Cancel"],
+                            &[
+                                PromptButton::new(t!("Retry")),
+                                PromptButton::cancel(t!("Cancel")),
+                            ],
                             cx,
                         )
                     })?
@@ -400,6 +393,15 @@ pub async fn open_remote_project(
     }
 
     Ok(window)
+}
+
+fn connection_failed_message(connection_options: &RemoteConnectionOptions) -> SharedString {
+    match connection_options {
+        RemoteConnectionOptions::Ssh(_) => t!("Failed to connect over SSH"),
+        RemoteConnectionOptions::Wsl(_) => t!("Failed to connect to WSL"),
+        #[cfg(any(test, feature = "test-support"))]
+        RemoteConnectionOptions::Mock(_) => "Failed to connect to mock server".into(),
+    }
 }
 
 pub fn navigate_to_positions(

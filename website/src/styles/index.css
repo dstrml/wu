@@ -65,11 +65,11 @@
 }
 
 @theme inline {
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-wu: "Geist", system-ui, -apple-system, sans-serif;
-  --font-wu-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", monospace;
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-wu: "Geist", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-wu-mono: "JetBrains Mono", ui-monospace, Menlo, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", monospace;
   --color-primary: var(--primary);
   --color-secondary: var(--secondary);
   --color-tertiary: var(--tertiary);

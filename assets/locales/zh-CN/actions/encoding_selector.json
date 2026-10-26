@@ -1,0 +1,6 @@
+{
+  "encoding_selector::Toggle": {
+    "name": "切换编码选择器",
+    "description": "切换编码选择器弹窗。"
+  }
+}

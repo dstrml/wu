@@ -22,6 +22,7 @@ use gpui::{
     ScrollStrategy, SharedString, StrikethroughStyle, Styled, StyledText, Subscription, Task,
     UniformListScrollHandle, WeakEntity, Window, actions, div, px, uniform_list,
 };
+use i18n::{n, t};
 use language::{Buffer, BufferId, BufferSnapshot, Point};
 use menu::{Cancel, Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
 use project::{Project, ProjectPath, search::SearchQuery};
@@ -156,14 +157,17 @@ impl SearchPanel {
         cx.new(|cx| {
             let search =
                 cx.new(|cx| ProjectSearch::new(project.clone(), weak_workspace.clone(), cx));
-            let query_editor = single_line_editor("Search", window, cx);
+            let query_editor = single_line_editor(&t!("Search"), window, cx);
             query_editor.update(cx, |editor, _| {
                 editor.set_use_autoclose(false);
                 editor.set_use_selection_highlight(false);
             });
-            let replacement_editor = single_line_editor(REPLACE_PLACEHOLDER, window, cx);
-            let included_files_editor = single_line_editor(INCLUDE_PLACEHOLDER, window, cx);
-            let excluded_files_editor = single_line_editor(EXCLUDE_PLACEHOLDER, window, cx);
+            let replacement_editor =
+                single_line_editor(&i18n::translate(REPLACE_PLACEHOLDER), window, cx);
+            let included_files_editor =
+                single_line_editor(&i18n::translate(INCLUDE_PLACEHOLDER), window, cx);
+            let excluded_files_editor =
+                single_line_editor(&i18n::translate(EXCLUDE_PLACEHOLDER), window, cx);
 
             let subscriptions = vec![
                 cx.observe_in(&search, window, |this: &mut Self, _, window, cx| {
@@ -1019,7 +1023,7 @@ impl SearchPanel {
             .tooltip({
                 let focus_handle = query_focus_handle.clone();
                 move |_, cx| {
-                    Tooltip::for_action_in("Toggle Replace", &ToggleReplace, &focus_handle, cx)
+                    Tooltip::for_action_in(t!("Toggle Replace"), &ToggleReplace, &focus_handle, cx)
                 }
             })
             .on_click(cx.listener(|this, _, window, cx| {
@@ -1039,7 +1043,9 @@ impl SearchPanel {
             .disabled(self.files.is_empty())
             .tooltip({
                 let focus_handle = query_focus_handle.clone();
-                move |_, cx| Tooltip::for_action_in("Replace All", &ReplaceAll, &focus_handle, cx)
+                move |_, cx| {
+                    Tooltip::for_action_in(t!("Replace All"), &ReplaceAll, &focus_handle, cx)
+                }
             })
             .on_click(cx.listener(|this, _, window, cx| {
                 this.replace_all(&ReplaceAll, window, cx);
@@ -1052,7 +1058,7 @@ impl SearchPanel {
                 query_focus_handle,
             )
             .into_any_element();
-        let filter_label = |text: &'static str| {
+        let filter_label = |text: SharedString| {
             Label::new(text)
                 .size(LabelSize::XSmall)
                 .color(Color::Muted)
@@ -1094,14 +1100,14 @@ impl SearchPanel {
                 this.child(
                     v_flex()
                         .pl_5()
-                        .child(filter_label("files to include"))
+                        .child(filter_label(t!("files to include")))
                         .child(self.render_input(
                             &self.included_files_editor,
                             Some(include_ignored_button),
                             window,
                             cx,
                         ))
-                        .child(filter_label("files to exclude"))
+                        .child(filter_label(t!("files to exclude")))
                         .child(self.render_input(&self.excluded_files_editor, None, window, cx)),
                 )
             })
@@ -1121,20 +1127,28 @@ impl SearchPanel {
         let has_query = !self.query_text(cx).is_empty();
         let match_count = self.match_count();
         let summary: Option<SharedString> = if search.pending_search.is_some() && match_count == 0 {
-            Some("Searching…".into())
+            Some(t!("Searching…"))
         } else if match_count > 0 {
-            let files = self.files.len();
-            let mut summary = format!(
-                "{match_count} result{} in {files} file{}",
-                if match_count == 1 { "" } else { "s" },
-                if files == 1 { "" } else { "s" }
-            );
+            let results = if match_count == 1 {
+                t!("1 result")
+            } else {
+                t!("{count} results", count = match_count)
+            };
+            let files = match self.files.len() {
+                1 => t!("1 file"),
+                count => t!("{count} files", count = count),
+            };
             if state.limit_reached() {
-                summary.push_str(", limit reached");
+                Some(t!(
+                    "{results} in {files}, limit reached",
+                    results = results,
+                    files = files
+                ))
+            } else {
+                Some(t!("{results} in {files}", results = results, files = files))
             }
-            Some(summary.into())
         } else if has_query && state.no_results_so_far() {
-            Some("No results found".into())
+            Some(t!("No results found"))
         } else {
             None
         };
@@ -1149,7 +1163,9 @@ impl SearchPanel {
                 .shape(IconButtonShape::Square)
                 .icon_size(IconSize::Small)
                 .disabled(!enabled)
-                .tooltip(move |_, cx| Tooltip::for_action_in(label, action, &focus_handle, cx))
+                .tooltip(move |_, cx| {
+                    Tooltip::for_action_in(i18n::translate(label), action, &focus_handle, cx)
+                })
                 .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
         };
         let has_results = !self.files.is_empty();
@@ -1176,28 +1192,28 @@ impl SearchPanel {
                     .child(action_button(
                         "search-panel-refresh",
                         IconName::ArrowCircle,
-                        "Refresh",
+                        n!("Refresh"),
                         &RefreshResults,
                         has_query,
                     ))
                     .child(action_button(
                         "search-panel-clear",
                         IconName::Eraser,
-                        "Clear Search Results",
+                        n!("Clear Search Results"),
                         &ClearResults,
                         has_query || has_results,
                     ))
                     .child(action_button(
                         "search-panel-collapse-all",
                         IconName::ListCollapse,
-                        "Collapse All",
+                        n!("Collapse All"),
                         &CollapseAllEntries,
                         has_results,
                     ))
                     .child(action_button(
                         "search-panel-open-in-editor",
                         IconName::FileDiff,
-                        "Open in Editor",
+                        n!("Open in Editor"),
                         &OpenInEditor,
                         has_results,
                     ))
@@ -1210,7 +1226,7 @@ impl SearchPanel {
                                 let focus_handle = query_focus_handle.clone();
                                 move |_, cx| {
                                     Tooltip::for_action_in(
-                                        "Toggle Search Details",
+                                        t!("Toggle Search Details"),
                                         &ToggleFilters,
                                         &focus_handle,
                                         cx,
@@ -1271,7 +1287,7 @@ impl SearchPanel {
             )
             .shape(IconButtonShape::Square)
             .icon_size(IconSize::Small)
-            .tooltip(Tooltip::text("Replace All in File"))
+            .tooltip(Tooltip::text(t!("Replace All in File")))
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
                 this.replace_file(file_index, window, cx);
@@ -1397,7 +1413,7 @@ impl SearchPanel {
             )
             .shape(IconButtonShape::Square)
             .icon_size(IconSize::Small)
-            .tooltip(Tooltip::text("Replace"))
+            .tooltip(Tooltip::text(t!("Replace")))
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
                 this.replace_match(file_index, match_index, window, cx);
@@ -1471,11 +1487,7 @@ impl SearchPanel {
     }
 }
 
-fn single_line_editor(
-    placeholder: &'static str,
-    window: &mut Window,
-    cx: &mut App,
-) -> Entity<Editor> {
+fn single_line_editor(placeholder: &str, window: &mut Window, cx: &mut App) -> Entity<Editor> {
     cx.new(|cx| {
         let mut editor = Editor::single_line(window, cx);
         editor.set_placeholder_text(placeholder, window, cx);
@@ -1642,7 +1654,7 @@ impl Panel for SearchPanel {
     }
 
     fn icon_tooltip(&self, _: &Window, _: &App) -> Option<&'static str> {
-        Some("Search Panel")
+        Some(n!("Search Panel"))
     }
 
     fn toggle_action(&self) -> Box<dyn Action> {

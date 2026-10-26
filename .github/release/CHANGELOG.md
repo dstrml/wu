@@ -7,6 +7,7 @@ release body.
 
 ## Unreleased
 
+- Wu is now available in Simplified Chinese. Pick the language in Settings > Appearance, or let it follow your system.
 - Cancelled messages in older Codex chats no longer offer Edit.
 - Fixed agent chats with generated images jumping while you scroll.
 

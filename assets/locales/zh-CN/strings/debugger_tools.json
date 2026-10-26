@@ -1,0 +1,9 @@
+{
+  "Adapter Logs": "适配器日志",
+  "Clear": "清除",
+  "DAP Logs": "DAP 日志",
+  "Initialization Sequence": "初始化序列",
+  "No adapter selected": "未选择适配器",
+  "RPC Messages": "RPC 消息",
+  "Session {id} (child)": "会话 {id}（子会话）"
+}

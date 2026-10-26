@@ -509,7 +509,7 @@ impl LspCommand for PrepareCallHierarchy {
     type ProtoRequest = proto::PrepareCallHierarchy;
 
     fn display_name(&self) -> &str {
-        "Prepare call hierarchy"
+        i18n::n!("Prepare call hierarchy")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -685,7 +685,7 @@ impl LspCommand for GetIncomingCalls {
     type ProtoRequest = proto::GetIncomingCalls;
 
     fn display_name(&self) -> &str {
-        "Get incoming calls"
+        i18n::n!("Get incoming calls")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -832,7 +832,7 @@ impl LspCommand for GetOutgoingCalls {
     type ProtoRequest = proto::GetOutgoingCalls;
 
     fn display_name(&self) -> &str {
-        "Get outgoing calls"
+        i18n::n!("Get outgoing calls")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -970,7 +970,7 @@ impl LspCommand for PrepareRename {
     type ProtoRequest = proto::PrepareRename;
 
     fn display_name(&self) -> &str {
-        "Prepare rename"
+        i18n::n!("Prepare rename")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1162,7 +1162,7 @@ impl LspCommand for PerformRename {
     type ProtoRequest = proto::PerformRename;
 
     fn display_name(&self) -> &str {
-        "Rename"
+        i18n::n!("Rename")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1291,7 +1291,7 @@ impl LspCommand for GetDefinitions {
     type ProtoRequest = proto::GetDefinition;
 
     fn display_name(&self) -> &str {
-        "Get definition"
+        i18n::n!("Get definition")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1393,7 +1393,7 @@ impl LspCommand for GetEditPredictionDefinitions {
     type ProtoRequest = proto::GetEditPredictionDefinition;
 
     fn display_name(&self) -> &str {
-        "Get edit prediction definition"
+        i18n::n!("Get edit prediction definition")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1493,7 +1493,7 @@ impl LspCommand for GetDeclarations {
     type ProtoRequest = proto::GetDeclaration;
 
     fn display_name(&self) -> &str {
-        "Get declaration"
+        i18n::n!("Get declaration")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1596,7 +1596,7 @@ impl LspCommand for GetImplementations {
     type ProtoRequest = proto::GetImplementation;
 
     fn display_name(&self) -> &str {
-        "Get implementation"
+        i18n::n!("Get implementation")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1698,7 +1698,7 @@ impl LspCommand for GetTypeDefinitions {
     type ProtoRequest = proto::GetTypeDefinition;
 
     fn display_name(&self) -> &str {
-        "Get type definition"
+        i18n::n!("Get type definition")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -1797,7 +1797,7 @@ impl LspCommand for GetEditPredictionTypeDefinitions {
     type ProtoRequest = proto::GetEditPredictionTypeDefinition;
 
     fn display_name(&self) -> &str {
-        "Get edit prediction type definition"
+        i18n::n!("Get edit prediction type definition")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -2269,11 +2269,11 @@ impl LspCommand for GetReferences {
     type ProtoRequest = proto::GetReferences;
 
     fn display_name(&self) -> &str {
-        "Find all references"
+        i18n::n!("Find all references")
     }
 
     fn status(&self) -> Option<String> {
-        Some("Finding references...".to_owned())
+        Some(i18n::t!("Finding references...").to_string())
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -2447,7 +2447,7 @@ impl LspCommand for GetDocumentHighlights {
     type ProtoRequest = proto::GetDocumentHighlights;
 
     fn display_name(&self) -> &str {
-        "Get document highlights"
+        i18n::n!("Get document highlights")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -2602,7 +2602,7 @@ impl LspCommand for GetDocumentSymbols {
     type ProtoRequest = proto::GetDocumentSymbols;
 
     fn display_name(&self) -> &str {
-        "Get document symbols"
+        i18n::n!("Get document symbols")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -2799,7 +2799,7 @@ impl LspCommand for GetSignatureHelp {
     type ProtoRequest = proto::GetSignatureHelp;
 
     fn display_name(&self) -> &str {
-        "Get signature help"
+        i18n::n!("Get signature help")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -2923,7 +2923,7 @@ impl LspCommand for GetHover {
     type ProtoRequest = proto::GetHover;
 
     fn display_name(&self) -> &str {
-        "Get hover"
+        i18n::n!("Get hover")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -3163,7 +3163,7 @@ impl LspCommand for GetCompletions {
     type ProtoRequest = proto::GetCompletions;
 
     fn display_name(&self) -> &str {
-        "Get completion"
+        i18n::n!("Get completion")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -3527,7 +3527,7 @@ impl LspCommand for GetCodeActions {
     type ProtoRequest = proto::GetCodeActions;
 
     fn display_name(&self) -> &str {
-        "Get code actions"
+        i18n::n!("Get code actions")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -3806,7 +3806,7 @@ impl LspCommand for OnTypeFormatting {
     type ProtoRequest = proto::OnTypeFormatting;
 
     fn display_name(&self) -> &str {
-        "Formatting on typing"
+        i18n::n!("Formatting on typing")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -4312,7 +4312,7 @@ impl LspCommand for InlayHints {
     type ProtoRequest = proto::InlayHints;
 
     fn display_name(&self) -> &str {
-        "Inlay hints"
+        i18n::n!("Inlay hints")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -4464,7 +4464,7 @@ impl LspCommand for SemanticTokensFull {
     type ProtoRequest = proto::SemanticTokens;
 
     fn display_name(&self) -> &str {
-        "Semantic tokens full"
+        i18n::n!("Semantic tokens full")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -4615,7 +4615,7 @@ impl LspCommand for SemanticTokensDelta {
     type ProtoRequest = proto::SemanticTokens;
 
     fn display_name(&self) -> &str {
-        "Semantic tokens delta"
+        i18n::n!("Semantic tokens delta")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -4768,7 +4768,7 @@ impl LspCommand for GetCodeLens {
     type ProtoRequest = proto::GetCodeLens;
 
     fn display_name(&self) -> &str {
-        "Code Lens"
+        i18n::n!("Code Lens")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -4905,7 +4905,7 @@ impl LspCommand for LinkedEditingRange {
     type ProtoRequest = proto::LinkedEditingRange;
 
     fn display_name(&self) -> &str {
-        "Linked editing range"
+        i18n::n!("Linked editing range")
     }
 
     fn check_capabilities(&self, capabilities: AdapterServerCapabilities) -> bool {
@@ -5356,7 +5356,7 @@ impl LspCommand for GetDocumentDiagnostics {
     type ProtoRequest = proto::GetDocumentDiagnostics;
 
     fn display_name(&self) -> &str {
-        "Get diagnostics"
+        i18n::n!("Get diagnostics")
     }
 
     fn check_capabilities(&self, _: AdapterServerCapabilities) -> bool {
@@ -5545,7 +5545,7 @@ impl LspCommand for GetDocumentColor {
     type ProtoRequest = proto::GetDocumentColor;
 
     fn display_name(&self) -> &str {
-        "Document color"
+        i18n::n!("Document color")
     }
 
     fn check_capabilities(&self, server_capabilities: AdapterServerCapabilities) -> bool {
@@ -5688,7 +5688,7 @@ impl LspCommand for GetFoldingRanges {
     type ProtoRequest = proto::GetFoldingRanges;
 
     fn display_name(&self) -> &str {
-        "Folding ranges"
+        i18n::n!("Folding ranges")
     }
 
     fn check_capabilities(&self, server_capabilities: AdapterServerCapabilities) -> bool {
@@ -5844,7 +5844,7 @@ impl LspCommand for GetDocumentLinks {
     type ProtoRequest = proto::GetDocumentLinks;
 
     fn display_name(&self) -> &str {
-        "Document links"
+        i18n::n!("Document links")
     }
 
     fn check_capabilities(&self, server_capabilities: AdapterServerCapabilities) -> bool {

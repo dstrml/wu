@@ -1,0 +1,6 @@
+{
+  "syntax_tree_view::UseActiveEditor": {
+    "name": "使用活动编辑器",
+    "description": "更新语法树视图，显示最后聚焦的文件。"
+  }
+}

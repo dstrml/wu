@@ -11,6 +11,7 @@ use gpui::{
     ShapedLine, SharedString, Styled, TextAlign, Window, WindowBackgroundAppearance, div, fill,
     linear_color_stop, linear_gradient, point, px, size,
 };
+use i18n::t;
 use language::language_settings::ShowWhitespaceSetting;
 use multi_buffer::{Anchor, ExcerptBoundaryInfo, MultiBuffer};
 use project::Entry;
@@ -755,14 +756,14 @@ pub(crate) fn render_buffer_header(
                                         move |_window, cx| {
                                             Tooltip::with_meta_in(
                                                 if is_folded_for_tooltip {
-                                                    "Unfold Excerpt"
+                                                    t!("Unfold Excerpt")
                                                 } else {
-                                                    "Fold Excerpt"
+                                                    t!("Fold Excerpt")
                                                 },
                                                 Some(&ToggleFold),
-                                                format!(
-                                                    "{} to toggle all",
-                                                    text_for_keystroke(
+                                                t!(
+                                                    "{shortcut} to toggle all",
+                                                    shortcut = text_for_keystroke(
                                                         &Modifiers::alt(),
                                                         "click",
                                                         cx
@@ -857,7 +858,7 @@ pub(crate) fn render_buffer_header(
                                             )
                                             .tooltip(move |_, cx| {
                                                 Tooltip::with_meta(
-                                                    "Open File",
+                                                    t!("Open File"),
                                                     None,
                                                     full_path.clone(),
                                                     cx,
@@ -925,7 +926,7 @@ pub(crate) fn render_buffer_header(
                                 })
                                 .when(show_open_file_button, |this| {
                                     this.child(
-                                        Button::new("open-file-button", "Open File")
+                                        Button::new("open-file-button", t!("Open File"))
                                             .style(ButtonStyle::OutlinedCustom(
                                                 cx.theme().colors().border.opacity(0.6),
                                             ))
@@ -1017,7 +1018,7 @@ pub(crate) fn render_buffer_header(
                     menu = menu
                         .when_some(abs_path, |menu, abs_path| {
                             menu.entry(
-                                "Copy Path",
+                                t!("Copy Path"),
                                 Some(Box::new(wu_actions::workspace::CopyPath)),
                                 window.handler_for(&editor, move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(
@@ -1028,7 +1029,7 @@ pub(crate) fn render_buffer_header(
                         })
                         .when_some(relative_path, |menu, relative_path| {
                             menu.entry(
-                                "Copy Relative Path",
+                                t!("Copy Relative Path"),
                                 Some(Box::new(wu_actions::workspace::CopyRelativePath)),
                                 window.handler_for(&editor, move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(
@@ -1043,7 +1044,7 @@ pub(crate) fn render_buffer_header(
                         )
                         .when_some(reveal_in_project_panel, |menu, entry_id| {
                             menu.entry(
-                                "Reveal In Project Panel",
+                                t!("Reveal In Project Panel"),
                                 Some(Box::new(RevealInProjectPanel::default())),
                                 window.handler_for(&editor, move |editor, _, cx| {
                                     if let Some(project) = &mut editor.project {
@@ -1056,7 +1057,7 @@ pub(crate) fn render_buffer_header(
                         })
                         .when_some(parent_abs_path, |menu, parent_abs_path| {
                             menu.entry(
-                                "Open in Terminal",
+                                t!("Open in Terminal"),
                                 Some(Box::new(OpenInTerminal)),
                                 window.handler_for(&editor, move |_, window, cx| {
                                     window.dispatch_action(

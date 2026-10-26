@@ -1,0 +1,54 @@
+{
+  "agent_chat::AcceptCommand": {
+    "name": "接受命令",
+    "description": "选择斜杠命令菜单中高亮显示的命令。"
+  },
+  "agent_chat::ContinueSavedChat": {
+    "name": "继续已保存的对话",
+    "description": "继续在 Claude Code、Codex 或 OpenCode 中开始的对话。"
+  },
+  "agent_chat::DismissCommands": {
+    "name": "关闭命令菜单",
+    "description": "关闭斜杠命令菜单。"
+  },
+  "agent_chat::NewClaudeChat": {
+    "name": "新建 Claude 对话",
+    "description": "开始新的 Claude Code 对话。"
+  },
+  "agent_chat::NewCodexChat": {
+    "name": "新建 Codex 对话",
+    "description": "开始新的 Codex 对话。"
+  },
+  "agent_chat::NewOpencodeChat": {
+    "name": "新建 OpenCode 对话",
+    "description": "开始新的 OpenCode 对话。"
+  },
+  "agent_chat::RenameChat": {
+    "name": "重命名对话",
+    "description": "在标签页上重命名对话。"
+  },
+  "agent_chat::SelectNextCommand": {
+    "name": "选择下一个命令",
+    "description": "高亮显示斜杠命令菜单中的下一个命令。"
+  },
+  "agent_chat::SelectPreviousCommand": {
+    "name": "选择上一个命令",
+    "description": "高亮显示斜杠命令菜单中的上一个命令。"
+  },
+  "agent_chat::Send": {
+    "name": "发送",
+    "description": "发送对话输入框中的消息。"
+  },
+  "agent_chat::Stop": {
+    "name": "停止",
+    "description": "停止智能体当前这一轮的回复。"
+  },
+  "agent_chat::ToggleDictation": {
+    "name": "切换听写",
+    "description": "在对话输入框中开始或停止听写。"
+  },
+  "agent_chat::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "切换智能体面板的焦点。"
+  }
+}

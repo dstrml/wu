@@ -72,7 +72,11 @@ impl LineWrapper {
                             }
                         } else {
                             // CJK may not be space separated, e.g.: `Hello world你好世界`
-                            if c != ' ' && first_non_whitespace_ix.is_some() {
+                            if c != ' '
+                                && first_non_whitespace_ix.is_some()
+                                && !Self::is_cjk_closing_punctuation(c)
+                                && !Self::is_cjk_opening_punctuation(prev_c)
+                            {
                                 last_candidate_ix = ix;
                                 last_candidate_width = width;
                             }
@@ -489,6 +493,35 @@ impl LineWrapper {
         matches!(c, '\u{202F}' | '\u{00A0}' | '\u{2011}')
     }
 
+    fn is_cjk_closing_punctuation(c: char) -> bool {
+        matches!(
+            c,
+            '，' | '。'
+                | '、'
+                | '；'
+                | '：'
+                | '？'
+                | '！'
+                | '）'
+                | '」'
+                | '』'
+                | '》'
+                | '〉'
+                | '】'
+                | '〕'
+                | '”'
+                | '’'
+                | '…'
+        )
+    }
+
+    fn is_cjk_opening_punctuation(c: char) -> bool {
+        matches!(
+            c,
+            '（' | '「' | '『' | '《' | '〈' | '【' | '〔' | '“' | '‘'
+        )
+    }
+
     #[inline(always)]
     fn width_for_char(&mut self, c: char) -> Pixels {
         if (c as u32) < 128 {
@@ -891,6 +924,30 @@ mod tests {
                 .wrap_line(&[LineFragment::text("aaaa bbb \"cc\"")], px(72.))
                 .collect::<Vec<_>>(),
             &[Boundary::new(5, 0), Boundary::new(9, 0)],
+        );
+    }
+
+    #[test]
+    fn test_wrap_line_keeps_chinese_punctuation_attached() {
+        let mut wrapper = build_wrapper();
+
+        assert_eq!(
+            wrapper
+                .wrap_line(&[LineFragment::text("你好世界你好世界")], px(72.))
+                .collect::<Vec<_>>(),
+            &[Boundary::new(21, 0)],
+        );
+        assert_eq!(
+            wrapper
+                .wrap_line(&[LineFragment::text("你好世界你好世，界")], px(72.))
+                .collect::<Vec<_>>(),
+            &[Boundary::new(18, 0)],
+        );
+        assert_eq!(
+            wrapper
+                .wrap_line(&[LineFragment::text("你好世界你好（世界")], px(72.))
+                .collect::<Vec<_>>(),
+            &[Boundary::new(18, 0)],
         );
     }
 

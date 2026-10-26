@@ -11,6 +11,7 @@ use fuzzy::{StringMatch, StringMatchCandidate, match_strings};
 use gpui::{
     BackgroundExecutor, DismissEvent, ElementId, Entity, Focusable, ForegroundExecutor, Task,
 };
+use i18n::{n, t};
 use picker::{Picker, PickerDelegate};
 use ui::{
     Color, GradientFade, HighlightedLabel, Icon, IconButton, IconName, IconSize, Label, LabelSize,
@@ -172,9 +173,7 @@ impl ColumnFilterDelegate {
         let mut header_inserted = false;
         for (row_index, positions) in matches {
             if rows[row_index].hidden_by.is_some() && !header_inserted {
-                entries.push(ColumnFilterListEntry::Header(
-                    "Hidden by other filters".into(),
-                ));
+                entries.push(ColumnFilterListEntry::Header(t!("Hidden by other filters")));
                 header_inserted = true;
             }
             entries.push(ColumnFilterListEntry::Row {
@@ -307,7 +306,12 @@ impl PickerDelegate for ColumnFilterDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        format!("Search {} unique values…", self.available_count).into()
+        t!(
+            "Search {count} unique values…",
+            count = self.available_count
+        )
+        .as_str()
+        .into()
     }
 
     fn update_matches(
@@ -491,16 +495,20 @@ impl PickerDelegate for ColumnFilterDelegate {
                 .justify_between()
                 .items_center()
                 .child(
-                    Label::new(format!("{selected_rows} / {total_rows} rows selected"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
+                    Label::new(t!(
+                        "{selected_rows} / {total_rows} rows selected",
+                        selected_rows = selected_rows,
+                        total_rows = total_rows
+                    ))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
                 )
                 .child(
                     div()
                         .id("table-filter-clear-all")
                         .cursor_pointer()
                         .child(
-                            Label::new("Clear all")
+                            Label::new(t!("Clear all"))
                                 .size(LabelSize::Small)
                                 .color(Color::Accent),
                         )
@@ -571,7 +579,7 @@ impl TabularDataPreviewPane {
                 with_copy_on_right_click(
                     header_text_cell,
                     header_text,
-                    "Right click to copy column name",
+                    n!("Right click to copy column name"),
                 )
                 .child(displayed_header)
             })
@@ -629,10 +637,10 @@ impl TabularDataPreviewPane {
         )
         .tooltip(Tooltip::text(match self.engine.applied_sorting {
             Some(ordering) if ordering.col_idx == col_idx => match ordering.direction {
-                SortDirection::Asc => "Sorted A-Z. Click to sort Z-A",
-                SortDirection::Desc => "Sorted Z-A. Click to disable sorting",
+                SortDirection::Asc => t!("Sorted A-Z. Click to sort Z-A"),
+                SortDirection::Desc => t!("Sorted Z-A. Click to disable sorting"),
             },
-            _ => "Not sorted. Click to sort A-Z",
+            _ => t!("Not sorted. Click to sort A-Z"),
         }))
         .on_click(cx.listener(move |this, _event, _window, cx| {
             let new_sorting = match this.engine.applied_sorting {
@@ -679,9 +687,9 @@ impl TabularDataPreviewPane {
             })
             .toggle_state(has_active_filters),
             Tooltip::text(if has_active_filters {
-                "Column has active filters. Click to manage"
+                t!("Column has active filters. Click to manage")
             } else {
-                "No filters applied. Click to add filters"
+                t!("No filters applied. Click to add filters")
             }),
         )
         .menu({

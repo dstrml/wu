@@ -33,10 +33,11 @@ use git_ui::unstaged_diff::UnstagedDiffToolbar;
 use gpui::{
     Action, App, AppContext as _, ClipboardItem, Context, DismissEvent, Element, Entity,
     FocusHandle, Focusable, Image, ImageFormat, KeyBinding, ParentElement, PathPromptOptions,
-    PromptLevel, ReadGlobal, SharedString, Size, Task, TaskExt, TitlebarOptions, UpdateGlobal,
-    WeakEntity, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, actions,
-    image_cache, img, point, px, retain_all,
+    PromptButton, PromptLevel, ReadGlobal, SharedString, Size, Task, TaskExt, TitlebarOptions,
+    UpdateGlobal, WeakEntity, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    actions, image_cache, img, point, px, retain_all,
 };
+use i18n::{n, t};
 use image_viewer::ImageInfo;
 use language::Capability;
 use language_onboarding::BasedPyrightBanner;
@@ -199,7 +200,7 @@ pub fn init(cx: &mut App) {
             open_bundled_file(
                 workspace,
                 asset_str::<Assets>("licenses.md"),
-                "Open Source License Attribution",
+                n!("Open Source License Attribution"),
                 "Markdown",
                 window,
                 cx,
@@ -251,7 +252,7 @@ pub fn init(cx: &mut App) {
             open_bundled_file(
                 workspace,
                 settings::default_semantic_token_rules(),
-                "Default Semantic Token Rules",
+                n!("Default Semantic Token Rules"),
                 "JSONC",
                 window,
                 cx,
@@ -263,7 +264,7 @@ pub fn init(cx: &mut App) {
             open_bundled_file(
                 workspace,
                 settings::default_settings(),
-                "Default Settings",
+                n!("Default Settings"),
                 "JSON",
                 window,
                 cx,
@@ -275,7 +276,7 @@ pub fn init(cx: &mut App) {
             open_bundled_file(
                 workspace,
                 settings::default_keymap(),
-                "Default Key Bindings",
+                n!("Default Key Bindings"),
                 "JSON",
                 window,
                 cx,
@@ -531,19 +532,15 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
 #[allow(unused)]
 fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
     if let Err(e) = fs::fs_watcher::global(|_| {}) {
-        let message = format!(
-            db::indoc! {r#"
-            inotify_init returned {}
-
-            This may be due to system-wide limits on inotify instances. For troubleshooting see: https://zed.dev/docs/linux
-            "#},
-            e
+        let message = t!(
+            "inotify_init returned {error}\n\nThis may be due to system-wide limits on inotify instances. For troubleshooting see: https://zed.dev/docs/linux",
+            error = e
         );
         let prompt = window.prompt(
             PromptLevel::Critical,
-            "Could not start inotify",
-            Some(&message),
-            &["Troubleshoot and Quit"],
+            &t!("Could not start inotify"),
+            Some(message.as_str()),
+            &[PromptButton::new(t!("Troubleshoot and Quit"))],
             cx,
         );
         cx.spawn(async move |_, cx| {
@@ -562,19 +559,15 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
 #[allow(unused)]
 fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
     if let Err(e) = fs::fs_watcher::global(|_| {}) {
-        let message = format!(
-            db::indoc! {r#"
-            ReadDirectoryChangesW initialization failed: {}
-
-            This may occur on network filesystems and WSL paths. For troubleshooting see: https://zed.dev/docs/windows
-            "#},
-            e
+        let message = t!(
+            "ReadDirectoryChangesW initialization failed: {error}\n\nThis may occur on network filesystems and WSL paths. For troubleshooting see: https://zed.dev/docs/windows",
+            error = e
         );
         let prompt = window.prompt(
             PromptLevel::Critical,
-            "Could not start ReadDirectoryChangesW",
-            Some(&message),
-            &["Troubleshoot and Quit"],
+            &t!("Could not start ReadDirectoryChangesW"),
+            Some(message.as_str()),
+            &[PromptButton::new(t!("Troubleshoot and Quit"))],
             cx,
         );
         cx.spawn(async move |_, cx| {
@@ -608,23 +601,20 @@ fn show_software_emulation_warning_if_needed(
                 "https://zed.dev/docs/linux#zed-fails-to-open-windows",
             )
         };
-        let message = format!(
-            db::indoc! {r#"
-            Wu uses {} for rendering and requires a compatible GPU.
-
-            Currently you are using a software emulated GPU ({}) which
-            will result in awful performance.
-
-            For troubleshooting see: {}
-            Set ZED_ALLOW_EMULATED_GPU=1 env var to permanently override.
-            "#},
-            graphics_api, specs.device_name, docs_url
+        let message = t!(
+            "Wu uses {graphics_api} for rendering and requires a compatible GPU.\n\nCurrently you are using a software emulated GPU ({device_name}) which\nwill result in awful performance.\n\nFor troubleshooting see: {docs_url}\nSet ZED_ALLOW_EMULATED_GPU=1 env var to permanently override.",
+            graphics_api = graphics_api,
+            device_name = specs.device_name,
+            docs_url = docs_url
         );
         let prompt = window.prompt(
             PromptLevel::Critical,
-            "Unsupported GPU",
-            Some(&message),
-            &["Skip", "Troubleshoot and Quit"],
+            &t!("Unsupported GPU"),
+            Some(message.as_str()),
+            &[
+                PromptButton::new(t!("Skip")),
+                PromptButton::new(t!("Troubleshoot and Quit")),
+            ],
             cx,
         );
         cx.spawn(async move |_, cx| {
@@ -782,10 +772,12 @@ fn register_actions(
                 }
                 Err(e) => {
                     workspace.show_error(
-                        format!(
-                            "Opening this URL in a browser failed because the URL is invalid: {}\n\nError was: {e}",
-                            action.url
-                        ),
+                        t!(
+                            "Opening this URL in a browser failed because the URL is invalid: {url}\n\nError was: {error}",
+                            url = action.url,
+                            error = e
+                        )
+                        .to_string(),
                         cx,
                     );
                 }
@@ -987,10 +979,11 @@ fn register_actions(
                     workspace.show_toast(
                         Toast::new(
                             NotificationId::unique::<RegisterWuScheme>(),
-                            format!(
-                                "wu:// links will now open in {}.",
-                                ReleaseChannel::global(cx).display_name()
-                            ),
+                            t!(
+                                "wu:// links will now open in {app_name}.",
+                                app_name = ReleaseChannel::global(cx).display_name()
+                            )
+                            .to_string(),
                         ),
                         cx,
                     )
@@ -998,7 +991,7 @@ fn register_actions(
                 Ok(())
             })
             .detach_and_prompt_err(
-                "Error registering wu:// scheme",
+                &t!("Error registering wu:// scheme"),
                 window,
                 cx,
                 |_, _, _| None,
@@ -1322,14 +1315,14 @@ fn open_about_window(cx: &mut App) {
                             .child(Headline::new(self.message.clone()))
                             .when_some(self.commit.clone(), |this, commit| {
                                 this.child(
-                                    Label::new("Commit")
+                                    Label::new(t!("Commit"))
                                         .color(Color::Muted)
                                         .size(LabelSize::XSmall),
                                 )
                                 .child(Label::new(commit).size(LabelSize::Small))
                             })
                             .child(
-                                Label::new("Version")
+                                Label::new(t!("Version"))
                                     .color(Color::Muted)
                                     .size(LabelSize::XSmall),
                             )
@@ -1347,7 +1340,7 @@ fn open_about_window(cx: &mut App) {
                                         window.remove_window();
                                     }))
                                     .child(
-                                        Button::new("ok", "OK")
+                                        Button::new("ok", t!("OK"))
                                             .full_width()
                                             .style(ButtonStyle::OutlinedGhost)
                                             .toggle_state(ok_is_focused)
@@ -1367,7 +1360,7 @@ fn open_about_window(cx: &mut App) {
                                         },
                                     ))
                                     .child(
-                                        Button::new("copy", "Copy")
+                                        Button::new("copy", t!("Copy"))
                                             .full_width()
                                             .style(ButtonStyle::Tinted(TintColor::Accent))
                                             .toggle_state(copy_is_focused)
@@ -1414,7 +1407,7 @@ fn open_about_window(cx: &mut App) {
     cx.open_window(
         WindowOptions {
             titlebar: Some(TitlebarOptions {
-                title: Some("About Wu".into()),
+                title: Some(t!("About Wu")),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(12.), px(12.))),
             }),
@@ -1473,9 +1466,12 @@ fn quit(_: &Quit, cx: &mut App) {
                 .update(cx, |_, window, cx| {
                     window.prompt(
                         PromptLevel::Info,
-                        "Are you sure you want to quit?",
+                        &t!("Are you sure you want to quit?"),
                         None,
-                        &["Quit", "Cancel"],
+                        &[
+                            PromptButton::ok(t!("Quit")),
+                            PromptButton::cancel(t!("Cancel")),
+                        ],
                         cx,
                     )
                 })
@@ -1551,10 +1547,10 @@ fn open_log_file(workspace: &mut Workspace, window: &mut Window, cx: &mut Contex
                             |cx| {
                                 cx.new(|cx| {
                                     MessageNotification::new(
-                                        format!(
-                                            "Unable to access/open log file at path \
-                                                    {}: {e:#}",
-                                            paths::log_file().display()
+                                        t!(
+                                            "Unable to access/open log file at path {path}: {error}",
+                                            path = paths::log_file().display(),
+                                            error = format!("{e:#}")
                                         ),
                                         cx,
                                     )
@@ -1581,17 +1577,20 @@ fn open_log_file(workspace: &mut Workspace, window: &mut Window, cx: &mut Contex
                 buffer.set_text(log, cx);
             });
 
-            let buffer = cx.new(|cx| MultiBuffer::singleton(buffer, cx).with_title("Log".into()));
+            let buffer = cx.new(|cx| MultiBuffer::singleton(buffer, cx).with_title(t!("Log").to_string()));
 
             let editor = cx
                 .new_window_entity(|window, cx| {
                     let mut editor = Editor::for_multibuffer(buffer, Some(project), window, cx);
                     editor.set_read_only(true);
-                    editor.set_breadcrumb_header(format!(
-                        "Last {} lines in {}",
-                        MAX_LINES,
-                        paths::log_file().display()
-                    ));
+                    editor.set_breadcrumb_header(
+                        t!(
+                            "Last {count} lines in {path}",
+                            count = MAX_LINES,
+                            path = paths::log_file().display()
+                        )
+                        .to_string(),
+                    );
                     let last_multi_buffer_offset = editor.buffer().read(cx).len(cx);
                     editor.change_selections(Default::default(), window, cx, |s| {
                         s.select_ranges(Some(last_multi_buffer_offset..last_multi_buffer_offset));
@@ -1633,16 +1632,16 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
             {
                 show_app_notification(id, cx, move |cx| {
                     cx.new(|cx| {
-                        MessageNotification::new(format!("Invalid user settings file\n{error}"), cx)
-                            .primary_message("Open Settings File")
-                            .primary_icon(IconName::Settings)
-                            .primary_on_click(|window, cx| {
-                                window.dispatch_action(
-                                    wu_actions::OpenSettingsFile.boxed_clone(),
-                                    cx,
-                                );
-                                cx.emit(DismissEvent);
-                            })
+                        MessageNotification::new(
+                            t!("Invalid user settings file\n{error}", error = error),
+                            cx,
+                        )
+                        .primary_message(t!("Open Settings File"))
+                        .primary_icon(IconName::Settings)
+                        .primary_on_click(|window, cx| {
+                            window.dispatch_action(wu_actions::OpenSettingsFile.boxed_clone(), cx);
+                            cx.emit(DismissEvent);
+                        })
                     })
                 });
             }
@@ -1654,28 +1653,38 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
 fn init_global_config_error_notifications(cx: &mut App) {
     cx.observe_new(|_: &mut SettingsObserver, _, cx| {
         cx.subscribe_self::<SettingsObserverEvent>(|_, event, cx| {
-            let (result, file_kind, on_click): (_, _, fn(&mut Window, &mut App)) = match event {
-                SettingsObserverEvent::GlobalTasksUpdated(result) => {
-                    (result, "tasks", |window, cx| {
-                        window.dispatch_action(OpenTasks.boxed_clone(), cx)
-                    })
-                }
-                SettingsObserverEvent::GlobalDebugScenariosUpdated(result) => {
-                    (result, "debug scenarios", |window, cx| {
-                        window.dispatch_action(OpenDebugTasks.boxed_clone(), cx)
-                    })
-                }
+            let (result, file_kind, message_template, on_click): (
+                _,
+                _,
+                _,
+                fn(&mut Window, &mut App),
+            ) = match event {
+                SettingsObserverEvent::GlobalTasksUpdated(result) => (
+                    result,
+                    "tasks",
+                    n!("Invalid global tasks file\n{error}"),
+                    |window, cx| window.dispatch_action(OpenTasks.boxed_clone(), cx),
+                ),
+                SettingsObserverEvent::GlobalDebugScenariosUpdated(result) => (
+                    result,
+                    "debug scenarios",
+                    n!("Invalid global debug scenarios file\n{error}"),
+                    |window, cx| window.dispatch_action(OpenDebugTasks.boxed_clone(), cx),
+                ),
                 _ => return,
             };
             let id = NotificationId::Named(format!("invalid-global-{file_kind}-file").into());
             match result {
                 Ok(_) => dismiss_app_notification(&id, cx),
                 Err(error) => {
-                    let message = format!("Invalid global {file_kind} file\n{error}");
+                    let message = i18n::format(
+                        i18n::translate(message_template),
+                        &[("error", &error as &dyn std::fmt::Display)],
+                    );
                     show_app_notification(id, cx, move |cx| {
                         cx.new(|cx| {
                             MessageNotification::new(message.clone(), cx)
-                                .primary_message("Open File")
+                                .primary_message(t!("Open File"))
                                 .primary_icon(IconName::Settings)
                                 .primary_on_click(move |window, cx| {
                                     on_click(window, cx);
@@ -1850,12 +1859,14 @@ fn show_keymap_file_json_error(
     error: &anyhow::Error,
     cx: &mut App,
 ) {
-    let message: SharedString =
-        format!("JSON parse error in keymap file. Bindings not reloaded.\n\n{error}").into();
+    let message = t!(
+        "JSON parse error in keymap file. Bindings not reloaded.\n\n{error}",
+        error = error
+    );
     show_app_notification(notification_id, cx, move |cx| {
         cx.new(|cx| {
             MessageNotification::new(message.clone(), cx)
-                .primary_message("Open Keymap File")
+                .primary_message(t!("Open Keymap File"))
                 .primary_icon(IconName::Settings)
                 .primary_on_click(|window, cx| {
                     window.dispatch_action(wu_actions::OpenKeymapFile.boxed_clone(), cx);
@@ -1873,7 +1884,7 @@ fn show_keymap_file_load_error(
     show_markdown_app_notification(
         notification_id,
         error_message,
-        "Open Keymap File".into(),
+        t!("Open Keymap File"),
         |window, cx| {
             window.dispatch_action(wu_actions::OpenKeymapFile.boxed_clone(), cx);
             cx.emit(DismissEvent);
@@ -1924,16 +1935,96 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
     }
     cx.bind_keys(user_key_bindings);
 
+    refresh_app_menus(cx);
+    // todo: nicer api here?
+    keymap_editor::KeymapEventChannel::trigger_keymap_changed(cx);
+}
+
+fn refresh_app_menus(cx: &mut App) {
     let menus = app_menus(cx);
     cx.set_menus(menus);
     // On Windows, this is set in the `update_jump_list` method of the `HistoryManager`.
     #[cfg(not(target_os = "windows"))]
     cx.set_dock_menu(vec![gpui::MenuItem::action(
-        "New Window",
+        t!("New Window"),
         workspace::NewWindow,
     )]);
-    // todo: nicer api here?
-    keymap_editor::KeymapEventChannel::trigger_keymap_changed(cx);
+}
+
+pub fn init_ui_language(cx: &mut App) {
+    let ui_language = |cx: &App| {
+        if cfg!(debug_assertions) && std::env::var_os("WU_PSEUDO_TRANSLATION").is_some() {
+            i18n::Language::Pseudo
+        } else {
+            ThemeSettings::get_global(cx).ui_language
+        }
+    };
+    i18n::set_language(ui_language(cx));
+    #[cfg(target_os = "macos")]
+    let mut macos_text_language = {
+        let choice = macos_text_language_choice(cx);
+        set_macos_system_text_language(choice);
+        choice
+    };
+    cx.observe_global::<SettingsStore>(move |cx| {
+        #[cfg(target_os = "macos")]
+        {
+            let choice = macos_text_language_choice(cx);
+            if choice != macos_text_language {
+                macos_text_language = choice;
+                set_macos_system_text_language(choice);
+            }
+        }
+        let language = ui_language(cx);
+        if language != i18n::language() {
+            i18n::set_language(language);
+            refresh_app_menus(cx);
+            cx.refresh_windows();
+        }
+    })
+    .detach();
+}
+
+#[cfg(target_os = "macos")]
+fn macos_text_language_choice(cx: &App) -> Option<i18n::Language> {
+    let settings = ThemeSettings::get_global(cx);
+    (!settings.ui_language_follows_system).then_some(settings.ui_language)
+}
+
+// macOS reads `AppleLanguages` at launch, so the menus and dialogs it adds itself change after a restart.
+#[cfg(target_os = "macos")]
+#[allow(clippy::disallowed_methods, reason = "both strings are autoreleased")]
+fn set_macos_system_text_language(choice: Option<i18n::Language>) {
+    use cocoa::{
+        base::{id, nil},
+        foundation::{NSArray, NSAutoreleasePool, NSString},
+    };
+    use objc::{class, msg_send, sel, sel_impl};
+
+    let code = match choice {
+        None => None,
+        Some(i18n::Language::English) => Some("en"),
+        Some(i18n::Language::SimplifiedChinese) => Some("zh-Hans"),
+        Some(i18n::Language::Pseudo) => return,
+    };
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let key = NSString::alloc(nil)
+            .init_str("AppleLanguages")
+            .autorelease();
+        match code {
+            Some(code) => {
+                let code = NSString::alloc(nil).init_str(code).autorelease();
+                let languages = NSArray::arrayWithObject(nil, code);
+                let () = msg_send![defaults, setObject: languages forKey: key];
+            }
+            None => {
+                let () = msg_send![defaults, removeObjectForKey: key];
+            }
+        }
+        pool.drain();
+    }
 }
 
 pub fn load_default_keymap(cx: &mut App) {
@@ -2193,7 +2284,7 @@ fn open_local_file(
         struct NoOpenFolders;
 
         workspace.show_notification(NotificationId::unique::<NoOpenFolders>(), cx, |cx| {
-            cx.new(|cx| MessageNotification::new("This project has no folders open.", cx))
+            cx.new(|cx| MessageNotification::new(t!("This project has no folders open."), cx))
         });
         None
     }
@@ -2207,10 +2298,12 @@ fn open_bundled_file(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    let english_title = title;
+    let title = i18n::translate(title);
     let existing = workspace.items_of_type::<Editor>(cx).find(|editor| {
         editor.read_with(cx, |editor, cx| {
             editor.read_only(cx)
-                && editor.title(cx).as_ref() == title
+                && i18n::is_any_translation_of(editor.title(cx).as_ref(), english_title)
                 && editor
                     .buffer()
                     .read(cx)
@@ -2238,8 +2331,8 @@ fn open_bundled_file(
                         buffer.set_text(text.into_owned(), cx);
                         buffer.set_capability(Capability::ReadOnly, cx);
                     });
-                    let buffer =
-                        cx.new(|cx| MultiBuffer::singleton(buffer, cx).with_title(title.into()));
+                    let buffer = cx
+                        .new(|cx| MultiBuffer::singleton(buffer, cx).with_title(title.to_string()));
                     workspace.update_in(cx, |workspace, window, cx| {
                         workspace.add_item_to_active_pane(
                             Box::new(cx.new(|cx| {
@@ -2251,7 +2344,7 @@ fn open_bundled_file(
                                 );
                                 editor.set_read_only(true);
                                 editor.set_should_serialize(false, cx);
-                                editor.set_breadcrumb_header(title.into());
+                                editor.set_breadcrumb_header(title.to_string());
                                 editor
                             })),
                             None,

@@ -69,16 +69,18 @@ fn validate_native_override_with(
                     .any(|candidate| extension.eq_ignore_ascii_case(candidate))
             })
     {
-        return Err(crate::HarnessError::NotInstalled(format!(
-            "{} is not a launchable Windows executable (use .exe, .cmd, .bat, or .com)",
-            path.display()
-        )));
+        return Err(crate::HarnessError::NotInstalled(
+            i18n::t!(
+                "{path} is not a launchable Windows executable (use .exe, .cmd, .bat, or .com)",
+                path = path.display()
+            )
+            .to_string(),
+        ));
     }
     if !path.is_file() {
-        return Err(crate::HarnessError::NotInstalled(format!(
-            "{} does not exist",
-            path.display()
-        )));
+        return Err(crate::HarnessError::NotInstalled(
+            i18n::t!("{path} does not exist", path = path.display()).to_string(),
+        ));
     }
     Ok(path.to_path_buf())
 }
@@ -101,13 +103,15 @@ pub(crate) fn find_on_paths(exe: &str, extra: Vec<PathBuf>) -> Option<PathBuf> {
 }
 
 pub(crate) fn binary_hint(path: &Path) -> String {
-    format!(
-        "{} (version {})",
-        path.display(),
-        binary_version(path)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "unknown".into())
+    let version = binary_version(path)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| i18n::t!("unknown").to_string());
+    i18n::t!(
+        "{path} (version {version})",
+        path = path.display(),
+        version = version
     )
+    .to_string()
 }
 
 pub(crate) fn runnable(path: &Path) -> bool {

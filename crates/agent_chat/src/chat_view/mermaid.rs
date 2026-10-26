@@ -1,6 +1,7 @@
 use super::ChatView;
 use crate::chat_style::{accent, ink, page, text_faint};
 use gpui::{App, Context, Hsla, Image, ImageFormat, Rgba};
+use i18n::t;
 use mermaid_render::{DiagramTheme, RenderError};
 use std::{ops::Range, sync::Arc};
 use theme::ActiveTheme as _;
@@ -156,7 +157,7 @@ impl ChatView {
                     height: rendered.height,
                 },
                 Err(RenderError::TooComplex) => {
-                    Diagram::Failed("This diagram is too large to draw.".into())
+                    Diagram::Failed(t!("This diagram is too large to draw.").to_string())
                 }
                 Err(error) => Diagram::Failed(error.to_string()),
             };

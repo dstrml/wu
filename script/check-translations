@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Checks that every translated string and command has its Simplified Chinese text.
+# Usage: script/check-translations [--binary path/to/wu] [--strings-only]
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+binary=""
+strings_only=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --binary) binary="$2"; shift 2 ;;
+        --strings-only) strings_only=true; shift ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
+    esac
+done
+
+export CARGO_INCREMENTAL=0
+
+if [[ "$strings_only" == true ]]; then
+    cargo test --package i18n --quiet
+    exit
+fi
+
+dump="$(mktemp)"
+trap 'rm -f "$dump"' EXIT
+
+if [[ -n "$binary" ]]; then
+    "$binary" --dump-all-actions > "$dump"
+else
+    cargo run --package wu --bin wu --quiet -- --dump-all-actions > "$dump"
+fi
+
+WU_ACTIONS_DUMP="$dump" cargo test --package i18n --quiet
