@@ -1,0 +1,10 @@
+{
+  "panel::NextPanelTab": {
+    "description": "切换到面板中的下一个标签页。",
+    "name": "下一个面板标签页"
+  },
+  "panel::PreviousPanelTab": {
+    "description": "切换到面板中的上一个标签页。",
+    "name": "上一个面板标签页"
+  }
+}

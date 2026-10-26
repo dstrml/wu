@@ -1424,7 +1424,7 @@ impl ToolchainLister for PythonToolchainProvider {
     }
     fn meta(&self) -> ToolchainMetadata {
         ToolchainMetadata {
-            term: SharedString::new_static("Virtual Environment"),
+            term: SharedString::new_static(i18n::n!("Virtual Environment")),
             new_toolchain_placeholder: SharedString::new_static(
                 "A path to the python3 executable within a virtual environment, or path to virtual environment itself",
             ),

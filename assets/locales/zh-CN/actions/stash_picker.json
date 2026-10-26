@@ -1,0 +1,10 @@
+{
+  "stash_picker::DropStashItem": {
+    "name": "删除储藏项",
+    "description": "删除所选的储藏项。"
+  },
+  "stash_picker::ShowStashItem": {
+    "name": "显示储藏项",
+    "description": "显示所选储藏项的差异视图。"
+  }
+}

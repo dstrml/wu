@@ -15,7 +15,8 @@ pub use chat_view::ChatView;
 
 use command_palette_hooks::CommandPaletteFilter;
 use futures::FutureExt as _;
-use gpui::{App, EntityId, PromptLevel, TaskExt as _, WindowHandle, actions};
+use gpui::{App, EntityId, PromptButton, PromptLevel, TaskExt as _, WindowHandle, actions};
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use settings::{Settings as _, SettingsStore};
 use util::ResultExt as _;
@@ -136,16 +137,19 @@ fn turn_off(cx: &mut App) {
         return;
     };
     let message = if working == 1 {
-        "An agent is still working.".to_string()
+        t!("An agent is still working.")
     } else {
-        format!("{working} agents are still working.")
+        t!("{count} agents are still working.", count = working)
     };
     let answer = prompt_window.update(cx, |_, window, cx| {
         window.prompt(
             PromptLevel::Warning,
             &message,
-            Some("Turning off Agent Chat stops it."),
-            &["Cancel", "Turn Off"],
+            Some(t!("Turning off Agent Chat stops it.").as_str()),
+            &[
+                PromptButton::cancel(t!("Cancel")),
+                PromptButton::new(t!("Turn Off")),
+            ],
             cx,
         )
     });

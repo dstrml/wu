@@ -4,9 +4,10 @@ use crate::{
 use anyhow::Context as _;
 use gpui::{
     AnyEntity, AnyView, App, AppContext as _, AsyncApp, AsyncWindowContext, ClickEvent, Context,
-    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, PromptLevel, Render, ScrollHandle,
-    Task, TextStyleRefinement, UnderlineStyle, WeakEntity,
+    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, PromptButton, PromptLevel, Render,
+    ScrollHandle, Task, TextStyleRefinement, UnderlineStyle, WeakEntity,
 };
+use i18n::t;
 use markdown::{CopyButtonVisibility, Markdown, MarkdownElement, MarkdownStyle};
 use parking_lot::Mutex;
 use project::project_settings::ProjectSettings;
@@ -351,23 +352,23 @@ impl Render for LanguageServerPrompt {
                                             "copy-description",
                                             request.message.clone(),
                                         )
-                                        .tooltip_label("Copy Description"),
+                                        .tooltip_label(t!("Copy Description")),
                                     )
                                     .child(
                                         IconButton::new(close_id, close_icon)
                                             .tooltip(move |_window, cx| {
                                                 if suppress {
                                                     Tooltip::with_meta(
-                                                        "Suppress",
+                                                        t!("Suppress"),
                                                         Some(&SuppressNotification),
-                                                        "Click to close",
+                                                        t!("Click to close"),
                                                         cx,
                                                     )
                                                 } else {
                                                     Tooltip::with_meta(
-                                                        "Close",
+                                                        t!("Close"),
                                                         Some(&menu::Cancel),
-                                                        "Suppress with shift-click",
+                                                        t!("Suppress with shift-click"),
                                                         cx,
                                                     )
                                                 }
@@ -472,6 +473,7 @@ pub mod simple_message_notification {
         AnyElement, DismissEvent, EventEmitter, FocusHandle, Focusable, ParentElement, Render,
         ScrollHandle, SharedString, Styled, Task,
     };
+    use i18n::t;
     use ui::{CopyButton, Tooltip, WithScrollbar, prelude::*};
 
     use crate::SuppressNotification;
@@ -986,7 +988,7 @@ pub mod simple_message_notification {
                 .when_some(copy_text, |el, text| {
                     el.child(
                         CopyButton::new("copy-notification-message", text)
-                            .tooltip_label("Copy Message"),
+                            .tooltip_label(t!("Copy Message")),
                     )
                 })
                 .when(show_close_button, |el| {
@@ -995,20 +997,20 @@ pub mod simple_message_notification {
                             .tooltip(move |_window, cx| {
                                 if suppress {
                                     Tooltip::with_meta(
-                                        "Suppress",
+                                        t!("Suppress"),
                                         Some(&SuppressNotification),
-                                        "Click to Close",
+                                        t!("Click to Close"),
                                         cx,
                                     )
                                 } else if show_suppress_button {
                                     Tooltip::with_meta(
-                                        "Close",
+                                        t!("Close"),
                                         Some(&menu::Cancel),
-                                        "Shift-click to Suppress",
+                                        t!("Shift-click to Suppress"),
                                         cx,
                                     )
                                 } else {
-                                    Tooltip::for_action("Close", &menu::Cancel, cx)
+                                    Tooltip::for_action(t!("Close"), &menu::Cancel, cx)
                                 }
                             })
                             .on_click(cx.listener(move |_, _, _, cx| {
@@ -1555,7 +1557,7 @@ where
             Ok(value) => Some(value),
             Err(err) => {
                 log::error!("Showing error notification in workspace: {err:?}");
-                workspace.show_error(format!("Error: {err}"), cx);
+                workspace.show_error(t!("Error: {error}", error = err).to_string(), cx);
                 None
             }
         }
@@ -1570,7 +1572,7 @@ where
             Ok(value) => Some(value),
             Err(err) => {
                 log::error!("{err:?}");
-                let message = format!("Error: {err}");
+                let message = t!("Error: {error}", error = err).to_string();
                 workspace
                     .update(cx, |workspace, cx| workspace.show_error(message, cx))
                     .ok();
@@ -1583,8 +1585,8 @@ where
         match self {
             Ok(value) => Some(value),
             Err(err) => {
-                let message = format!("Error: {err}");
-                log::error!("Showing error notification in app: {message}");
+                log::error!("Showing error notification in app: {err}");
+                let message = t!("Error: {error}", error = err).to_string();
                 show_app_notification(workspace_error_notification_id(), cx, {
                     move |cx| {
                         cx.new({
@@ -1670,7 +1672,13 @@ where
                         display.push('.');
                     }
                     let detail = f(err, window, cx).unwrap_or(display);
-                    window.prompt(PromptLevel::Critical, &msg, Some(&detail), &["OK"], cx)
+                    window.prompt(
+                        PromptLevel::Critical,
+                        &msg,
+                        Some(&detail),
+                        &[PromptButton::ok(t!("OK"))],
+                        cx,
+                    )
                 }) {
                     prompt.await.ok();
                 }

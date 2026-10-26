@@ -5,6 +5,7 @@ use gpui::{
     ScrollStrategy, SharedString, Size, StrikethroughStyle, StyledText, Task, TaskExt,
     UniformListScrollHandle, div, px, uniform_list,
 };
+use i18n::t;
 use itertools::Itertools;
 use language::CodeLabel;
 use language::{Buffer, LanguageName, LanguageRegistry};
@@ -1689,34 +1690,34 @@ fn render_completion_kind_letter(
         .into_any_element()
 }
 
-fn completion_kind_name(kind: CompletionItemKind) -> &'static str {
+fn completion_kind_name(kind: CompletionItemKind) -> SharedString {
     match kind {
-        CompletionItemKind::TEXT => "Text",
-        CompletionItemKind::METHOD => "Method",
-        CompletionItemKind::FUNCTION => "Function",
-        CompletionItemKind::CONSTRUCTOR => "Constructor",
-        CompletionItemKind::FIELD => "Field",
-        CompletionItemKind::VARIABLE => "Variable",
-        CompletionItemKind::CLASS => "Class",
-        CompletionItemKind::INTERFACE => "Interface",
-        CompletionItemKind::MODULE => "Module",
-        CompletionItemKind::PROPERTY => "Property",
-        CompletionItemKind::UNIT => "Unit",
-        CompletionItemKind::VALUE => "Value",
-        CompletionItemKind::ENUM => "Enum",
-        CompletionItemKind::KEYWORD => "Keyword",
-        CompletionItemKind::SNIPPET => "Snippet",
-        CompletionItemKind::COLOR => "Color",
-        CompletionItemKind::FILE => "File",
-        CompletionItemKind::REFERENCE => "Reference",
-        CompletionItemKind::FOLDER => "Folder",
-        CompletionItemKind::ENUM_MEMBER => "Enum Member",
-        CompletionItemKind::CONSTANT => "Constant",
-        CompletionItemKind::STRUCT => "Struct",
-        CompletionItemKind::EVENT => "Event",
-        CompletionItemKind::OPERATOR => "Operator",
-        CompletionItemKind::TYPE_PARAMETER => "Type Parameter",
-        _ => "Unknown",
+        CompletionItemKind::TEXT => t!("Text"),
+        CompletionItemKind::METHOD => t!("Method"),
+        CompletionItemKind::FUNCTION => t!("Function"),
+        CompletionItemKind::CONSTRUCTOR => t!("Constructor"),
+        CompletionItemKind::FIELD => t!("Field"),
+        CompletionItemKind::VARIABLE => t!("Variable"),
+        CompletionItemKind::CLASS => t!("Class"),
+        CompletionItemKind::INTERFACE => t!("Interface"),
+        CompletionItemKind::MODULE => t!("Module"),
+        CompletionItemKind::PROPERTY => t!("Property"),
+        CompletionItemKind::UNIT => t!("Unit"),
+        CompletionItemKind::VALUE => t!("Value"),
+        CompletionItemKind::ENUM => t!("Enum"),
+        CompletionItemKind::KEYWORD => t!("Keyword"),
+        CompletionItemKind::SNIPPET => t!("Snippet"),
+        CompletionItemKind::COLOR => t!("Color"),
+        CompletionItemKind::FILE => t!("File"),
+        CompletionItemKind::REFERENCE => t!("Reference"),
+        CompletionItemKind::FOLDER => t!("Folder"),
+        CompletionItemKind::ENUM_MEMBER => t!("Enum Member"),
+        CompletionItemKind::CONSTANT => t!("Constant"),
+        CompletionItemKind::STRUCT => t!("Struct"),
+        CompletionItemKind::EVENT => t!("Event"),
+        CompletionItemKind::OPERATOR => t!("Operator"),
+        CompletionItemKind::TYPE_PARAMETER => t!("Type Parameter"),
+        _ => t!("Unknown"),
     }
 }
 
@@ -1949,7 +1950,9 @@ impl CodeActionsItem {
         match self {
             Self::CodeAction { action, .. } => action.lsp_action.title().replace("\n", ""),
             Self::Task(_, task) => task.resolved_label.replace("\n", ""),
-            Self::DebugScenario(scenario) => format!("debug: {}", scenario.label),
+            Self::DebugScenario(scenario) => {
+                t!("debug: {label}", label = scenario.label).to_string()
+            }
         }
     }
 }
@@ -2105,7 +2108,7 @@ impl CodeActionsMenu {
                         action.lsp_action.title().chars().count()
                     }
                     CodeActionsItem::DebugScenario(scenario) => {
-                        format!("debug: {}", scenario.label).chars().count()
+                        t!("debug: {label}", label = scenario.label).chars().count()
                     }
                 })
                 .map(|(ix, _)| ix),

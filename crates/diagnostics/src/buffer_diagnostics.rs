@@ -15,6 +15,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
     Task, TaskExt, WeakEntity, Window, actions, div,
 };
+use i18n::t;
 use language::{Buffer, Capability, DiagnosticEntry, DiagnosticEntryRef, Point};
 use project::{
     DiagnosticSummary, Event, Project, ProjectItem, ProjectPath,
@@ -865,18 +866,15 @@ impl Item for BufferDiagnosticsEditor {
     }
 
     fn tab_content_text(&self, _detail: usize, _app: &App) -> SharedString {
-        "Buffer Diagnostics".into()
+        t!("Buffer Diagnostics")
     }
 
     fn tab_tooltip_text(&self, cx: &App) -> Option<SharedString> {
         let path_style = self.project.read(cx).path_style(cx);
-        Some(
-            format!(
-                "Buffer Diagnostics - {}",
-                self.project_path.path.display(path_style)
-            )
-            .into(),
-        )
+        Some(t!(
+            "Buffer Diagnostics - {path}",
+            path = self.project_path.path.display(path_style)
+        ))
     }
 
     fn to_item_events(event: &EditorEvent, f: &mut dyn FnMut(ItemEvent)) {
@@ -896,8 +894,8 @@ impl Render for BufferDiagnosticsEditor {
 
         let child = if error_count + warning_count == 0 {
             let label = match warning_count {
-                0 => "No problems in",
-                _ => "No errors in",
+                0 => t!("No problems in"),
+                _ => t!("No errors in"),
             };
 
             v_flex()
@@ -915,7 +913,7 @@ impl Render for BufferDiagnosticsEditor {
                         .child(
                             Button::new("open-file", filename)
                                 .style(ButtonStyle::Transparent)
-                                .tooltip(Tooltip::text("Open File"))
+                                .tooltip(Tooltip::text(t!("Open File")))
                                 .on_click(cx.listener(|buffer_diagnostics, _, window, cx| {
                                     if let Some(workspace) = Workspace::for_window(window, cx) {
                                         workspace.update(cx, |workspace, cx| {
@@ -935,8 +933,8 @@ impl Render for BufferDiagnosticsEditor {
                 )
                 .when(self.summary.warning_count > 0, |div| {
                     let label = match self.summary.warning_count {
-                        1 => "Show 1 warning".into(),
-                        warning_count => format!("Show {} warnings", warning_count),
+                        1 => t!("Show 1 warning"),
+                        warning_count => t!("Show {count} warnings", count = warning_count),
                     };
 
                     div.child(

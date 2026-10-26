@@ -16,6 +16,7 @@ doctest = false
 editor.workspace = true
 fuzzy_nucleo.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 language.workspace = true
 picker.workspace = true
 picker_preview.workspace = true

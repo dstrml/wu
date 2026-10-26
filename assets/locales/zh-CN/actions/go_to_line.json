@@ -1,0 +1,6 @@
+{
+  "go_to_line::Toggle": {
+    "name": "切换转到行",
+    "description": "切换转到行对话框。"
+  }
+}

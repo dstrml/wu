@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use gpui::{EventEmitter, FocusHandle, Focusable};
+use i18n::t;
 use ui::{
     App, Button, ButtonCommon, ButtonStyle, Clickable, Context, FluentBuilder, InteractiveElement,
     KeyBinding, Label, LabelCommon, LabelSize, ParentElement, Render, SharedString, Styled as _,
@@ -32,7 +33,10 @@ impl InvalidItemView {
         Self {
             is_local,
             abs_path: Arc::from(abs_path),
-            error: format!("{}", e.root_cause()).into(),
+            error: {
+                let error = e.root_cause().to_string();
+                i18n::lookup(&error).unwrap_or_else(|| error.into())
+            },
             focus_handle: cx.focus_handle(),
         }
     }
@@ -90,7 +94,7 @@ impl Render for InvalidItemView {
                     v_flex()
                         .justify_center()
                         .gap_2()
-                        .child(h_flex().justify_center().child("Could not open file"))
+                        .child(h_flex().justify_center().child(t!("Could not open file")))
                         .child(
                             h_flex()
                                 .justify_center()
@@ -99,7 +103,7 @@ impl Render for InvalidItemView {
                         .when(self.is_local, |contents| {
                             contents.child(
                                 h_flex().justify_center().child(
-                                    Button::new("open-with-system", "Open in Default App")
+                                    Button::new("open-with-system", t!("Open in Default App"))
                                         .on_click(move |_, _, cx| {
                                             cx.open_with_system(&abs_path);
                                         })

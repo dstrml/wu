@@ -74,24 +74,24 @@ impl Display for BaseKeymap {
 impl BaseKeymap {
     #[cfg(target_os = "macos")]
     pub const OPTIONS: [(&'static str, Self); 8] = [
-        ("Wu (Default)", Self::Zed),
+        (i18n::n!("Wu (Default)"), Self::Zed),
         ("VS Code", Self::VSCode),
         ("Atom", Self::Atom),
         ("JetBrains", Self::JetBrains),
         ("Sublime Text", Self::SublimeText),
-        ("Emacs (beta)", Self::Emacs),
+        (i18n::n!("Emacs (beta)"), Self::Emacs),
         ("TextMate", Self::TextMate),
         ("Cursor", Self::Cursor),
     ];
 
     #[cfg(not(target_os = "macos"))]
     pub const OPTIONS: [(&'static str, Self); 7] = [
-        ("Wu (Default)", Self::Zed),
+        (i18n::n!("Wu (Default)"), Self::Zed),
         ("VS Code", Self::VSCode),
         ("Atom", Self::Atom),
         ("JetBrains", Self::JetBrains),
         ("Sublime Text", Self::SublimeText),
-        ("Emacs (beta)", Self::Emacs),
+        (i18n::n!("Emacs (beta)"), Self::Emacs),
         ("Cursor", Self::Cursor),
     ];
 

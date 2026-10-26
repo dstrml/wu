@@ -10,6 +10,7 @@ use gpui::{
     App, AppContext as _, Entity, EventEmitter, FocusHandle, Focusable, Render, SharedString,
     Subscription, Task, WeakEntity,
 };
+use i18n::t;
 use language::{BufferId, Capability};
 use project::{
     Project, ProjectPath,
@@ -79,7 +80,7 @@ impl BranchDiff {
             let workspace = cx.entity().downgrade();
             window
                 .spawn(cx, async |_cx| {
-                    let result: Result<()> = Err(anyhow!("No active repository"));
+                    let result: Result<()> = Err(anyhow!("{}", t!("No active repository")));
                     result
                 })
                 .detach_and_notify_err(workspace, window, cx);
@@ -137,7 +138,7 @@ impl BranchDiff {
             let workspace = cx.entity().downgrade();
             window
                 .spawn(cx, async |_cx| {
-                    let result: Result<()> = Err(anyhow!("No active repository"));
+                    let result: Result<()> = Err(anyhow!("{}", t!("No active repository")));
                     result
                 })
                 .detach_and_notify_err(workspace, window, cx);
@@ -244,7 +245,7 @@ impl BranchDiff {
         cx: &mut App,
     ) -> Task<Result<Entity<Self>>> {
         let Some(repo) = project.read(cx).git_store().read(cx).active_repository() else {
-            return Task::ready(Err(anyhow!("No active repository")));
+            return Task::ready(Err(anyhow!("{}", t!("No active repository"))));
         };
         let main_branch = repo.update(cx, |repo, _| repo.default_branch(true));
         window.spawn(cx, async move |cx| {
@@ -327,7 +328,7 @@ impl BranchDiff {
             DiffMultibuffer::new(
                 branch_diff,
                 Capability::ReadWrite,
-                "No changes",
+                t!("No changes"),
                 move |editor, cx| {
                     editor.set_diff_hunk_renderer(Some(Arc::new(HiddenDiffHunkRenderer)), cx);
                     editor.rhs_editor().update(cx, move |rhs_editor, _cx| {
@@ -425,8 +426,8 @@ impl Item for BranchDiff {
 
     fn tab_content_text(&self, _detail: usize, cx: &App) -> SharedString {
         match self.diff_base(cx) {
-            DiffBase::Merge { base_ref } => format!("Changes since {}", base_ref).into(),
-            DiffBase::Head | DiffBase::Index | DiffBase::Staged => "Changes".into(),
+            DiffBase::Merge { base_ref } => t!("Changes since {base_ref}", base_ref = base_ref),
+            DiffBase::Head | DiffBase::Index | DiffBase::Staged => t!("Changes"),
         }
     }
 
@@ -699,7 +700,7 @@ impl Render for BranchDiffToolbar {
             return div();
         };
         let selected_base_ref = base_ref.clone();
-        let base_ref_label = format!("Base: {base_ref}");
+        let base_ref_label = t!("Base: {base_ref}", base_ref = base_ref);
         let repository = branch_diff.read(cx).repo(cx);
         let workspace = branch_diff.read(cx).workspace.clone();
         let project = branch_diff.read(cx).project.clone();
@@ -791,7 +792,7 @@ impl Render for BranchDiffToolbar {
                                 .size(IconSize::XSmall)
                                 .color(Color::Muted),
                         ),
-                        Tooltip::text("Select Base Branch"),
+                        Tooltip::text(t!("Select Base Branch")),
                     ),
             )
     }
@@ -1107,7 +1108,7 @@ mod tests {
         let target_branch_diff = cx
             .update(|window, cx| {
                 let Some(repository) = project.read(cx).active_repository(cx) else {
-                    return Task::ready(Err(anyhow!("No active repository")));
+                    return Task::ready(Err(anyhow!("{}", t!("No active repository"))));
                 };
                 BranchDiff::new_with_branch_base(
                     project.clone(),

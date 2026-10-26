@@ -1,0 +1,8 @@
+{
+  "tabular_data::OpenPreview": {
+    "name": "打开预览"
+  },
+  "tabular_data::OpenPreviewToTheSide": {
+    "name": "打开侧边预览"
+  }
+}

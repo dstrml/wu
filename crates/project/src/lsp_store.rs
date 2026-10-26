@@ -4553,6 +4553,21 @@ impl SymbolLocation {
     }
 }
 
+fn lsp_request_failure_message(
+    request_name: &str,
+    server_name: &dyn std::fmt::Display,
+    error: &dyn std::fmt::Display,
+) -> String {
+    let request = i18n::lookup(request_name).unwrap_or_else(|| request_name.to_owned().into());
+    i18n::t!(
+        "{request} via {server} failed: {error}",
+        request = request,
+        server = server_name,
+        error = error
+    )
+    .to_string()
+}
+
 fn should_log_lsp_request_failure(message: &str) -> bool {
     // "content modified" and "server cancelled the request" are noisy failure
     // modes of rust-analyzer where requests are denied before it has loaded a
@@ -5722,7 +5737,11 @@ impl LspStore {
                 if should_log_lsp_request_failure(&message) {
                     log::warn!("{message}");
                 }
-                return Task::ready(Err(anyhow!(message)));
+                return Task::ready(Err(anyhow!(lsp_request_failure_message(
+                    request.display_name(),
+                    &language_server.name(),
+                    &err
+                ))));
             }
         };
 
@@ -5783,7 +5802,11 @@ impl LspStore {
                 if should_log_lsp_request_failure(&message) {
                     log::warn!("{message}");
                 }
-                anyhow::anyhow!(message)
+                anyhow::anyhow!(lsp_request_failure_message(
+                    request.display_name(),
+                    &language_server.name(),
+                    &err
+                ))
             })?;
 
             request

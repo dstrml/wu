@@ -1,0 +1,6 @@
+{
+  "activity_indicator::ShowErrorMessage": {
+    "description": "在状态栏中显示语言服务器的错误消息。",
+    "name": "显示错误消息"
+  }
+}

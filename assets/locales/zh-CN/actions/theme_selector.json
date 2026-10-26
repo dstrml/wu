@@ -1,0 +1,10 @@
+{
+  "theme_selector::Reload": {
+    "description": "从磁盘重新加载所有主题。",
+    "name": "重新加载"
+  },
+  "theme_selector::Toggle": {
+    "description": "打开或关闭主题选择器。",
+    "name": "切换主题选择器"
+  }
+}

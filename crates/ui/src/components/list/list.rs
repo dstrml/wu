@@ -1,5 +1,6 @@
 use component::{Component, ComponentScope, example_group_with_title, single_example};
 use gpui::AnyElement;
+use i18n::t;
 use smallvec::SmallVec;
 
 use crate::{Label, ListHeader, ListItem, prelude::*};
@@ -28,7 +29,7 @@ impl Default for List {
 impl List {
     pub fn new() -> Self {
         Self {
-            empty_message: EmptyMessage::Text("No items".into()),
+            empty_message: EmptyMessage::Text(t!("No items")),
             header: None,
             toggle: None,
             children: SmallVec::new(),

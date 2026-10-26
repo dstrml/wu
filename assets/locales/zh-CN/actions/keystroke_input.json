@@ -1,0 +1,14 @@
+{
+  "keystroke_input::ClearKeystrokes": {
+    "name": "清除按键",
+    "description": "清除已录制的按键。"
+  },
+  "keystroke_input::StartRecording": {
+    "name": "开始录制",
+    "description": "开始录制按键。"
+  },
+  "keystroke_input::StopRecording": {
+    "name": "停止录制",
+    "description": "停止录制按键。"
+  }
+}

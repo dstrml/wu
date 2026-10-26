@@ -58,12 +58,13 @@ use gpui::{
     Action, AnyView, AnyWeakView, App, AppContext, AsyncApp, AsyncWindowContext, Axis, Bounds,
     ClipboardItem, Context, CursorStyle, Decorations, DragMoveEvent, Entity, EntityId,
     EventEmitter, FocusHandle, Focusable, Global, HitboxBehavior, Hsla, KeyContext, Keystroke,
-    ManagedView, MouseButton, PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size,
-    Stateful, Subscription, SystemWindowTabController, Task, TaskExt, Tiling, WeakEntity,
-    WindowBounds, WindowHandle, WindowId, WindowOptions, actions, canvas, point, relative, size,
-    transparent_black,
+    ManagedView, MouseButton, PathPromptOptions, Point, PromptButton, PromptLevel, Render,
+    ResizeEdge, Size, Stateful, Subscription, SystemWindowTabController, Task, TaskExt, Tiling,
+    WeakEntity, WindowBounds, WindowHandle, WindowId, WindowOptions, actions, canvas, point,
+    relative, size, transparent_black,
 };
 pub use history_manager::*;
+use i18n::t;
 pub use item::{
     Item, ItemHandle, ItemSettings, PreviewTabsSettings, ProjectItem, SerializableItem,
     SerializableItemHandle, WeakItemHandle,
@@ -656,12 +657,12 @@ fn handle_file_permalink(
                 .ok();
             }
             Err(err) => {
-                let action = if copy {
-                    "copy file permalink"
+                let message = if copy {
+                    t!("Failed to copy file permalink: {error}", error = err)
                 } else {
-                    "open file permalink"
-                };
-                let message = format!("Failed to {action}: {err}");
+                    t!("Failed to open file permalink: {error}", error = err)
+                }
+                .to_string();
                 anyhow::Result::<()>::Err(err).log_err();
 
                 workspace
@@ -1506,7 +1507,7 @@ impl Workspace {
                         let mut notification = MessageNotification::new(message.clone(), cx);
                         if let Some(link) = link {
                             notification = notification
-                                .more_info_message(link.label)
+                                .more_info_message(i18n::translate(link.label))
                                 .more_info_url(link.url);
                         }
 
@@ -3506,9 +3507,13 @@ impl Workspace {
                         );
                         window.prompt(
                             PromptLevel::Warning,
-                            "Do you want to save all changes in the following files?",
+                            &t!("Do you want to save all changes in the following files?"),
                             Some(&detail),
-                            &["Save all", "Discard all", "Cancel"],
+                            &[
+                                PromptButton::new(t!("Save all")),
+                                PromptButton::new(t!("Discard all")),
+                                PromptButton::cancel(t!("Cancel")),
+                            ],
                             cx,
                         )
                     })?;
@@ -5777,7 +5782,7 @@ impl Workspace {
         }
 
         if title.is_empty() {
-            title = "empty project".to_string();
+            title = t!("empty project").to_string();
         }
 
         let active_project_path = self.active_item(cx).and_then(|item| item.project_path(cx));
@@ -6540,25 +6545,27 @@ impl Workspace {
                             window,
                             cx,
                         )
-                        .detach_and_prompt_err("Failed to save", window, cx, |_, _, _| None);
+                        .detach_and_prompt_err(&t!("Failed to save"), window, cx, |_, _, _| None);
                 }))
                 .on_action(cx.listener(|workspace, _: &FormatAndSave, window, cx| {
                     workspace
                         .save_active_item(SaveIntent::FormatAndSave, window, cx)
-                        .detach_and_prompt_err("Failed to save", window, cx, |_, _, _| None);
+                        .detach_and_prompt_err(&t!("Failed to save"), window, cx, |_, _, _| None);
                 }))
                 .on_action(cx.listener(
                     |workspace, _: &SaveWithoutFormat, window, cx| {
                         workspace
                             .save_active_item(SaveIntent::SaveWithoutFormat, window, cx)
-                            .detach_and_prompt_err("Failed to save", window, cx, |_, _, _| None);
+                            .detach_and_prompt_err(&t!("Failed to save"), window, cx, |_, _, _| {
+                                None
+                            });
                     },
                 ))
             })
             .on_action(cx.listener(|workspace, _: &SaveAs, window, cx| {
                 workspace
                     .save_active_item(SaveIntent::SaveAs, window, cx)
-                    .detach_and_prompt_err("Failed to save", window, cx, |_, _, _| None);
+                    .detach_and_prompt_err(&t!("Failed to save"), window, cx, |_, _, _| None);
             }))
             .on_action(
                 cx.listener(|workspace, _: &ActivatePreviousPane, window, cx| {
@@ -7102,9 +7109,9 @@ impl Workspace {
         // window. We only make it focusable in that case so it never adds a
         // hitbox or intercepts mouse focus for other users.
         let (dock_element_id, dock_label) = match position {
-            DockPosition::Left => ("left-dock", "Left dock"),
-            DockPosition::Right => ("right-dock", "Right dock"),
-            DockPosition::Bottom => ("bottom-dock", "Bottom dock"),
+            DockPosition::Left => ("left-dock", t!("Left dock")),
+            DockPosition::Right => ("right-dock", t!("Right dock")),
+            DockPosition::Bottom => ("bottom-dock", t!("Bottom dock")),
         };
         let dock_is_open = dock.read(cx).is_open();
         let a11y_active = window.is_a11y_active();
@@ -7322,7 +7329,7 @@ impl Workspace {
         div()
             .id("editor-region")
             .role(gpui::Role::Main)
-            .aria_label("Editor")
+            .aria_label(t!("Editor"))
             .when(window.is_a11y_active(), |this| {
                 this.track_focus(&self.region_focus_handles.editor)
             })
@@ -7767,7 +7774,10 @@ fn notify_if_database_failed(window: WindowHandle<MultiWorkspace>, cx: &mut Asyn
                         cx,
                         |cx| {
                             cx.new(|cx| {
-                                MessageNotification::new("Failed to load the database file.", cx)
+                                MessageNotification::new(
+                                    t!("Failed to load the database file."),
+                                    cx,
+                                )
                             })
                         },
                     );
@@ -7925,7 +7935,7 @@ impl Render for Workspace {
                         .track_focus(&self.titlebar_focus_handle)
                         .tab_group()
                         .role(gpui::Role::Toolbar)
-                        .aria_label("Title bar")
+                        .aria_label(t!("Title bar"))
                         .on_key_down(cx.listener(
                             |workspace, event: &gpui::KeyDownEvent, window, cx| {
                                 if event.keystroke.modifiers.modified() {
@@ -9003,7 +9013,7 @@ pub fn open_paths(
                 workspace.update(cx, |workspace, cx| {
                     for item in open_task.iter().flatten() {
                         if let Err(e) = item {
-                            workspace.show_error(format!("Error: {e}"), cx);
+                            workspace.show_error(t!("Error: {error}", error = e).to_string(), cx);
                         }
                     }
                 });
@@ -9047,10 +9057,10 @@ pub fn open_paths(
                     workspace.update(cx, |workspace, cx| {
                         workspace.show_notification(NotificationId::unique::<OpenInWsl>(), cx, move |cx| {
                             let display_path = util::markdown::MarkdownInlineCode(&path.to_string_lossy());
-                            let msg = format!("{display_path} is inside a WSL filesystem, some features may not work unless you open it with WSL remote");
+                            let msg = t!("{path} is inside a WSL filesystem, some features may not work unless you open it with WSL remote", path = display_path);
                             cx.new(move |cx| {
                                 MessageNotification::new(msg, cx)
-                                    .primary_message("Open in WSL")
+                                    .primary_message(t!("Open in WSL"))
                                     .primary_icon(IconName::FolderOpen)
                                     .primary_on_click(move |window, cx| {
                                         window.dispatch_action(Box::new(remote::OpenWslPath {
@@ -9336,7 +9346,7 @@ async fn open_remote_project_inner(
         for error in project_path_errors {
             if error.error_code() == proto::ErrorCode::DevServerProjectPathDoesNotExist {
                 if let Some(path) = error.error_tag("path") {
-                    workspace.show_error(format!("'{path}' does not exist"), cx)
+                    workspace.show_error(t!("'{path}' does not exist", path = path).to_string(), cx)
                 }
             } else {
                 workspace.show_error(format!("{error}"), cx)
@@ -9400,9 +9410,12 @@ pub fn reload(cx: &mut App) {
             .update(cx, |_, window, cx| {
                 window.prompt(
                     PromptLevel::Info,
-                    "Are you sure you want to restart?",
+                    &t!("Are you sure you want to restart?"),
                     None,
-                    &["Restart", "Cancel"],
+                    &[
+                        PromptButton::new(t!("Restart")),
+                        PromptButton::cancel(t!("Cancel")),
+                    ],
                     cx,
                 )
             })
@@ -9505,8 +9518,11 @@ async fn confirm_quit_warning(
             window.prompt(
                 PromptLevel::Warning,
                 &warning,
-                Some("Closing Wu now stops it."),
-                &["Cancel", "Close Wu"],
+                Some(&t!("Closing Wu now stops it.")),
+                &[
+                    PromptButton::cancel(t!("Cancel")),
+                    PromptButton::new(t!("Close Wu")),
+                ],
                 cx,
             )
         })

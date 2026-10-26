@@ -1,0 +1,18 @@
+{
+  "diagnostics::Deploy": {
+    "name": "打开诊断",
+    "description": "打开项目诊断视图。"
+  },
+  "diagnostics::DeployCurrentFile": {
+    "name": "打开当前文件的诊断",
+    "description": "打开当前聚焦文件的项目诊断视图。"
+  },
+  "diagnostics::ToggleDiagnosticsRefresh": {
+    "name": "切换诊断自动刷新",
+    "description": "切换诊断的自动刷新。"
+  },
+  "diagnostics::ToggleWarnings": {
+    "name": "切换警告",
+    "description": "切换是否显示警告级别的诊断。"
+  }
+}

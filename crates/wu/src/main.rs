@@ -20,6 +20,7 @@ use gpui::{App, AppContext, Application, AsyncApp, QuitMode, Task, TaskExt, Upda
 use gpui_platform;
 
 use gpui_tokio::Tokio;
+use i18n::t;
 use language::LanguageRegistry;
 use onboarding::{FIRST_OPEN, show_onboarding_view};
 use project_panel::ProjectPanel;
@@ -595,6 +596,7 @@ fn main() {
         );
 
         theme_settings::init(theme::LoadThemes::All(Box::new(Assets)), cx);
+        wu::init_ui_language(cx);
         eager_load_active_theme_and_icon_theme(fs.clone(), cx);
         reset_theme_to_default_once(fs.clone(), cx);
         theme_extension::init(
@@ -1188,12 +1190,13 @@ pub(crate) async fn restore_or_create_workspace(
 
         if error_count > 0 {
             let message = if error_count == 1 {
-                "Failed to restore 1 workspace. Check logs for details.".to_string()
+                t!("Failed to restore 1 workspace. Check logs for details.").to_string()
             } else {
-                format!(
-                    "Failed to restore {} workspaces. Check logs for details.",
-                    error_count
+                t!(
+                    "Failed to restore {count} workspaces. Check logs for details.",
+                    count = error_count
                 )
+                .to_string()
             };
 
             // Try to find an active workspace to show the toast

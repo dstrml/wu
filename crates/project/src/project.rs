@@ -74,6 +74,7 @@ use gpui::{
     App, AppContext, AsyncApp, BorrowAppContext, Context, Entity, EventEmitter, Hsla, SharedString,
     Task, TaskExt, WeakEntity, Window,
 };
+use i18n::{n, t};
 use language::{
     Buffer, BufferEditSource, BufferEvent, Capability, CodeLabel, DiskState, Language,
     LanguageName, LanguageRegistry, PointUtf16, ToOffset, ToPointUtf16, Toolchain,
@@ -2884,7 +2885,12 @@ impl Project {
         match event {
             SettingsObserverEvent::LocalSettingsUpdated(result) => match result {
                 Err(InvalidSettingsError::LocalSettings { message, path }) => {
-                    let message = format!("Failed to set local settings in {path:?}:\n{message}");
+                    let message = t!(
+                        "Failed to set local settings in {path}:\n{message}",
+                        path = format!("{path:?}"),
+                        message = message
+                    )
+                    .to_string();
                     cx.emit(Event::Toast {
                         notification_id: format!("local-settings-{path:?}").into(),
                         link: None,
@@ -2898,11 +2904,16 @@ impl Project {
             },
             SettingsObserverEvent::LocalTasksUpdated(result) => match result {
                 Err(InvalidSettingsError::Tasks { message, path }) => {
-                    let message = format!("Failed to set local tasks in {path:?}:\n{message}");
+                    let message = t!(
+                        "Failed to set local tasks in {path}:\n{message}",
+                        path = format!("{path:?}"),
+                        message = message
+                    )
+                    .to_string();
                     cx.emit(Event::Toast {
                         notification_id: format!("local-tasks-{path:?}").into(),
                         link: Some(ToastLink {
-                            label: "Open Tasks Documentation",
+                            label: n!("Open Tasks Documentation"),
                             url: "https://zed.dev/docs/tasks",
                         }),
                         message,
@@ -2915,8 +2926,12 @@ impl Project {
             },
             SettingsObserverEvent::LocalDebugScenariosUpdated(result) => match result {
                 Err(InvalidSettingsError::Debug { message, path }) => {
-                    let message =
-                        format!("Failed to set local debug scenarios in {path:?}:\n{message}");
+                    let message = t!(
+                        "Failed to set local debug scenarios in {path}:\n{message}",
+                        path = format!("{path:?}"),
+                        message = message
+                    )
+                    .to_string();
                     cx.emit(Event::Toast {
                         notification_id: format!("local-debug-scenarios-{path:?}").into(),
                         link: None,

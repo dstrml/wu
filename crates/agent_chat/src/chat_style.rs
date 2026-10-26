@@ -3,6 +3,7 @@ use gpui::{
     IntoElement, ParentElement, Pixels, Rems, RenderOnce, Styled, Window, div, hsla, px, rems,
     rgb, svg,
 };
+use i18n::{n, t};
 use std::time::Duration;
 use theme::ActiveTheme as _;
 use ui::{Clickable, IconName, IconSize, Toggleable, Tooltip, prelude::*};
@@ -284,27 +285,27 @@ fn spinner_grid(id: SharedString, cell: f32, row_tints: [Hsla; 3]) -> impl IntoE
 }
 
 pub(crate) const FLAVOUR_WORDS: [&str; 21] = [
-    "Reckoning",
-    "Thinking",
-    "Pondering",
-    "Scheming",
-    "Brewing",
-    "Weaving",
-    "Tinkering",
-    "Musing",
-    "Composing",
-    "Sifting",
-    "Untangling",
-    "Distilling",
-    "Sketching",
-    "Plotting",
-    "Riffing",
-    "Combobulating",
-    "Percolating",
-    "Marinating",
-    "Noodling",
-    "Puzzling",
-    "Conjuring",
+    n!("Reckoning"),
+    n!("Thinking"),
+    n!("Pondering"),
+    n!("Scheming"),
+    n!("Brewing"),
+    n!("Weaving"),
+    n!("Tinkering"),
+    n!("Musing"),
+    n!("Composing"),
+    n!("Sifting"),
+    n!("Untangling"),
+    n!("Distilling"),
+    n!("Sketching"),
+    n!("Plotting"),
+    n!("Riffing"),
+    n!("Combobulating"),
+    n!("Percolating"),
+    n!("Marinating"),
+    n!("Noodling"),
+    n!("Puzzling"),
+    n!("Conjuring"),
 ];
 const FLAVOUR_ROTATE_SECS: u64 = 7;
 
@@ -321,13 +322,28 @@ pub(crate) fn flavour_seed(chat_id: &str) -> u64 {
 
 pub(crate) fn format_elapsed(secs: u64) -> String {
     if secs < 60 {
-        format!("{secs}s")
+        t!("{seconds}s", seconds = secs).to_string()
     } else if secs < 3_600 {
-        format!("{}m {}s", secs / 60, secs % 60)
+        t!(
+            "{minutes}m {seconds}s",
+            minutes = secs / 60,
+            seconds = secs % 60
+        )
+        .to_string()
     } else if secs < 86_400 {
-        format!("{}h {}m", secs / 3_600, (secs % 3_600) / 60)
+        t!(
+            "{hours}h {minutes}m",
+            hours = secs / 3_600,
+            minutes = (secs % 3_600) / 60
+        )
+        .to_string()
     } else {
-        format!("{}d {}h", secs / 86_400, (secs % 86_400) / 3_600)
+        t!(
+            "{days}d {hours}h",
+            days = secs / 86_400,
+            hours = (secs % 86_400) / 3_600
+        )
+        .to_string()
     }
 }
 

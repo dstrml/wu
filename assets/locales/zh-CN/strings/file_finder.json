@@ -1,0 +1,14 @@
+{
+  "Create File: {path}": "新建文件：{path}",
+  "Create file {path}?": "要新建文件 {path} 吗？",
+  "Exclude Ignored Files": "排除已忽略的文件",
+  "Include Ignored Files": "包含已忽略的文件",
+  "Open File": "打开文件",
+  "Open multiple": "打开多个",
+  "Search project files...": "搜索项目文件…",
+  "Split…": "拆分…",
+  "split|Down": "向下",
+  "split|Left": "向左",
+  "split|Right": "向右",
+  "split|Up": "向上"
+}

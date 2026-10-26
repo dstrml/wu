@@ -1,0 +1,19 @@
+{
+  "Add": "添加",
+  "Add Toolchain": "添加工具链",
+  "Add {term}": "添加{term}",
+  "Available in all locations in your current project.": "在当前项目的所有位置可用。",
+  "Available in all of your projects on this machine.": "在这台电脑上的所有项目中可用。",
+  "Available only in the subproject you're currently in.": "仅在你当前所在的子项目中可用。",
+  "Global": "全局",
+  "Project": "项目",
+  "Scope": "作用域",
+  "Select": "选择",
+  "Select Toolchain Path": "选择工具链路径",
+  "Select a toolchain…": "选择工具链…",
+  "Select a {term} for worktree root…": "为工作树根目录选择{term}…",
+  "Select a {term} for {path}…": "为 {path} 选择{term}…",
+  "Select {term}": "选择{term}",
+  "Subproject": "子项目",
+  "Toolchain": "工具链"
+}

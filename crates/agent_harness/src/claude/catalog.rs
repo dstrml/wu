@@ -49,11 +49,11 @@ fn toggle(id: &str, label: &str) -> ModelOption {
         choices: vec![
             ModelOptionChoice {
                 id: "off".into(),
-                label: "Off".into(),
+                label: i18n::t!("Off").to_string(),
             },
             ModelOptionChoice {
                 id: "on".into(),
-                label: "On".into(),
+                label: i18n::t!("On").to_string(),
             },
         ],
         default_choice: "off".into(),
@@ -63,7 +63,7 @@ fn toggle(id: &str, label: &str) -> ModelOption {
 pub(crate) fn context_window() -> ModelOption {
     ModelOption {
         id: CONTEXT_WINDOW_OPTION.into(),
-        label: "Context Window".into(),
+        label: i18n::t!("Context Window").to_string(),
         choices: vec![
             ModelOptionChoice {
                 id: "200k".into(),
@@ -327,7 +327,7 @@ fn discovered_context_window(mut sizes: Vec<String>) -> ModelOption {
     );
     ModelOption {
         id: CONTEXT_WINDOW_OPTION.into(),
-        label: "Context Window".into(),
+        label: i18n::t!("Context Window").to_string(),
         choices,
         default_choice: largest.unwrap_or_else(|| STANDARD_CONTEXT.0.into()),
     }
@@ -400,21 +400,21 @@ pub fn static_models() -> Vec<Model> {
             "Opus 5.5",
             "Best for everyday, complex tasks",
             FULL_LADDER,
-            vec![context_window(), toggle("fastMode", "Fast Mode")],
+            vec![context_window(), toggle("fastMode", &i18n::t!("Fast Mode"))],
         ),
         model(
             "claude-opus-4-8",
             "Opus 4.8",
             "Previous generation Opus",
             FULL_LADDER,
-            vec![toggle("fastMode", "Fast Mode")],
+            vec![toggle("fastMode", &i18n::t!("Fast Mode"))],
         ),
         model(
             "claude-opus-4-7",
             "Opus 4.7",
             "Older generation Opus",
             XHIGH_LADDER,
-            vec![toggle("fastMode", "Fast Mode")],
+            vec![toggle("fastMode", &i18n::t!("Fast Mode"))],
         ),
         model(
             "claude-sonnet-5",
@@ -428,7 +428,7 @@ pub fn static_models() -> Vec<Model> {
             "Haiku 4.5",
             "Fastest model for everyday tasks",
             &[],
-            vec![toggle("thinking", "Thinking")],
+            vec![toggle("thinking", &i18n::tc!("model option", "Thinking"))],
         ),
     ]
 }

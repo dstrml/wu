@@ -1,0 +1,15 @@
+{
+  "1 character": "1 个字符",
+  "Current Line: {line} of {total} (column {column})": "当前行：{line}/{total}（第 {column} 列）",
+  "Go to Line/Column": "转到行/列",
+  "Go to line {line}": "转到第 {line} 行",
+  "Go to line {line} ({offset} from current)": "转到第 {line} 行（相对当前行 {offset}）",
+  "Go to line {line}, character {character}": "转到第 {line} 行，第 {character} 个字符",
+  "Line {line}, column {column}": "第 {line} 行，第 {column} 列",
+  "{count} c": "{count} 字符",
+  "{count} characters": "{count} 个字符",
+  "{count} l": "{count} 行",
+  "{count} lines": "{count} 行",
+  "{count} s": "{count} 选区",
+  "{count} selections": "{count} 个选区"
+}

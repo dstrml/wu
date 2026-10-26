@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result, bail};
 use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
+use i18n::t;
 use std::sync::{
     Arc, Mutex, PoisonError,
     atomic::{AtomicBool, AtomicU32, Ordering},
@@ -15,7 +16,7 @@ pub struct InputDevice {
 pub fn input_devices() -> Result<Vec<InputDevice>> {
     let devices = cpal::default_host()
         .input_devices()
-        .context("Could not list microphones")?;
+        .context(t!("Could not list microphones"))?;
     let mut devices: Vec<InputDevice> = devices
         .filter_map(|device| {
             Some(InputDevice {
@@ -145,7 +146,8 @@ pub(crate) struct Capture {
 
 impl Capture {
     pub(crate) fn start(device_id: Option<&str>, input_level: Arc<AtomicU32>) -> Result<Self> {
-        let device = input_device_or_default(device_id).context("No microphone is available")?;
+        let device =
+            input_device_or_default(device_id).context(t!("No microphone is available"))?;
         let config = device.default_input_config()?;
         let sample_rate = config.sample_rate();
         let channels = config.channels() as usize;
@@ -183,7 +185,10 @@ impl Capture {
             cpal::SampleFormat::U64 => build_stream!(u64),
             cpal::SampleFormat::F32 => build_stream!(f32),
             cpal::SampleFormat::F64 => build_stream!(f64),
-            format => bail!("Unsupported microphone sample format {format}"),
+            format => bail!(t!(
+                "Unsupported microphone sample format {format}",
+                format = format
+            )),
         };
         stream.play()?;
         Ok(Self {
@@ -202,7 +207,7 @@ impl Recording for Capture {
     fn finish(mut self) -> Result<CapturedAudio> {
         self.stream.take();
         if self.audio.failed.load(Ordering::Acquire) {
-            bail!("The microphone disconnected");
+            bail!(t!("The microphone disconnected"));
         }
         let mut samples = self
             .audio

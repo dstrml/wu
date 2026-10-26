@@ -9,6 +9,7 @@ use futures::{
 use gpui::{
     App, AppContext, AsyncApp, BorrowAppContext, Entity, Global, SharedString, Task, UpdateGlobal,
 };
+use i18n::t;
 
 use paths::{local_settings_file_relative_path, task_file_name};
 use schemars::{JsonSchema, json_schema};
@@ -1209,7 +1210,7 @@ impl SettingsStore {
             replace_subschema::<LanguageToSettingsMap>(generator, || {
                 json_schema!({
                     "type": "object",
-                    "errorMessage": "No language with this name is installed.",
+                    "errorMessage": t!("No language with this name is installed.").to_string(),
                     "properties": params.language_names.iter().map(|name| (name.clone(), language_settings_content_ref.clone())).collect::<serde_json::Map<_, _>>()
                 })
             });
@@ -1219,7 +1220,7 @@ impl SettingsStore {
             replace_subschema::<FileTypeMap>(generator, || {
                 json_schema!({
                     "type": "object",
-                    "errorMessage": "No language with this name is installed.",
+                    "errorMessage": t!("No language with this name is installed.").to_string(),
                     "properties": params.language_names.iter().map(|name| (name.clone(), file_type_patterns_ref.clone())).collect::<serde_json::Map<_, _>>(),
                     "additionalProperties": file_type_patterns_ref.clone()
                 })
@@ -1312,19 +1313,27 @@ impl SettingsStore {
         }
 
         if !params.action_names.is_empty() {
+            let localized_documentation =
+                localized_action_documentation(params.action_documentation);
+            let action_documentation = localized_documentation
+                .iter()
+                .map(|(name, description)| (*name, description.as_str()))
+                .collect();
             replace_subschema::<CommandAliasTarget>(&mut generator, || {
                 CommandAliasTarget::build_schema(
                     params.action_names,
-                    params.action_documentation,
+                    &action_documentation,
                     params.deprecations,
                     params.deprecation_messages,
                 )
             });
         }
 
-        generator
+        let mut schema = generator
             .root_schema_for::<UserSettingsContent>()
-            .to_value()
+            .to_value();
+        localize_schema_descriptions(&mut schema);
+        schema
     }
 
     /// Generate JSON schema for project settings, including only settings valid
@@ -1338,9 +1347,11 @@ impl SettingsStore {
         ProjectSettingsContent::json_schema(&mut generator);
         Self::configure_schema_generator(&mut generator, params);
 
-        generator
+        let mut schema = generator
             .root_schema_for::<ProjectSettingsContent>()
-            .to_value()
+            .to_value();
+        localize_schema_descriptions(&mut schema);
+        schema
     }
 
     fn recompute_values(
@@ -1592,6 +1603,40 @@ impl<T: Settings> AnySettingValue for SettingValue<T> {
     }
 }
 
+pub(crate) fn localize_schema_descriptions(schema: &mut Value) {
+    match schema {
+        Value::Object(object) => {
+            for (key, value) in object.iter_mut() {
+                match value {
+                    Value::String(description)
+                        if key == "description" || key == "markdownDescription" =>
+                    {
+                        if let Some(translation) = i18n::schema_description(description) {
+                            *description = translation.to_string();
+                        }
+                    }
+                    _ => localize_schema_descriptions(value),
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(localize_schema_descriptions),
+        _ => {}
+    }
+}
+
+pub(crate) fn localized_action_documentation<'a>(
+    documentation: &HashMap<&'a str, &'a str>,
+) -> HashMap<&'a str, SharedString> {
+    documentation
+        .iter()
+        .map(|(name, english)| {
+            let description = i18n::action_description(name)
+                .unwrap_or_else(|| SharedString::from(english.to_string()));
+            (*name, description)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, num::NonZeroU32};
@@ -1602,6 +1647,7 @@ mod tests {
     };
 
     use super::*;
+    use collections::BTreeSet;
     use fs::FakeFs;
     use unindent::Unindent;
     use util::rel_path::rel_path;
@@ -3205,5 +3251,143 @@ mod tests {
 
         assert!(user_schema_str.contains("\"auto_update\""));
         assert!(!project_schema_str.contains("\"auto_update\""));
+    }
+
+    static LANGUAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct SimplifiedChinese {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl SimplifiedChinese {
+        fn enable() -> Self {
+            let lock = LANGUAGE_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            i18n::set_language(i18n::Language::SimplifiedChinese);
+            Self { _lock: lock }
+        }
+    }
+
+    impl Drop for SimplifiedChinese {
+        fn drop(&mut self) {
+            i18n::set_language(i18n::Language::English);
+        }
+    }
+
+    fn collect_descriptions(schema: &Value, descriptions: &mut BTreeSet<String>) {
+        match schema {
+            Value::Object(object) => {
+                for (key, value) in object {
+                    match value {
+                        Value::String(description)
+                            if key == "description" || key == "markdownDescription" =>
+                        {
+                            descriptions.insert(description.clone());
+                        }
+                        _ => collect_descriptions(value, descriptions),
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    collect_descriptions(item, descriptions);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn keymap_schema(action_documentation: &HashMap<&str, &str>) -> Value {
+        crate::KeymapFile::generate_json_schema(
+            crate::KeymapFile::action_schema_generator(),
+            action_documentation
+                .keys()
+                .map(|name| (*name, None))
+                .collect(),
+            action_documentation,
+            &HashMap::default(),
+            &HashMap::default(),
+        )
+    }
+
+    fn schema_descriptions() -> BTreeSet<String> {
+        let params = SettingsJsonSchemaParams {
+            language_names: &[],
+            font_names: &[],
+            theme_names: &[],
+            icon_theme_names: &[],
+            lsp_adapter_names: &[],
+            action_names: &[],
+            action_documentation: &HashMap::default(),
+            deprecations: &HashMap::default(),
+            deprecation_messages: &HashMap::default(),
+        };
+        let mut descriptions = BTreeSet::new();
+        for schema in [
+            SettingsStore::json_schema(&params),
+            SettingsStore::project_json_schema(&params),
+            keymap_schema(&HashMap::default()),
+        ] {
+            collect_descriptions(&schema, &mut descriptions);
+        }
+        descriptions
+    }
+
+    #[test]
+    fn test_schema_descriptions_are_translated_to_simplified_chinese() {
+        let english = schema_descriptions();
+        let (untranslated, toggle_comments_description) = {
+            let _chinese = SimplifiedChinese::enable();
+            let untranslated = schema_descriptions()
+                .intersection(&english)
+                .cloned()
+                .collect::<Vec<_>>();
+            let keymap = keymap_schema(&HashMap::from_iter([(
+                "editor::ToggleComments",
+                "Toggles comments.",
+            )]));
+            let mut descriptions = BTreeSet::new();
+            collect_descriptions(&keymap, &mut descriptions);
+            let toggle_comments_description = i18n::action_description("editor::ToggleComments");
+            (
+                untranslated,
+                toggle_comments_description
+                    .filter(|description| descriptions.contains(description.as_str())),
+            )
+        };
+        assert!(
+            toggle_comments_description.is_some(),
+            "the keymap schema should use the Chinese description of editor::ToggleComments"
+        );
+
+        let directory =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/locales/zh-CN/schema");
+        let mut stale = Vec::new();
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let translations: BTreeMap<String, String> =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            stale.extend(
+                translations
+                    .into_keys()
+                    .filter(|key| !english.contains(key))
+                    .map(|key| format!("{}: {key:?}", path.display())),
+            );
+        }
+
+        assert!(
+            untranslated.is_empty() && stale.is_empty(),
+            "Schema descriptions with no Chinese in assets/locales/zh-CN/schema:\n{}\n\nTranslations that match no schema description:\n{}",
+            untranslated
+                .iter()
+                .map(|description| format!("{description:?}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            stale.join("\n"),
+        );
     }
 }

@@ -1,0 +1,11 @@
+{
+  "Caution": "注意",
+  "Failed to Load: {label}": "加载失败：{label}",
+  "Image failed to load. Open `wu: log` for more details.": "图片加载失败。打开 `wu: log` 查看详细信息。",
+  "Important": "重要",
+  "Note": "备注",
+  "Tip": "提示",
+  "Unwrap Content": "取消自动换行",
+  "Warning": "警告",
+  "Wrap Content": "自动换行"
+}

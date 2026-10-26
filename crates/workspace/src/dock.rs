@@ -15,6 +15,7 @@ use gpui::{
     Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window, deferred, div,
     px,
 };
+use i18n::{n, t};
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore, TerminalDockPosition};
 use std::sync::Arc;
@@ -365,6 +366,22 @@ impl DockPosition {
             Self::Left => "Left",
             Self::Bottom => "Bottom",
             Self::Right => "Right",
+        }
+    }
+
+    fn close_dock_tooltip(&self) -> SharedString {
+        match self {
+            Self::Left => t!("Close Left Dock"),
+            Self::Bottom => t!("Close Bottom Dock"),
+            Self::Right => t!("Close Right Dock"),
+        }
+    }
+
+    fn dock_here_label(&self) -> SharedString {
+        match self {
+            Self::Left => t!("Dock Left"),
+            Self::Bottom => t!("Dock Bottom"),
+            Self::Right => t!("Dock Right"),
         }
     }
 
@@ -1027,15 +1044,18 @@ impl Dock {
     ) -> (Box<dyn Action>, SharedString, bool) {
         let is_active = Some(panel_index) == self.active_panel_index && self.is_open;
         if is_active {
-            let tooltip: SharedString = format!("Close {} Dock", self.position.label()).into();
-            (self.toggle_action(), tooltip, true)
+            (
+                self.toggle_action(),
+                self.position.close_dock_tooltip(),
+                true,
+            )
         } else {
             let action = self
                 .panel_entries
                 .get(panel_index)
                 .map(|entry| entry.panel.toggle_action(window, cx))
                 .unwrap_or_else(|| self.toggle_action());
-            (action, icon_tooltip.into(), false)
+            (action, i18n::translate(icon_tooltip), false)
         }
     }
 
@@ -1519,7 +1539,7 @@ impl Render for PanelButtons {
                                 .icon_size(IconSize::Small)
                                 .toggle_state(is_active_button)
                                 .tab_index(0isize)
-                                .aria_label(icon_tooltip)
+                                .aria_label(i18n::translate(icon_tooltip))
                                 .on_click({
                                     let action = action.boxed_clone();
                                     move |_, window, cx| {
@@ -1607,7 +1627,7 @@ pub(crate) fn panel_button_context_menu(
                 let is_current = position == dock_position;
                 let panel = panel.clone();
                 menu = menu.toggleable_entry(
-                    format!("Dock {}", position.label()),
+                    position.dock_here_label(),
                     is_current,
                     IconPosition::Start,
                     None,
@@ -1624,12 +1644,12 @@ pub(crate) fn panel_button_context_menu(
             if has_position_entries {
                 menu = menu.separator();
             }
-            for (label, flexible) in [("Flex Width", true), ("Fixed Width", false)] {
+            for (label, flexible) in [(n!("Flex Width"), true), (n!("Fixed Width"), false)] {
                 let panel = panel.clone();
                 let dock = dock.clone();
                 let workspace = workspace.clone();
                 menu = menu.toggleable_entry(
-                    label,
+                    i18n::translate(label),
                     currently_flexible == flexible,
                     IconPosition::Start,
                     None,

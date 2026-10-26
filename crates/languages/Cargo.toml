@@ -31,6 +31,7 @@ globset.workspace = true
 gpui.workspace = true
 grammars.workspace = true
 http_client = { workspace = true, features = ["github-download"] }
+i18n.workspace = true
 itertools.workspace = true
 json_schema_store.workspace = true
 language.workspace = true

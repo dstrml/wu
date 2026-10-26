@@ -1,0 +1,82 @@
+{
+  "terminal::Clear": {
+    "name": "清屏",
+    "description": "清除终端屏幕。"
+  },
+  "terminal::Copy": {
+    "name": "复制",
+    "description": "将所选文本复制到剪贴板。"
+  },
+  "terminal::Paste": {
+    "name": "粘贴",
+    "description": "从剪贴板粘贴。"
+  },
+  "terminal::PasteText": {
+    "name": "粘贴文本",
+    "description": "粘贴剪贴板中的文本。"
+  },
+  "terminal::RenameTerminal": {
+    "name": "重命名终端",
+    "description": "重命名终端标签页。"
+  },
+  "terminal::RerunTask": {
+    "name": "重新运行任务",
+    "description": "在终端中重新运行上一次执行的任务。"
+  },
+  "terminal::ScrollHalfPageDown": {
+    "name": "向下滚动半页",
+    "description": "向下滚动半页。"
+  },
+  "terminal::ScrollHalfPageUp": {
+    "name": "向上滚动半页",
+    "description": "向上滚动半页。"
+  },
+  "terminal::ScrollLineDown": {
+    "name": "向下滚动一行",
+    "description": "向下滚动一行。"
+  },
+  "terminal::ScrollLineUp": {
+    "name": "向上滚动一行",
+    "description": "向上滚动一行。"
+  },
+  "terminal::ScrollPageDown": {
+    "name": "向下翻页",
+    "description": "向下滚动一页。"
+  },
+  "terminal::ScrollPageUp": {
+    "name": "向上翻页",
+    "description": "向上滚动一页。"
+  },
+  "terminal::ScrollToBottom": {
+    "name": "滚动到底部",
+    "description": "滚动到终端缓冲区的底部。"
+  },
+  "terminal::ScrollToTop": {
+    "name": "滚动到顶部",
+    "description": "滚动到终端缓冲区的顶部。"
+  },
+  "terminal::SearchTest": {
+    "name": "搜索文本",
+    "description": "在终端中搜索文本。"
+  },
+  "terminal::SelectAll": {
+    "name": "全选",
+    "description": "选择终端中的所有文本。"
+  },
+  "terminal::SendKeystroke": {
+    "name": "发送按键",
+    "description": "向终端发送按键序列。"
+  },
+  "terminal::SendText": {
+    "name": "发送文本",
+    "description": "将指定文本直接发送到终端。"
+  },
+  "terminal::ShowCharacterPalette": {
+    "name": "显示字符面板",
+    "description": "显示用于输入特殊字符的字符面板。"
+  },
+  "terminal::ToggleViMode": {
+    "name": "切换 Vi 模式",
+    "description": "切换终端的 Vi 模式。"
+  }
+}

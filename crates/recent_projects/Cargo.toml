@@ -26,6 +26,7 @@ fs.workspace = true
 futures.workspace = true
 fuzzy_nucleo.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 language.workspace = true
 log.workspace = true
 menu.workspace = true
@@ -46,7 +47,6 @@ util.workspace = true
 workspace.workspace = true
 worktree.workspace = true
 wu_actions.workspace = true
-indoc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-registry.workspace = true
@@ -57,6 +57,7 @@ extension.workspace = true
 fs.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 http_client.workspace = true
+indoc.workspace = true
 language = { workspace = true, features = ["test-support"] }
 picker = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }

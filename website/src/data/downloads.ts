@@ -1,11 +1,12 @@
 import { RELEASES_URL } from '../consts';
+import type { Messages } from '../i18n/en';
 
 export type Platform = 'mac' | 'windows' | 'linux';
 
 export type MacArchitecture = 'arm' | 'x86';
 
 export interface Download {
-  label: string;
+  id: keyof Messages['downloads'];
   href: string;
   platform?: Platform;
   architecture?: MacArchitecture;
@@ -14,11 +15,11 @@ export interface Download {
 const latest = (file: string) => `${RELEASES_URL}/latest/download/${file}`;
 
 export const downloads: Download[] = [
-  { label: 'macOS (Apple Silicon)', href: latest('Wu-aarch64.dmg'), platform: 'mac', architecture: 'arm' },
-  { label: 'macOS (Intel)', href: latest('Wu-x86_64.dmg'), platform: 'mac', architecture: 'x86' },
-  { label: 'Windows (x86-64)', href: latest('Wu-x86_64.exe'), platform: 'windows' },
-  { label: 'Linux (x86-64)', href: latest('wu-linux-x86_64.tar.gz'), platform: 'linux' },
-  { label: 'Linux (AArch64)', href: latest('wu-linux-aarch64.tar.gz') }
+  { id: 'macArm', href: latest('Wu-aarch64.dmg'), platform: 'mac', architecture: 'arm' },
+  { id: 'macIntel', href: latest('Wu-x86_64.dmg'), platform: 'mac', architecture: 'x86' },
+  { id: 'windows', href: latest('Wu-x86_64.exe'), platform: 'windows' },
+  { id: 'linuxX86', href: latest('wu-linux-x86_64.tar.gz'), platform: 'linux' },
+  { id: 'linuxArm', href: latest('wu-linux-aarch64.tar.gz') }
 ];
 
 export const platformNames: Record<Platform, string> = {

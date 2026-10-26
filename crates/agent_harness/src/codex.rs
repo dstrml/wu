@@ -10,6 +10,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use i18n::{n, t};
 use serde_json::{Value, json};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
@@ -70,6 +71,7 @@ pub struct CodexHarness {
 }
 
 const MAX_LISTED_THREADS: usize = 500;
+pub(crate) const AGENT_CONTROL_TOOL: &str = n!("Agent control: {tool}");
 
 impl Default for CodexHarness {
     fn default() -> Self {
@@ -311,9 +313,9 @@ fn normalized_service_tier(value: &str) -> &str {
 
 fn service_tier_label(value: &str) -> String {
     match value {
-        "fast" | "priority" => "Fast".into(),
-        "flex" => "Flex".into(),
-        "ultrafast" => "Ultra Fast".into(),
+        "fast" | "priority" => t!("Fast").to_string(),
+        "flex" => t!("Flex").to_string(),
+        "ultrafast" => t!("Ultra Fast").to_string(),
         other => other.to_owned(),
     }
 }
@@ -321,7 +323,7 @@ fn service_tier_label(value: &str) -> String {
 fn model_service_tier(item: &Value) -> Option<ModelOption> {
     let mut choices = vec![ModelOptionChoice {
         id: "default".into(),
-        label: "Standard".into(),
+        label: t!("Standard").to_string(),
     }];
     let mut seen = HashSet::from(["default".to_owned()]);
     for tier in item
@@ -374,7 +376,7 @@ fn model_service_tier(item: &Value) -> Option<ModelOption> {
         .to_owned();
     Some(ModelOption {
         id: "serviceTier".into(),
-        label: "Service Tier".into(),
+        label: t!("Service Tier").to_string(),
         choices,
         default_choice,
     })
@@ -511,14 +513,15 @@ impl Harness for CodexHarness {
         Ok(vec![
             SlashCommand {
                 name: "compact".into(),
-                description: "Compact this conversation's context".into(),
+                description: t!("Compact this conversation's context").to_string(),
                 input_hint: None,
                 is_skill: false,
             },
             SlashCommand {
                 name: "review".into(),
-                description: "Review uncommitted changes, or supply review instructions".into(),
-                input_hint: Some("optional instructions".into()),
+                description: t!("Review uncommitted changes, or supply review instructions")
+                    .to_string(),
+                input_hint: Some(t!("optional instructions").to_string()),
                 is_skill: false,
             },
         ])
@@ -591,7 +594,7 @@ impl CodexHarness {
             && request.fork.is_none()
         {
             return Err(HarnessError::Protocol(
-                "/compact needs an existing Codex conversation".into(),
+                t!("/compact needs an existing Codex conversation").to_string(),
             ));
         }
         if native.is_some() && (!request.attachments.is_empty() || !request.skills.is_empty()) {
@@ -813,7 +816,7 @@ fn command_request(
             json!({"threadId": thread_id}),
         ))),
         "compact" => Err(HarnessError::Protocol(
-            "/compact takes no arguments; send other text separately".into(),
+            t!("/compact takes no arguments; send other text separately").to_string(),
         )),
         "review" => Ok(Some((
             "review/start",
@@ -826,9 +829,13 @@ fn command_request(
         "model" | "permissions" | "approvals" | "new" | "clear" | "resume" | "fork" | "status"
         | "diff" | "mention" | "mcp" | "skills" | "plan" | "fast" | "logout" | "quit" | "exit"
         | "init" | "rename" | "feedback" | "ps" | "stop" | "clean" | "archive" | "delete" => {
-            Err(HarnessError::Protocol(format!(
-                "/{name} is not available here. Available commands: /compact and /review."
-            )))
+            Err(HarnessError::Protocol(
+                t!(
+                    "/{name} is not available here. Available commands: /compact and /review.",
+                    name = name
+                )
+                .to_string(),
+            ))
         }
         _ => Ok(None),
     }
@@ -836,8 +843,8 @@ fn command_request(
 
 fn command_with_extras_error() -> HarnessError {
     HarnessError::Protocol(
-        "Codex commands cannot include skills or attachments; send them in a separate prompt"
-            .into(),
+        t!("Codex commands cannot include skills or attachments; send them in a separate prompt")
+            .to_string(),
     )
 }
 
@@ -949,9 +956,13 @@ async fn run_session(session: Session) {
                             )
                             .await
                     {
-                        drop_problem = Some(format!(
-                            "Codex couldn't forget your earlier message, so it may still see it. {error}"
-                        ));
+                        drop_problem = Some(
+                            t!(
+                                "Codex couldn't forget your earlier message, so it may still see it. {error}",
+                                error = error
+                            )
+                            .to_string(),
+                        );
                     }
                     thread
                 }
@@ -1286,7 +1297,7 @@ async fn run_session(session: Session) {
                                 .pointer("/turn/status")
                                 .and_then(Value::as_str)
                                 == Some("failed"))
-                            .then(|| "Codex turn failed".to_owned())
+                            .then(|| t!("Codex turn failed").to_string())
                         });
                         let status = if interrupted {
                             DoneStatus::Interrupted
@@ -1356,7 +1367,7 @@ async fn run_session(session: Session) {
                                 result: None,
                                 error: Some(
                                     turn_error_message(&params)
-                                        .unwrap_or_else(|| "Codex turn failed".into()),
+                                        .unwrap_or_else(|| t!("Codex turn failed").to_string()),
                                 ),
                                 session_id: Some(thread_id.clone()),
                             },
@@ -1389,8 +1400,8 @@ async fn run_session(session: Session) {
                             .pointer("/error/message")
                             .and_then(Value::as_str)
                             .or_else(|| params.get("message").and_then(Value::as_str))
-                            .unwrap_or("Codex error")
-                            .to_owned();
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| t!("Codex error").to_string());
                         if !send(&event_tx, AgentEvent::Error { message }).await {
                             break 'main;
                         }
@@ -1579,13 +1590,8 @@ async fn steer_as_new_turn(
             .await
         }
         Err(e) => {
-            send_final(
-                event_tx,
-                AgentEvent::Error {
-                    message: format!("Steering failed: {e}"),
-                },
-            )
-            .await;
+            let message = t!("Steering failed: {error}", error = e).to_string();
+            send_final(event_tx, AgentEvent::Error { message }).await;
             false
         }
     }
@@ -1760,7 +1766,7 @@ fn user_input_questions(params: &Value) -> Vec<(String, UserInputQuestion)> {
                 header: {
                     let h = field(["header", "title", "label"]);
                     if h.is_empty() {
-                        "Codex question".into()
+                        t!("Codex question").to_string()
                     } else {
                         h
                     }
@@ -1793,9 +1799,6 @@ fn user_input_questions(params: &Value) -> Vec<(String, UserInputQuestion)> {
         })
         .collect()
 }
-
-const ELICITATION_ALLOW_FOR_CHAT: &str = "Allow for this chat";
-const ELICITATION_ALWAYS_ALLOW: &str = "Always allow";
 
 /// Forms and links are declined because the chat can't show them.
 fn elicitation_question(params: &Value) -> Option<(UserInputQuestion, Vec<(String, Value)>)> {
@@ -1832,20 +1835,17 @@ fn elicitation_question(params: &Value) -> Option<(UserInputQuestion, Vec<(Strin
         }
         None => json!({ "action": "accept", "content": {} }),
     };
-    let mut replies = vec![(crate::claude::PERMISSION_ALLOW.to_owned(), accept(None))];
+    let mut replies = vec![(t!("Allow").to_string(), accept(None))];
     if persist.contains(&"session") {
         replies.push((
-            ELICITATION_ALLOW_FOR_CHAT.to_owned(),
+            t!("Allow for this chat").to_string(),
             accept(Some("session")),
         ));
     }
     if persist.contains(&"always") {
-        replies.push((ELICITATION_ALWAYS_ALLOW.to_owned(), accept(Some("always"))));
+        replies.push((t!("Always allow").to_string(), accept(Some("always"))));
     }
-    replies.push((
-        crate::claude::PERMISSION_DENY.to_owned(),
-        json!({ "action": "decline" }),
-    ));
+    replies.push((t!("Deny").to_string(), json!({ "action": "decline" })));
     let question = UserInputQuestion {
         id: new_message_id(),
         header,
@@ -1866,30 +1866,39 @@ fn permissions_question(params: &Value) -> UserInputQuestion {
         .and_then(Value::as_bool)
         == Some(true)
     {
-        wants.push("network access".to_owned());
+        wants.push(t!("network access"));
     }
+    let wants_network = !wants.is_empty();
     let file_system = permissions.and_then(|permissions| permissions.get("fileSystem"));
-    for (key, access) in [("read", "read"), ("write", "write")] {
-        let paths: Vec<&str> = file_system
+    let paths_for = |key: &str| -> String {
+        file_system
             .and_then(|file_system| file_system.get(key))
             .and_then(Value::as_array)
-            .map(|paths| paths.iter().filter_map(Value::as_str).collect())
-            .unwrap_or_default();
-        if !paths.is_empty() {
-            wants.push(format!("{access} access to {}", paths.join(", ")));
-        }
+            .map(|paths| paths.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default()
+            .join(", ")
+    };
+    let read_paths = paths_for("read");
+    if !read_paths.is_empty() {
+        wants.push(t!("read access to {paths}", paths = read_paths));
+    }
+    let write_paths = paths_for("write");
+    if !write_paths.is_empty() {
+        wants.push(t!("write access to {paths}", paths = write_paths));
     }
     let has_entries = file_system
         .and_then(|file_system| file_system.get("entries"))
         .and_then(Value::as_array)
         .is_some_and(|entries| !entries.is_empty());
-    if has_entries && wants.iter().all(|want| want == "network access") {
-        wants.push("more file access".to_owned());
+    if has_entries && (wants.is_empty() || wants_network && wants.len() == 1) {
+        wants.push(t!("more file access"));
     }
-    let mut question = if wants.is_empty() {
-        "Codex wants more access. Allow it?".to_owned()
-    } else {
-        format!("Codex wants {}. Allow it?", wants.join(" and "))
+    let mut question = match wants
+        .into_iter()
+        .reduce(|first, second| t!("{first} and {second}", first = first, second = second))
+    {
+        None => t!("Codex wants more access. Allow it?").to_string(),
+        Some(access) => t!("Codex wants {access}. Allow it?", access = access).to_string(),
     };
     if let Some(reason) = params
         .get("reason")
@@ -1926,9 +1935,13 @@ fn approval_question(method: &str, params: &Value) -> UserInputQuestion {
         (
             crate::claude::PERMISSION_HEADER.to_owned(),
             if command.is_empty() {
-                "Codex wants to run a command. Allow it?".to_owned()
+                t!("Codex wants to run a command. Allow it?").to_string()
             } else {
-                format!("Codex wants to run `{command}`. Allow it?")
+                t!(
+                    "Codex wants to run `{command}`. Allow it?",
+                    command = command
+                )
+                .to_string()
             },
         )
     } else {
@@ -1943,9 +1956,13 @@ fn approval_question(method: &str, params: &Value) -> UserInputQuestion {
         (
             crate::claude::PERMISSION_HEADER.to_owned(),
             if paths.is_empty() {
-                "Codex wants to modify files. Allow it?".to_owned()
+                t!("Codex wants to modify files. Allow it?").to_string()
             } else {
-                format!("Codex wants to modify {}. Allow it?", paths.join(", "))
+                t!(
+                    "Codex wants to modify {paths}. Allow it?",
+                    paths = paths.join(", ")
+                )
+                .to_string()
             },
         )
     };

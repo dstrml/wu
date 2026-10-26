@@ -1,0 +1,10 @@
+{
+  "onboarding::Finish": {
+    "description": "完成新手引导。",
+    "name": "完成"
+  },
+  "onboarding::ResetHints": {
+    "description": "将欢迎页的提示恢复到初始状态。",
+    "name": "重置提示"
+  }
+}

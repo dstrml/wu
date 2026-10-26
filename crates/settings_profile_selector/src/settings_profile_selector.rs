@@ -2,6 +2,7 @@ use fuzzy::{StringMatch, StringMatchCandidate, match_strings};
 use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, Focusable, Render, Task, WeakEntity, Window,
 };
+use i18n::t;
 use picker::{Picker, PickerDelegate};
 use settings::{ActiveSettingsProfileName, SettingsStore};
 use ui::{HighlightedLabel, ListItem, ListItemSpacing, prelude::*};
@@ -155,7 +156,7 @@ impl PickerDelegate for SettingsProfileSelectorDelegate {
     }
 
     fn placeholder_text(&self, _: &mut Window, _: &mut App) -> std::sync::Arc<str> {
-        "Select a settings profile...".into()
+        t!("Select a settings profile...").as_ref().into()
     }
 
     fn match_count(&self) -> usize {
@@ -279,7 +280,9 @@ impl PickerDelegate for SettingsProfileSelectorDelegate {
 }
 
 fn display_name(profile_name: &Option<String>) -> String {
-    profile_name.clone().unwrap_or("Disabled".into())
+    profile_name
+        .clone()
+        .unwrap_or_else(|| t!("Disabled").to_string())
 }
 
 #[cfg(test)]

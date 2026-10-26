@@ -1,0 +1,186 @@
+{
+  "project_panel::CollapseAllEntries": {
+    "name": "全部折叠",
+    "description": "折叠项目树中的所有条目。"
+  },
+  "project_panel::CollapseSelectedEntry": {
+    "name": "折叠所选条目",
+    "description": "折叠项目树中的所选条目。"
+  },
+  "project_panel::CollapseSelectedEntryAndChildren": {
+    "name": "折叠所选条目及子项",
+    "description": "折叠项目树中的所选条目及其子项。"
+  },
+  "project_panel::CompareMarkedFiles": {
+    "name": "比较选中的文件",
+    "description": "打开差异视图，比较两个选中的文件。"
+  },
+  "project_panel::Copy": {
+    "name": "复制",
+    "description": "复制所选文件或文件夹。"
+  },
+  "project_panel::Cut": {
+    "name": "剪切",
+    "description": "剪切所选文件或文件夹。"
+  },
+  "project_panel::Delete": {
+    "name": "删除",
+    "description": "永久删除所选文件或文件夹。"
+  },
+  "project_panel::DownloadFromRemote": {
+    "name": "从远程下载",
+    "description": "下载所选的远程文件。"
+  },
+  "project_panel::Duplicate": {
+    "name": "创建副本",
+    "description": "创建所选文件或文件夹的副本。"
+  },
+  "project_panel::ExpandAllEntries": {
+    "name": "全部展开",
+    "description": "展开项目树中的所有条目。"
+  },
+  "project_panel::ExpandSelectedEntry": {
+    "name": "展开所选条目",
+    "description": "展开项目树中的所选条目。"
+  },
+  "project_panel::ExpandSelectedEntryAndChildren": {
+    "name": "展开所选条目及子项",
+    "description": "展开项目树中的所选条目及其子项。"
+  },
+  "project_panel::FoldDirectory": {
+    "name": "合并文件夹",
+    "description": "将所选文件夹与只含一个子文件夹的下级合并为一行显示。"
+  },
+  "project_panel::GetInfo": {
+    "name": "显示简介",
+    "description": "显示所选条目的大小、日期和其他详细信息。"
+  },
+  "project_panel::NewDirectory": {
+    "name": "新建文件夹",
+    "description": "新建一个文件夹。"
+  },
+  "project_panel::NewFile": {
+    "name": "新建文件",
+    "description": "新建一个文件。"
+  },
+  "project_panel::NewSearchInDirectory": {
+    "name": "在文件夹中搜索",
+    "description": "在所选文件夹中开始新的搜索。"
+  },
+  "project_panel::Open": {
+    "name": "打开",
+    "description": "在编辑器中打开所选文件。"
+  },
+  "project_panel::OpenMarkdownPreview": {
+    "name": "打开 Markdown 预览",
+    "description": "打开所选文件的 Markdown 预览。"
+  },
+  "project_panel::OpenPermanent": {
+    "name": "以常驻标签页打开",
+    "description": "在常驻标签页（非预览标签页）中打开所选文件。"
+  },
+  "project_panel::OpenSplitHorizontal": {
+    "name": "在水平拆分中打开",
+    "description": "在水平拆分的窗格中打开所选文件。"
+  },
+  "project_panel::OpenSplitVertical": {
+    "name": "在垂直拆分中打开",
+    "description": "在垂直拆分的窗格中打开所选文件。"
+  },
+  "project_panel::Paste": {
+    "name": "粘贴",
+    "description": "粘贴之前剪切或复制的项。"
+  },
+  "project_panel::Redo": {
+    "name": "重做",
+    "description": "重做上一次撤销的文件操作。"
+  },
+  "project_panel::RemoveFromProject": {
+    "name": "从项目中移除",
+    "description": "从项目中移除所选文件夹。"
+  },
+  "project_panel::Rename": {
+    "name": "重命名",
+    "description": "重命名所选文件或文件夹。"
+  },
+  "project_panel::RevealInFileManager": {
+    "name": "在文件管理器中显示",
+    "description": "在系统文件管理器中显示所选项。"
+  },
+  "project_panel::ScrollCursorBottom": {
+    "name": "滚动使光标位于底部",
+    "description": "滚动视图，使光标显示在底部。"
+  },
+  "project_panel::ScrollCursorCenter": {
+    "name": "滚动使光标位于中间",
+    "description": "滚动视图，使光标显示在中间。"
+  },
+  "project_panel::ScrollCursorTop": {
+    "name": "滚动使光标位于顶部",
+    "description": "滚动视图，使光标显示在顶部。"
+  },
+  "project_panel::ScrollDown": {
+    "name": "向下滚动",
+    "description": "向下滚动半页。"
+  },
+  "project_panel::ScrollUp": {
+    "name": "向上滚动",
+    "description": "向上滚动半页。"
+  },
+  "project_panel::SelectNextDiagnostic": {
+    "name": "选择下一个诊断",
+    "description": "选择下一个有诊断的条目。"
+  },
+  "project_panel::SelectNextDirectory": {
+    "name": "选择下一个文件夹",
+    "description": "选择下一个文件夹。"
+  },
+  "project_panel::SelectNextGitEntry": {
+    "name": "选择下一个 Git 更改",
+    "description": "选择下一个有 Git 更改的条目。"
+  },
+  "project_panel::SelectParent": {
+    "name": "选择父文件夹",
+    "description": "选择父文件夹。"
+  },
+  "project_panel::SelectPrevDiagnostic": {
+    "name": "选择上一个诊断",
+    "description": "选择上一个有诊断的条目。"
+  },
+  "project_panel::SelectPrevDirectory": {
+    "name": "选择上一个文件夹",
+    "description": "选择上一个文件夹。"
+  },
+  "project_panel::SelectPrevGitEntry": {
+    "name": "选择上一个 Git 更改",
+    "description": "选择上一个有 Git 更改的条目。"
+  },
+  "project_panel::Toggle": {
+    "name": "切换项目面板",
+    "description": "切换项目面板。"
+  },
+  "project_panel::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "切换项目面板的焦点。"
+  },
+  "project_panel::ToggleHideGitIgnore": {
+    "name": "切换显示 Git 忽略的文件",
+    "description": "切换是否显示被 Git 忽略的文件。"
+  },
+  "project_panel::ToggleHideHidden": {
+    "name": "切换显示隐藏文件",
+    "description": "切换是否显示隐藏文件。"
+  },
+  "project_panel::Trash": {
+    "name": "移到废纸篓",
+    "description": "将所选文件或文件夹移到系统废纸篓。"
+  },
+  "project_panel::Undo": {
+    "name": "撤销",
+    "description": "撤销上一次文件操作。"
+  },
+  "project_panel::UnfoldDirectory": {
+    "name": "取消合并文件夹",
+    "description": "取消合并所选文件夹，逐级显示其子文件夹。"
+  }
+}

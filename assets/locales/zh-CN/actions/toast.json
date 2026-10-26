@@ -1,0 +1,6 @@
+{
+  "toast::RunAction": {
+    "description": "执行提示通知所关联的操作。",
+    "name": "执行操作"
+  }
+}

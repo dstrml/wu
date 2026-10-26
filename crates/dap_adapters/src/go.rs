@@ -10,6 +10,7 @@ use dap::{
 use fs::Fs;
 use futures::StreamExt;
 use gpui::{AsyncApp, SharedString};
+use i18n::t;
 use language::LanguageName;
 use log::warn;
 use serde_json::{Map, Value};
@@ -459,7 +460,9 @@ impl DebugAdapter for GoDebugAdapter {
             let go = delegate
                 .which(OsStr::new("go"))
                 .await
-                .context("Go not found in path. Please install Go first, then Dlv will be installed automatically.")?;
+                .context(t!(
+                    "Go not found in path. Please install Go first, then Dlv will be installed automatically."
+                ))?;
 
             let adapter_path = paths::debug_adapters_dir().join(&Self::ADAPTER_NAME);
 
@@ -471,11 +474,11 @@ impl DebugAdapter for GoDebugAdapter {
                 .await?;
 
             if !install_output.status.success() {
-                bail!(
-                    "failed to install dlv via `go install`. stdout: {:?}, stderr: {:?}\n Please try installing it manually using 'go install github.com/go-delve/delve/cmd/dlv@latest'",
-                    String::from_utf8_lossy(&install_output.stdout),
-                    String::from_utf8_lossy(&install_output.stderr)
-                );
+                bail!(t!(
+                    "failed to install dlv via `go install`. stdout: {stdout}, stderr: {stderr}\n Please try installing it manually using 'go install github.com/go-delve/delve/cmd/dlv@latest'",
+                    stdout = format!("{:?}", String::from_utf8_lossy(&install_output.stdout)),
+                    stderr = format!("{:?}", String::from_utf8_lossy(&install_output.stderr))
+                ));
             }
 
             adapter_path

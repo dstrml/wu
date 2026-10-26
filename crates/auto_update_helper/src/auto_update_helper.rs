@@ -7,9 +7,10 @@ mod updater;
 
 #[cfg(target_os = "windows")]
 fn main() {
+    i18n::set_language(i18n::Language::system());
     if let Err(e) = windows_impl::run() {
         log::error!("Error: Wu update failed, {:?}", e);
-        windows_impl::show_error(format!("Error: {:?}", e));
+        windows_impl::show_error(i18n::t!("Error: {error}", error = format!("{e:?}")).to_string());
     }
 }
 
@@ -116,14 +117,14 @@ mod windows_impl {
 
     pub(crate) fn show_error(mut content: String) {
         if content.len() > 600 {
-            content.truncate(600);
+            content.truncate(content.floor_char_boundary(600));
             content.push_str("...\n");
         }
         let _ = unsafe {
             MessageBoxW(
                 None,
                 &HSTRING::from(content),
-                windows::core::w!("Error: Wu update failed."),
+                &HSTRING::from(i18n::t!("Error: Wu update failed.").as_str()),
                 MB_ICONERROR | MB_SYSTEMMODAL,
             )
         };

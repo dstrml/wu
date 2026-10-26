@@ -1,0 +1,12 @@
+{
+  "Delete from Recent Tasks": "从最近的任务中删除",
+  "Find a task, or run a command": "查找任务，或运行命令",
+  "Find a task, or run a command in the central pane": "查找任务，或在中央窗格中运行命令",
+  "Rerun": "重新运行",
+  "Rerun Last Task": "重新运行上一个任务",
+  "Rerun Without History": "重新运行（不记入历史记录）",
+  "Spawn": "运行",
+  "Spawn Oneshot": "运行一次性任务",
+  "Spawn Oneshot Without History": "运行一次性任务（不记入历史记录）",
+  "Spawn Without History": "运行（不记入历史记录）"
+}

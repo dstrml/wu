@@ -7,25 +7,35 @@ interface Assets {
   js?: string;
 }
 
+const pageUrl = (path: string) => `${SITE_URL}${path === '/' ? '/' : `${path}/`}`;
+
 const escapeHtml = (text: string) =>
   text.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 
 export function renderPage(route: Route, { css, js }: Assets): string {
   const title = escapeHtml(route.meta?.title ?? SITE_TITLE);
   const description = escapeHtml(route.meta?.description ?? SITE_DESCRIPTION);
-  const url = `${SITE_URL}${route.path === '/' ? '/' : `${route.path}/`}`;
+  const url = pageUrl(route.path);
+  const alternates = route.alternates
+    ? [
+        ...Object.entries(route.alternates).map(
+          ([locale, path]) => `    <link rel="alternate" hreflang="${locale}" href="${pageUrl(path)}" />\n`
+        ),
+        `    <link rel="alternate" hreflang="x-default" href="${pageUrl(route.alternates.en)}" />\n`
+      ].join('')
+    : '';
   const image = `${SITE_URL}/wu-preview.png`;
   const app = js ? renderToString(route.element) : renderToStaticMarkup(route.element);
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${route.locale}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>${title}</title>
     <meta name="description" content="${description}" />
     <link rel="canonical" href="${url}" />
-    <link rel="icon" href="/app-icon.png" />
+${alternates}    <link rel="icon" href="/app-icon.png" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="${SITE_TITLE}" />
     <meta property="og:url" content="${url}" />

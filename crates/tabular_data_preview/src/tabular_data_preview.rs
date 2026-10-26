@@ -2,6 +2,7 @@ use editor::{Editor, EditorEvent};
 use gpui::{
     AppContext, Entity, EventEmitter, FocusHandle, Focusable, ListAlignment, Task, actions,
 };
+use i18n::t;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -297,9 +298,9 @@ impl Item for TabularDataPreviewPane {
                 local_file
                     .abs_path(cx)
                     .file_name()
-                    .map(|name| format!("Preview {}", name.to_string_lossy()).into())
+                    .map(|name| t!("Preview {name}", name = name.to_string_lossy()))
             })
-            .unwrap_or_else(|| SharedString::from("Tabular Data Preview"))
+            .unwrap_or_else(|| t!("Tabular Data Preview"))
     }
 }
 

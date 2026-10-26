@@ -17,6 +17,7 @@ use gpui::{
     AnyElement, App, AsyncWindowContext, Context, Entity, EntityId, EventEmitter, Font,
     IntoElement, ParentElement, Pixels, SharedString, Styled, Task, WeakEntity, Window,
 };
+use i18n::t;
 use language::{
     Bias, Buffer, BufferRow, CharKind, CharScopeContext, DiskState, HighlightedText, LocalFile,
     PLAIN_TEXT, Point,
@@ -646,14 +647,14 @@ impl Item for Editor {
 
         if is_markdown {
             actions.push((
-                "Open Markdown Preview".into(),
+                t!("Open Markdown Preview"),
                 Box::new(OpenMarkdownPreview) as Box<dyn gpui::Action>,
             ));
         }
 
         if is_svg {
             actions.push((
-                "Open SVG Preview".into(),
+                t!("Open SVG Preview"),
                 Box::new(OpenSvgPreview) as Box<dyn gpui::Action>,
             ));
         }

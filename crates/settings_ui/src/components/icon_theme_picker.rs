@@ -1,3 +1,4 @@
+use i18n::t;
 use std::sync::Arc;
 
 use fuzzy::{StringMatch, StringMatchCandidate};
@@ -82,7 +83,7 @@ impl PickerDelegate for IconThemePickerDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Search icon themes…".into()
+        t!("Search icon themes…").as_ref().into()
     }
 
     fn update_matches(

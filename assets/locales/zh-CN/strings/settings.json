@@ -1,0 +1,15 @@
+{
+  "Deprecated, use {new_name}": "已弃用，请使用 {new_name}",
+  "Emacs (beta)": "Emacs（测试版）",
+  "Errors in user keymap file.": "用户键位映射文件中有错误。",
+  "In binding {keystrokes}, {error}": "在快捷键 {keystrokes} 中：{error}",
+  "In section with {context}:": "在 {context} 的部分中：",
+  "In section without context predicate:": "在没有上下文条件的部分中：",
+  "In unbind {keystrokes}, {error}": "在取消绑定 {keystrokes} 中：{error}",
+  "No action named this.": "没有此名称的命令。",
+  "No language with this name is installed.": "未安装此名称的语言。",
+  "Parse error in section `context` field: {error}": "解析部分的 `context` 字段时出错：{error}",
+  "This action does not take input - just the action name string should be used.": "此命令不接受输入，只需使用命令名称字符串。",
+  "Unrecognized fields: {fields}": "无法识别的字段：{fields}",
+  "Wu (Default)": "Wu（默认）"
+}

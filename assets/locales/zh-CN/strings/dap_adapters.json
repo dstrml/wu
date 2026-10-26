@@ -1,0 +1,18 @@
+{
+  "Cannot have two different hosts in debug configuration": "调试配置中不能有两个不同的主机",
+  "Cannot have two different ports in debug configuration": "调试配置中不能有两个不同的端口",
+  "Checking latest version of {name}...": "正在检查 {name} 的最新版本…",
+  "Could not find a Python installation": "找不到已安装的 Python",
+  "Could not find a Python installation. Install Python from the Microsoft Store, or manually from https://www.python.org/downloads/windows.": "找不到已安装的 Python。请从 Microsoft Store 安装 Python，或从 https://www.python.org/downloads/windows 手动安装。",
+  "Could not find gdb path or it's not installed": "找不到 gdb 路径，或尚未安装 gdb",
+  "Failed to create base virtual environment with {base_python} in:\n{debug_adapter_path}\nstderr:\n{stderr}\nstdout:\n{stdout}\n": "无法使用 {base_python} 创建基础虚拟环境，位置：\n{debug_adapter_path}\nstderr:\n{stderr}\nstdout:\n{stdout}\n",
+  "Go not found in path. Please install Go first, then Dlv will be installed automatically.": "在 PATH 中找不到 Go。请先安装 Go，之后会自动安装 Dlv。",
+  "No cached adapter directory": "没有缓存的适配器目录",
+  "No cached adapter found": "找不到缓存的适配器",
+  "Searching for adapters in: {path}": "正在以下位置查找适配器：{path}",
+  "Unable to fetch latest version": "无法获取最新版本",
+  "debugpy installation failed (could not fetch Debugpy's wheel)": "debugpy 安装失败（无法获取 Debugpy 的 wheel 包）",
+  "failed to find binary path for Python": "找不到 Python 的可执行文件路径",
+  "failed to install dlv via `go install`. stdout: {stdout}, stderr: {stderr}\n Please try installing it manually using 'go install github.com/go-delve/delve/cmd/dlv@latest'": "通过 `go install` 安装 dlv 失败。stdout：{stdout}，stderr：{stderr}\n请尝试使用 'go install github.com/go-delve/delve/cmd/dlv@latest' 手动安装",
+  "{name} debug adapter is up to date": "{name} 调试适配器已是最新版本"
+}

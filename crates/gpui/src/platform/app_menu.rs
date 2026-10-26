@@ -10,6 +10,9 @@ pub struct Menu {
 
     /// Whether this menu is disabled
     pub disabled: bool,
+
+    /// Whether macOS should treat this as its Window menu and add the open windows to it
+    pub window_menu: bool,
 }
 
 impl Menu {
@@ -19,6 +22,7 @@ impl Menu {
             name: name.into(),
             items: vec![],
             disabled: false,
+            window_menu: false,
         }
     }
 
@@ -34,12 +38,19 @@ impl Menu {
         self
     }
 
+    /// Mark this menu as macOS's Window menu
+    pub fn window_menu(mut self, window_menu: bool) -> Self {
+        self.window_menu = window_menu;
+        self
+    }
+
     /// Create an OwnedMenu from this Menu
     pub fn owned(self) -> OwnedMenu {
         OwnedMenu {
             name: self.name.to_string().into(),
             items: self.items.into_iter().map(|item| item.owned()).collect(),
             disabled: self.disabled,
+            window_menu: self.window_menu,
         }
     }
 }
@@ -244,6 +255,9 @@ pub struct OwnedMenu {
 
     /// Whether this menu is disabled
     pub disabled: bool,
+
+    /// Whether macOS should treat this as its Window menu and add the open windows to it
+    pub window_menu: bool,
 }
 
 /// The different kinds of items that can be in a menu
@@ -412,6 +426,7 @@ mod tests {
             name: "Submenu".into(),
             items: vec![],
             disabled: true,
+            window_menu: false,
         });
         assert_eq!(
             match &submenu {

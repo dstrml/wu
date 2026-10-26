@@ -10,6 +10,7 @@ use worktree::Worktree;
 
 use collections::HashMap;
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Task, WeakEntity};
+use i18n::t;
 use settings::Settings as _;
 
 use crate::{
@@ -321,7 +322,7 @@ async fn load_directory_shell_environment(
     }
 
     let meta = smol::fs::metadata(&abs_path).await.with_context(|| {
-        tx.unbounded_send(format!("Failed to open {}", abs_path.display()))
+        tx.unbounded_send(t!("Failed to open {path}", path = abs_path.display()).to_string())
             .ok();
         format!("stat {abs_path:?}")
     })?;
@@ -332,8 +333,10 @@ async fn load_directory_shell_environment(
         abs_path
             .parent()
             .with_context(|| {
-                tx.unbounded_send(format!("Failed to open {}", abs_path.display()))
-                    .ok();
+                tx.unbounded_send(
+                    t!("Failed to open {path}", path = abs_path.display()).to_string(),
+                )
+                .ok();
                 format!("getting parent of {abs_path:?}")
             })?
             .into()
@@ -343,7 +346,7 @@ async fn load_directory_shell_environment(
     let mut envs = util::shell_env::capture(shell.clone(), args, abs_path)
         .await
         .with_context(|| {
-            tx.unbounded_send("Failed to load environment variables".into())
+            tx.unbounded_send(t!("Failed to load environment variables").to_string())
                 .ok();
             format!("capturing shell environment with {shell:?}")
         })?;
@@ -368,7 +371,7 @@ async fn load_directory_shell_environment(
         DirenvSettings::Direct => load_direnv_environment(&envs, &dir)
             .await
             .with_context(|| {
-                tx.unbounded_send("Failed to load direnv environment".into())
+                tx.unbounded_send(t!("Failed to load direnv environment").to_string())
                     .ok();
                 "load direnv environment"
             })

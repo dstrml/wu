@@ -473,7 +473,7 @@ impl RemoteConnection for SshRemoteConnection {
         cx: &mut AsyncApp,
     ) -> Task<Result<i32>> {
         const VARS: [&str; 2] = ["RUST_LOG", "RUST_BACKTRACE"];
-        delegate.set_status(Some("Starting proxy"), cx);
+        delegate.set_status(Some(i18n::t!("Starting proxy").as_str()), cx);
 
         let Some(remote_binary_path) = self.remote_binary_path.clone() else {
             return Task::ready(Err(anyhow!("Remote binary path not set")));
@@ -652,7 +652,7 @@ impl SshRemoteConnection {
 
         #[cfg(not(windows))]
         let (socket, master_process_option) = if let Some(reused_path) = reused_socket {
-            delegate.set_status(Some("Connecting (reusing session)"), cx);
+            delegate.set_status(Some(i18n::t!("Connecting (reusing session)").as_str()), cx);
             log::info!("reusing existing ControlMaster, skipping authentication");
             let socket = SshSocket::new(connection_options, reused_path).await?;
             (socket, None)
@@ -668,7 +668,7 @@ impl SshRemoteConnection {
                 askpass::AskPassSession::new(cx.background_executor().clone(), askpass_delegate)
                     .await?;
 
-            delegate.set_status(Some("Connecting"), cx);
+            delegate.set_status(Some(i18n::t!("Connecting").as_str()), cx);
 
             // Start the master SSH process, which does not do anything except
             // for establish the connection and keep it open, allowing other ssh
@@ -732,7 +732,7 @@ impl SshRemoteConnection {
                 askpass::AskPassSession::new(cx.background_executor().clone(), askpass_delegate)
                     .await?;
 
-            delegate.set_status(Some("Connecting"), cx);
+            delegate.set_status(Some(i18n::t!("Connecting").as_str()), cx);
 
             let mut master_process = MasterProcess::new(
                 askpass.script_path().as_ref(),
@@ -985,7 +985,10 @@ impl SshRemoteConnection {
             }
         }
 
-        delegate.set_status(Some("Downloading remote development server on host"), cx);
+        delegate.set_status(
+            Some(i18n::t!("Downloading remote development server on host").as_str()),
+            cx,
+        );
 
         let connection_timeout = self
             .socket
@@ -1091,7 +1094,10 @@ impl SshRemoteConnection {
         let size = src_stat.len();
 
         let t0 = Instant::now();
-        delegate.set_status(Some("Uploading remote development server"), cx);
+        delegate.set_status(
+            Some(i18n::t!("Uploading remote development server").as_str()),
+            cx,
+        );
         log::info!(
             "uploading remote development server to {:?} ({}kb)",
             tmp_path,
@@ -1111,7 +1117,10 @@ impl SshRemoteConnection {
         delegate: &Arc<dyn RemoteClientDelegate>,
         cx: &mut AsyncApp,
     ) -> Result<()> {
-        delegate.set_status(Some("Extracting remote development server"), cx);
+        delegate.set_status(
+            Some(i18n::t!("Extracting remote development server").as_str()),
+            cx,
+        );
 
         if self.ssh_platform.os.is_windows() {
             self.extract_server_binary_windows(dst_path, tmp_path).await

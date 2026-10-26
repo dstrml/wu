@@ -1,5 +1,6 @@
 use editor::Editor;
 use gpui::{App, Context, Entity, SharedString};
+use i18n::t;
 use language::Buffer;
 use notifications::status_toast::StatusToast;
 use proto::RpcError;
@@ -24,7 +25,10 @@ pub fn open_output(
     let editor = cx.new(|cx| {
         let mut editor = Editor::for_buffer(buffer, None, window, cx);
         editor.buffer().update(cx, |buffer, cx| {
-            buffer.set_title(format!("Output from git {operation}"), cx);
+            buffer.set_title(
+                t!("Output from git {operation}", operation = operation).to_string(),
+                cx,
+            );
         });
         editor.set_read_only(true);
         editor
@@ -50,22 +54,26 @@ pub fn show_error_toast(
         cx.defer(move |cx| {
             workspace.update(cx, |workspace, cx| {
                 let workspace_weak = cx.weak_entity();
-                let toast = StatusToast::new(format!("git {} failed", action), cx, |this, _cx| {
-                    this.icon(
-                        Icon::new(IconName::XCircle)
-                            .size(IconSize::Small)
-                            .color(Color::Error),
-                    )
-                    .action("View Log", move |window, cx| {
-                        let message = message.clone();
-                        let action = action.clone();
-                        workspace_weak
-                            .update(cx, move |workspace, cx| {
-                                open_output(action, workspace, &message, window, cx)
-                            })
-                            .ok();
-                    })
-                });
+                let toast = StatusToast::new(
+                    t!("git {action} failed", action = action),
+                    cx,
+                    |this, _cx| {
+                        this.icon(
+                            Icon::new(IconName::XCircle)
+                                .size(IconSize::Small)
+                                .color(Color::Error),
+                        )
+                        .action(t!("View Log"), move |window, cx| {
+                            let message = message.clone();
+                            let action = action.clone();
+                            workspace_weak
+                                .update(cx, move |workspace, cx| {
+                                    open_output(action, workspace, &message, window, cx)
+                                })
+                                .ok();
+                        })
+                    },
+                );
                 workspace.toggle_status_toast(toast, cx)
             });
         });

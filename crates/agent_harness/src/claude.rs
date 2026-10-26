@@ -12,6 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use i18n::{n, t};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
@@ -33,19 +34,25 @@ use wire::{
 pub const PERMISSION_ALLOW: &str = "Allow";
 pub const PERMISSION_DENY: &str = "Deny";
 pub const PERMISSION_HEADER: &str = "Permission";
+pub const QUESTION_HEADER: &str = n!("Question");
 
 fn permission_question(tool_name: &str, input: &Value) -> UserInputQuestion {
     let call = normalize::decode_tool_use(tool_name, input);
     let question = match &call {
-        crate::ToolCall::Exec { command } => format!("Run `{command}`?"),
-        crate::ToolCall::WriteFile { path, .. } => format!("Write {path}?"),
-        crate::ToolCall::EditFile { path, .. } => format!("Edit {path}?"),
-        crate::ToolCall::ReadFile { path } => format!("Read {path}?"),
-        crate::ToolCall::WebFetch { url, .. } => format!("Fetch {url}?"),
-        crate::ToolCall::WebSearch { query } => format!("Search the web for \"{query}\"?"),
-        crate::ToolCall::Mcp { server, tool, .. } => format!("Use {server}: {tool}?"),
-        _ => format!("Use {tool_name}?"),
-    };
+        crate::ToolCall::Exec { command } => t!("Run `{command}`?", command = command),
+        crate::ToolCall::WriteFile { path, .. } => t!("Write {path}?", path = path),
+        crate::ToolCall::EditFile { path, .. } => t!("Edit {path}?", path = path),
+        crate::ToolCall::ReadFile { path } => t!("Read {path}?", path = path),
+        crate::ToolCall::WebFetch { url, .. } => t!("Fetch {url}?", url = url),
+        crate::ToolCall::WebSearch { query } => {
+            t!("Search the web for \"{query}\"?", query = query)
+        }
+        crate::ToolCall::Mcp { server, tool, .. } => {
+            t!("Use {server}: {tool}?", server = server, tool = tool)
+        }
+        _ => t!("Use {tool}?", tool = tool_name),
+    }
+    .to_string();
     UserInputQuestion {
         id: uuid::Uuid::new_v4().to_string(),
         header: PERMISSION_HEADER.into(),
@@ -295,7 +302,9 @@ impl ClaudeHarness {
         shutdown_child(&mut child, self.kill_grace).await;
         match result {
             Ok(inner) => inner,
-            Err(_) => Err(HarnessError::Protocol("Claude initialize timed out".into())),
+            Err(_) => Err(HarnessError::Protocol(
+                n!("Claude initialize timed out").into(),
+            )),
         }
     }
 }
@@ -662,12 +671,10 @@ impl ClaudeHarness {
             match point {
                 history::ResumePoint::At(id) => resume_at = Some(id),
                 history::ResumePoint::Empty => request.resume = None,
-                history::ResumePoint::NotFound => {
-                    drop_problem = Some(
-                        "Claude Code couldn't find your earlier message, so it may still see it."
-                            .to_string(),
-                    )
-                }
+                history::ResumePoint::NotFound => drop_problem = Some(
+                    t!("Claude Code couldn't find your earlier message, so it may still see it.")
+                        .to_string(),
+                ),
             }
         }
         let discovered = self.models_cache.peek();
@@ -797,18 +804,30 @@ async fn load_image_blocks(paths: &[String]) -> (Vec<wire::ImageBlock>, Vec<Stri
         let bytes = match tokio::fs::read(path).await {
             Ok(bytes) => bytes,
             Err(error) => {
-                problems.push(format!("{name} wasn't sent: {error}"));
+                problems.push(
+                    t!("{name} wasn't sent: {error}", name = name, error = error).to_string(),
+                );
                 continue;
             }
         };
         if bytes.len().div_ceil(3) * 4 > MAX_INLINE_IMAGE_BYTES {
-            problems.push(format!("{name} wasn't sent: Claude only accepts images up to 5 MB."));
+            problems.push(
+                t!(
+                    "{name} wasn't sent: Claude only accepts images up to 5 MB.",
+                    name = name
+                )
+                .to_string(),
+            );
             continue;
         }
         let Some(media_type) = image_media_type(std::path::Path::new(path), &bytes) else {
-            problems.push(format!(
-                "{name} wasn't sent: only PNG, JPEG, GIF and WebP images are supported."
-            ));
+            problems.push(
+                t!(
+                    "{name} wasn't sent: only PNG, JPEG, GIF and WebP images are supported.",
+                    name = name
+                )
+                .to_string(),
+            );
             continue;
         };
         blocks.push(wire::ImageBlock {
@@ -909,9 +928,11 @@ async fn run_session(session: Session) {
                         *deadline = tokio::time::Instant::now() + HELD_DONE_SETTLE;
                     }
                     if let Some(error) = wire::control_error(line, SET_MODE_REQUEST_PREFIX) {
-                        let message = format!(
-                            "Claude Code couldn't switch the permission mode right away, so the new mode applies from your next message. {error}"
-                        );
+                        let message = t!(
+                            "Claude Code couldn't switch the permission mode right away, so the new mode applies from your next message. {error}",
+                            error = error
+                        )
+                        .to_string();
                         if event_tx.send(Ok(AgentEvent::Error { message })).await.is_err() { break 'main; }
                         continue;
                     }
@@ -1242,7 +1263,7 @@ fn elicitation_question(request: &ControlRequestBody) -> Option<UserInputQuestio
         id: uuid::Uuid::new_v4().to_string(),
         header: header.into(),
         question: message.into(),
-        options: vec![PERMISSION_ALLOW.into(), PERMISSION_DENY.into()],
+        options: vec![t!("Allow").to_string(), t!("Deny").to_string()],
         multi_select: false,
         prefill: None,
         multiline: false,
@@ -1275,10 +1296,12 @@ fn answer_elicitation(
             .unwrap_or_default();
         let accept = answers.iter().any(|answer| {
             answer.question_id == question.id
-                && answer
-                    .labels
-                    .iter()
-                    .any(|label| label.eq_ignore_ascii_case(PERMISSION_ALLOW))
+                && answer.labels.iter().any(|label| {
+                    question
+                        .options
+                        .first()
+                        .is_some_and(|allow| allow.eq_ignore_ascii_case(label))
+                })
         });
         let response = if accept {
             serde_json::json!({ "action": "accept", "content": {} })
@@ -1302,7 +1325,7 @@ fn parse_questions(input: &Value) -> Vec<UserInputQuestion> {
                 |keys: [&str; 2]| keys.iter().find_map(|k| q.get(*k).and_then(Value::as_str));
             UserInputQuestion {
                 id: uuid::Uuid::new_v4().to_string(),
-                header: field(["header", "title"]).unwrap_or("Question").into(),
+                header: field(["header", "title"]).unwrap_or(QUESTION_HEADER).into(),
                 question: field(["question", "prompt"]).unwrap_or("").into(),
                 prefill: None,
                 multiline: false,

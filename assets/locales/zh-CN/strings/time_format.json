@@ -1,0 +1,22 @@
+{
+  "1 hour ago": "1 小时前",
+  "1 minute ago": "1 分钟前",
+  "1 month ago": "1 个月前",
+  "1 week ago": "1 周前",
+  "1 year ago": "1 年前",
+  "1 year, 1 month ago": "1 年 1 个月前",
+  "1 year, {months} months ago": "1 年 {months} 个月前",
+  "Just now": "刚刚",
+  "Today": "今天",
+  "Today at {time}": "今天 {time}",
+  "Yesterday": "昨天",
+  "Yesterday at {time}": "昨天 {time}",
+  "{count} days ago": "{count} 天前",
+  "{count} hours ago": "{count} 小时前",
+  "{count} minutes ago": "{count} 分钟前",
+  "{count} months ago": "{count} 个月前",
+  "{count} weeks ago": "{count} 周前",
+  "{count} years ago": "{count} 年前",
+  "{years} years, 1 month ago": "{years} 年 1 个月前",
+  "{years} years, {months} months ago": "{years} 年 {months} 个月前"
+}

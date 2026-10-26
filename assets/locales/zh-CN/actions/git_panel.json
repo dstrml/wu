@@ -1,0 +1,94 @@
+{
+  "git_panel::ActivateChangesTab": {
+    "name": "切换到“更改”标签页",
+    "description": "切换到“更改”标签页。"
+  },
+  "git_panel::ActivateHistoryTab": {
+    "name": "切换到“历史记录”标签页",
+    "description": "切换到“历史记录”标签页。"
+  },
+  "git_panel::Close": {
+    "name": "关闭",
+    "description": "关闭 Git 面板。"
+  },
+  "git_panel::CollapseSelectedEntry": {
+    "name": "折叠所选项",
+    "description": "折叠所选项，隐藏其子项。"
+  },
+  "git_panel::ExpandSelectedEntry": {
+    "name": "展开所选项",
+    "description": "展开所选项，显示其子项。"
+  },
+  "git_panel::FirstEntry": {
+    "name": "第一项",
+    "description": "选择 Git 面板中的第一项，并在差异视图中显示。"
+  },
+  "git_panel::FocusChanges": {
+    "name": "聚焦到更改列表",
+    "description": "将焦点移到更改列表。"
+  },
+  "git_panel::FocusEditor": {
+    "name": "聚焦到提交编辑器",
+    "description": "将焦点移到提交消息编辑器。"
+  },
+  "git_panel::LastEntry": {
+    "name": "最后一项",
+    "description": "选择 Git 面板中的最后一项，并在差异视图中显示。"
+  },
+  "git_panel::NextEntry": {
+    "name": "下一项",
+    "description": "选择 Git 面板中的下一项，并在差异视图中显示。"
+  },
+  "git_panel::OpenMenu": {
+    "name": "打开菜单",
+    "description": "打开 Git 面板菜单。"
+  },
+  "git_panel::PreviousEntry": {
+    "name": "上一项",
+    "description": "选择 Git 面板中的上一项，并在差异视图中显示。"
+  },
+  "git_panel::SetGroupByNone": {
+    "name": "不分组",
+    "description": "不按状态对条目分组。"
+  },
+  "git_panel::SetGroupByStaging": {
+    "name": "按暂存状态分组",
+    "description": "按暂存状态对条目分组。"
+  },
+  "git_panel::SetGroupByStatus": {
+    "name": "按状态分组",
+    "description": "按状态对条目分组。"
+  },
+  "git_panel::SetSortByName": {
+    "name": "按名称排序",
+    "description": "按名称对条目排序。"
+  },
+  "git_panel::SetSortByPath": {
+    "name": "按路径排序",
+    "description": "按路径对条目排序。"
+  },
+  "git_panel::Toggle": {
+    "name": "切换 Git 面板",
+    "description": "打开或关闭 Git 面板。"
+  },
+  "git_panel::ToggleFillCoAuthors": {
+    "name": "切换自动填写共同作者",
+    "description": "开启或关闭自动建议共同作者。"
+  },
+  "git_panel::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "将焦点移到 Git 面板或移出 Git 面板。"
+  },
+  "git_panel::ToggleTreeView": {
+    "name": "切换树状视图",
+    "description": "在树状视图和平铺视图之间切换条目的显示方式。"
+  },
+  "git_panel::ViewStagedChanges": {
+    "name": "查看已暂存的更改",
+    "description": "查看已暂存的更改。"
+  },
+  "git_panel::ViewUnstagedChanges": {
+    "name": "查看未暂存的更改",
+    "description": "查看未暂存的更改。"
+  }
+}

@@ -87,7 +87,7 @@ impl WslRemoteConnection {
             default_system_shell: String::from("/bin/sh"),
             has_wsl_interop: false,
         };
-        delegate.set_status(Some("Detecting WSL environment"), cx);
+        delegate.set_status(Some(i18n::t!("Detecting WSL environment").as_str()), cx);
         this.shell = this
             .detect_shell()
             .await
@@ -279,7 +279,7 @@ impl WslRemoteConnection {
         delegate: &Arc<dyn RemoteClientDelegate>,
         cx: &mut AsyncApp,
     ) -> Result<()> {
-        delegate.set_status(Some("Uploading remote server"), cx);
+        delegate.set_status(Some(i18n::t!("Uploading remote server").as_str()), cx);
 
         if let Some(parent) = dst_path.parent() {
             let parent = parent.display(PathStyle::Unix);
@@ -306,7 +306,10 @@ impl WslRemoteConnection {
                 log::warn!(
                     "failed to upload remote server via /mnt, falling back to wsl.exe stdin: {cp_err:#}"
                 );
-                delegate.set_status(Some("Streaming remote server into WSL"), cx);
+                delegate.set_status(
+                    Some(i18n::t!("Streaming remote server into WSL").as_str()),
+                    cx,
+                );
                 self.stream_file_into_wsl(src_path, dst_path)
                     .await
                     .with_context(|| {
@@ -396,7 +399,7 @@ impl WslRemoteConnection {
         delegate: &Arc<dyn RemoteClientDelegate>,
         cx: &mut AsyncApp,
     ) -> Result<()> {
-        delegate.set_status(Some("Extracting remote server"), cx);
+        delegate.set_status(Some(i18n::t!("Extracting remote server").as_str()), cx);
 
         let tmp_path_str = tmp_path.display(PathStyle::Unix);
         let dst_path_str = dst_path.display(PathStyle::Unix);
@@ -434,7 +437,7 @@ impl RemoteConnection for WslRemoteConnection {
         delegate: Arc<dyn RemoteClientDelegate>,
         cx: &mut AsyncApp,
     ) -> Task<Result<i32>> {
-        delegate.set_status(Some("Starting proxy"), cx);
+        delegate.set_status(Some(i18n::t!("Starting proxy").as_str()), cx);
 
         let Some(remote_binary_path) = &self.remote_binary_path else {
             return Task::ready(Err(anyhow!("Remote binary path not set")));

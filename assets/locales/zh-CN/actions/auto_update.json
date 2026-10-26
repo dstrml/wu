@@ -1,0 +1,18 @@
+{
+  "auto_update::Check": {
+    "description": "检查是否有可用的更新。",
+    "name": "检查更新"
+  },
+  "auto_update::DismissMessage": {
+    "description": "关闭更新错误消息。",
+    "name": "关闭消息"
+  },
+  "auto_update::ViewReleaseNotes": {
+    "description": "在浏览器中打开当前版本的发行说明。",
+    "name": "查看发行说明"
+  },
+  "auto_update::ViewReleaseNotesLocally": {
+    "description": "在新标签页中打开当前版本的发行说明。",
+    "name": "在应用内查看发行说明"
+  }
+}

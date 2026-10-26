@@ -1,0 +1,18 @@
+{
+  "tab_switcher::CloseSelectedItem": {
+    "name": "关闭所选项",
+    "description": "关闭标签页切换器中的所选项。"
+  },
+  "tab_switcher::OpenInActivePane": {
+    "name": "在活动窗格中打开",
+    "description": "切换显示所有窗格中全部标签页的标签页切换器，相同路径只显示一次。在活动窗格中打开所选项。"
+  },
+  "tab_switcher::Toggle": {
+    "name": "切换标签页切换器",
+    "description": "切换标签页切换器界面。"
+  },
+  "tab_switcher::ToggleAll": {
+    "name": "切换全部标签页",
+    "description": "在显示所有标签页和只显示当前窗格的标签页之间切换。"
+  }
+}

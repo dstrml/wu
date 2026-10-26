@@ -1,0 +1,22 @@
+{
+  "buffer_search::Deploy": {
+    "name": "打开搜索",
+    "description": "按指定配置打开缓冲区搜索界面。"
+  },
+  "buffer_search::DeployReplace": {
+    "name": "打开替换",
+    "description": "打开搜索和替换界面。"
+  },
+  "buffer_search::Dismiss": {
+    "name": "关闭",
+    "description": "关闭搜索栏。"
+  },
+  "buffer_search::FocusEditor": {
+    "name": "聚焦编辑器",
+    "description": "将焦点移回编辑器。"
+  },
+  "buffer_search::UseSelectionForFind": {
+    "name": "使用选区查找",
+    "description": "用选区或光标所在的单词作为搜索内容。"
+  }
+}

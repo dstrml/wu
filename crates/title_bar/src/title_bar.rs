@@ -21,6 +21,7 @@ use gpui::{
     AnyElement, App, Context, Entity, Focusable, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Render, Styled, Subscription, WeakEntity, Window, actions, div,
 };
+use i18n::t;
 use onboarding_banner::OnboardingBanner;
 use project::{
     Project, git_store::GitStoreEvent, project_settings::ProjectSettings,
@@ -492,29 +493,40 @@ impl TitleBar {
         let (nickname, tooltip_title, icon) = match options {
             RemoteConnectionOptions::Ssh(options) => (
                 options.nickname.map(|nick| nick.into()),
-                "Remote Project",
+                t!("Remote Project"),
                 IconName::Server,
             ),
-            RemoteConnectionOptions::Wsl(_) => (None, "Remote Project", IconName::Linux),
+            RemoteConnectionOptions::Wsl(_) => (None, t!("Remote Project"), IconName::Linux),
             #[cfg(any(test, feature = "test-support"))]
-            RemoteConnectionOptions::Mock(_) => (None, "Mock Remote Project", IconName::Server),
+            RemoteConnectionOptions::Mock(_) => (
+                None,
+                SharedString::new_static("Mock Remote Project"),
+                IconName::Server,
+            ),
         };
 
         let nickname = nickname.unwrap_or_else(|| host.clone());
 
         let (indicator_color, meta) = match self.project.read(cx).remote_connection_state(cx)? {
-            remote::ConnectionState::Connecting => (Color::Info, format!("Connecting to: {host}")),
-            remote::ConnectionState::Connected => (Color::Success, format!("Connected to: {host}")),
+            remote::ConnectionState::Connecting => {
+                (Color::Info, t!("Connecting to: {host}", host = host))
+            }
+            remote::ConnectionState::Connected => {
+                (Color::Success, t!("Connected to: {host}", host = host))
+            }
             remote::ConnectionState::HeartbeatMissed => (
                 Color::Warning,
-                format!("Connection attempt to {host} missed. Retrying..."),
+                t!(
+                    "Connection attempt to {host} missed. Retrying...",
+                    host = host
+                ),
             ),
             remote::ConnectionState::Reconnecting => (
                 Color::Warning,
-                format!("Lost connection to {host}. Reconnecting..."),
+                t!("Lost connection to {host}. Reconnecting...", host = host),
             ),
             remote::ConnectionState::Disconnected => {
-                (Color::Error, format!("Disconnected from {host}"))
+                (Color::Error, t!("Disconnected from {host}", host = host))
             }
         };
 
@@ -525,8 +537,6 @@ impl TitleBar {
             remote::ConnectionState::Reconnecting => Color::Warning,
             remote::ConnectionState::Disconnected => Color::Error,
         };
-
-        let meta = SharedString::from(meta);
 
         Some(
             PopoverMenu::new("remote-project-menu")
@@ -562,7 +572,7 @@ impl TitleBar {
                         ),
                     move |_window, cx| {
                         Tooltip::with_meta(
-                            tooltip_title,
+                            tooltip_title.clone(),
                             Some(&OpenRemote::default()),
                             meta.clone(),
                             cx,
@@ -581,7 +591,7 @@ impl TitleBar {
             return None;
         }
 
-        let button = Button::new("restricted_mode_trigger", "Restricted Mode")
+        let button = Button::new("restricted_mode_trigger", t!("Restricted Mode"))
             .style(ButtonStyle::Tinted(TintColor::Warning))
             .label_size(LabelSize::Small)
             .color(Color::Warning)
@@ -592,9 +602,9 @@ impl TitleBar {
             )
             .tooltip(|_, cx| {
                 Tooltip::with_meta(
-                    "You're in Restricted Mode",
+                    t!("You're in Restricted Mode"),
                     Some(&ToggleWorktreeSecurity),
-                    "Mark this project as trusted and unlock all features",
+                    t!("Mark this project as trusted and unlock all features"),
                     cx,
                 )
             })
@@ -637,7 +647,7 @@ impl TitleBar {
         let display_name = if let Some(ref name) = name {
             util::truncate_and_trailoff(name, MAX_PROJECT_NAME_LENGTH)
         } else {
-            "Open Recent Project".to_string()
+            t!("Open Recent Project").to_string()
         };
 
         let focus_handle = workspace
@@ -677,7 +687,11 @@ impl TitleBar {
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                     .when(!is_project_selected, |s| s.color(Color::Muted)),
                 move |_window, cx| {
-                    Tooltip::for_action("Recent Projects", &wu_actions::OpenRecent::default(), cx)
+                    Tooltip::for_action(
+                        t!("Recent Projects"),
+                        &wu_actions::OpenRecent::default(),
+                        cx,
+                    )
                 },
             )
             .anchor(gpui::Anchor::TopLeft)
@@ -746,9 +760,9 @@ impl TitleBar {
 
         let display_label: SharedString = if let Some(ref name) = creation_in_progress {
             if is_switch {
-                format!("Loading {}…", name).into()
+                t!("Loading {name}…", name = name)
             } else {
-                format!("Creating {}…", name).into()
+                t!("Creating {name}…", name = name)
             }
         } else {
             worktree_label.clone()
@@ -780,9 +794,9 @@ impl TitleBar {
                         ),
                     move |_window, cx| {
                         Tooltip::with_meta(
-                            "Worktree",
+                            t!("Worktree"),
                             Some(&wu_actions::git::Worktree),
-                            format!("Currently In Use: {}", worktree_label),
+                            t!("Currently In Use: {worktree}", worktree = worktree_label),
                             cx,
                         )
                     },
@@ -800,7 +814,7 @@ impl TitleBar {
                 };
 
                 let trigger = if is_detached_head {
-                    Button::new("project_branch_trigger", "Create Branch")
+                    Button::new("project_branch_trigger", t!("Create Branch"))
                         .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                         .label_size(LabelSize::Small)
                         .tab_index(0isize)
@@ -833,12 +847,15 @@ impl TitleBar {
                     })
                     .trigger_with_tooltip(trigger, move |_window, cx| {
                         let meta = if is_detached_head {
-                            format!("Detached HEAD: {}", branch_tooltip_label)
+                            t!("Detached HEAD: {branch}", branch = branch_tooltip_label)
                         } else {
-                            format!("Currently Checked Out: {}", branch_tooltip_label)
+                            t!(
+                                "Currently Checked Out: {branch}",
+                                branch = branch_tooltip_label
+                            )
                         };
                         Tooltip::with_meta(
-                            "Branch & Stash",
+                            t!("Branch & Stash"),
                             Some(&wu_actions::git::Branch),
                             meta,
                             cx,

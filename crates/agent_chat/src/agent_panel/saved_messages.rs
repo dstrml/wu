@@ -9,6 +9,7 @@ use crate::{
 };
 use collections::HashMap;
 use gpui::{AnyElement, Context, SharedString, Window, div, px};
+use i18n::t;
 use time::OffsetDateTime;
 use ui::{IconName, Tooltip, prelude::*};
 use workspace::{Toast, notifications::NotificationId};
@@ -60,7 +61,7 @@ impl AgentPanel {
                     workspace.show_toast(
                         Toast::new(
                             NotificationId::unique::<SavedMessage>(),
-                            "This message is no longer in its chat.",
+                            t!("This message is no longer in its chat.").to_string(),
                         )
                         .autohide(),
                         cx,
@@ -97,9 +98,9 @@ impl AgentPanel {
                 .text_size(ui(12.))
                 .text_color(text_faint(cx))
                 .child(if query.is_empty() {
-                    "No saved messages yet. Hover a message and click the bookmark to save it."
+                    t!("No saved messages yet. Hover a message and click the bookmark to save it.")
                 } else {
-                    "No matching saved messages"
+                    t!("No matching saved messages")
                 })
                 .into_any_element();
         }
@@ -135,9 +136,9 @@ impl AgentPanel {
         let subline = colors.text_muted.opacity(0.7);
         let group = SharedString::from(format!("agent-saved-{position}"));
         let author = if message.from_agent {
-            chat.kind.label()
+            SharedString::new_static(chat.kind.label())
         } else {
-            "You"
+            t!("You")
         };
         let details = format!(
             "{author} · {} · {}",
@@ -157,7 +158,7 @@ impl AgentPanel {
                 .cursor_pointer()
                 .visible_on_hover(group.clone())
                 .hover(|style| style.bg(colors.element_hover))
-                .tooltip(Tooltip::text("Remove from saved"))
+                .tooltip(Tooltip::text(t!("Remove from saved")))
                 .child(glyph(IconName::AgentClose, 11., colors.text_muted))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();

@@ -1716,7 +1716,7 @@ impl LocalWorktree {
             if let Some(metadata) = metadata.as_ref()
                 && metadata.len >= FILE_SIZE_MAX
             {
-                anyhow::bail!("File is too large to load");
+                anyhow::bail!(i18n::n!("File is too large to load"));
             }
             let (text, line_ending, encoding, has_bom) =
                 decode_file_text_to_rope(fs.as_ref(), &abs_path).await?;
@@ -7263,7 +7263,7 @@ pub async fn decode_file_text(
     let (_, byte_content) = decode_byte_header(&file_first_bytes);
     anyhow::ensure!(
         byte_content != ByteContent::Binary,
-        "Binary files are not supported"
+        i18n::n!("Binary files are not supported")
     );
 
     // If the file is eligible for opening, read the rest of the file.
@@ -7291,7 +7291,7 @@ pub async fn decode_file_text_to_rope(
     let (bom_encoding, byte_content) = decode_byte_header(&prefix);
     anyhow::ensure!(
         byte_content != ByteContent::Binary,
-        "Binary files are not supported"
+        i18n::n!("Binary files are not supported")
     );
 
     // Only BOM-less, non-UTF-16 files are candidates for streaming: everything

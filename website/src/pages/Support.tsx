@@ -4,47 +4,40 @@ import { Header } from '../components/Header';
 import { sectionBody } from '../components/Section';
 import { GithubIcon } from '../components/icons';
 import { ISSUES_URL, OPEN_COLLECTIVE_URL, REPO_URL } from '../consts';
+import { PageContext, messagesFor, type Locale } from '../i18n/locale';
 
-export function Support() {
+export function Support({ locale }: { locale: Locale }) {
+  const t = messagesFor(locale).support;
   return (
-    <>
+    <PageContext value={{ locale, path: '/support/' }}>
       <Header />
       <main className="mx-auto flex max-w-[640px] flex-col items-center px-8 pt-44 pb-16 text-center max-sm:px-4 max-sm:pt-32">
-        <h1 className="text-[clamp(36px,5vw,48px)] leading-[1.1] font-medium tracking-[-0.03em]">Support Wu</h1>
+        <h1 className="text-[clamp(36px,5vw,48px)] leading-[1.1] font-medium tracking-[-0.03em]">{t.title}</h1>
         <div className="mt-8 flex flex-col gap-5">
-          <p className={`${sectionBody} text-balance`}>
-            Wu is free and open source, with no account and no telemetry. It's built and maintained by one developer.
-          </p>
-          <p className={`${sectionBody} text-balance`}>
-            If Wu is part of your day, a donation helps pay for the time it takes to fix bugs, add features and keep Wu
-            up to date with Zed.
-          </p>
+          <p className={`${sectionBody} text-balance`}>{t.intro}</p>
+          <p className={`${sectionBody} text-balance`}>{t.why}</p>
         </div>
         <a className="btn btn-lg btn-light mt-12" href={OPEN_COLLECTIVE_URL} target="_blank" rel="noopener">
           <Heart size={18} aria-hidden="true" />
-          Donate on Open Collective
+          {t.donate}
         </a>
-        <p className="mt-5 text-sm leading-[1.5] text-balance text-tertiary opacity-60">
-          Open Collective handles the payment and shows every donation and expense in public.
-        </p>
+        <p className="mt-5 text-sm leading-[1.5] text-balance text-tertiary opacity-60">{t.donateNote}</p>
 
         <div className="mt-24 w-full rounded-xl card-raised px-8 py-9 max-sm:mt-16 max-sm:px-5">
-          <h2 className="text-xl font-medium">Other ways to help</h2>
-          <p className="mt-3 text-[17px] leading-normal text-balance text-secondary">
-            Star Wu on GitHub, report bugs you run into, and tell a friend who might like it.
-          </p>
+          <h2 className="text-xl font-medium">{t.otherWays.title}</h2>
+          <p className="mt-3 text-[17px] leading-normal text-balance text-secondary">{t.otherWays.body}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
             <a className="btn btn-md btn-soft" href={REPO_URL} target="_blank" rel="noopener">
               <GithubIcon />
-              Star on GitHub
+              {t.otherWays.star}
             </a>
             <a className="btn btn-md btn-soft" href={ISSUES_URL} target="_blank" rel="noopener">
-              Report an issue
+              {t.otherWays.reportIssue}
             </a>
           </div>
         </div>
       </main>
       <Footer />
-    </>
+    </PageContext>
   );
 }

@@ -1,0 +1,74 @@
+{
+  "outline_panel::CollapseAllEntries": {
+    "name": "全部折叠",
+    "description": "折叠大纲树中的所有条目。"
+  },
+  "outline_panel::CollapseSelectedEntry": {
+    "name": "折叠所选条目",
+    "description": "折叠当前所选条目。"
+  },
+  "outline_panel::ExpandAllEntries": {
+    "name": "全部展开",
+    "description": "展开大纲树中的所有条目。"
+  },
+  "outline_panel::ExpandSelectedEntry": {
+    "name": "展开所选条目",
+    "description": "展开当前所选条目。"
+  },
+  "outline_panel::FoldDirectory": {
+    "name": "合并文件夹",
+    "description": "将所选文件夹与只含一个子文件夹的下级合并为一行显示。"
+  },
+  "outline_panel::OpenSelectedEntry": {
+    "name": "打开所选条目",
+    "description": "在编辑器中打开所选条目。"
+  },
+  "outline_panel::RevealInFileManager": {
+    "name": "在文件管理器中显示",
+    "description": "在系统文件管理器中显示所选项。"
+  },
+  "outline_panel::ScrollCursorBottom": {
+    "name": "滚动使光标位于底部",
+    "description": "滚动视图，使光标显示在底部。"
+  },
+  "outline_panel::ScrollCursorCenter": {
+    "name": "滚动使光标位于中间",
+    "description": "滚动视图，使光标显示在中间。"
+  },
+  "outline_panel::ScrollCursorTop": {
+    "name": "滚动使光标位于顶部",
+    "description": "滚动视图，使光标显示在顶部。"
+  },
+  "outline_panel::ScrollDown": {
+    "name": "向下滚动",
+    "description": "向下滚动半页。"
+  },
+  "outline_panel::ScrollUp": {
+    "name": "向上滚动",
+    "description": "向上滚动半页。"
+  },
+  "outline_panel::SelectParent": {
+    "name": "选择父级",
+    "description": "选择当前条目的父级。"
+  },
+  "outline_panel::Toggle": {
+    "name": "切换大纲面板",
+    "description": "切换大纲面板。"
+  },
+  "outline_panel::ToggleActiveEditorPin": {
+    "name": "切换固定活动编辑器",
+    "description": "切换活动编辑器的固定状态。"
+  },
+  "outline_panel::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "切换大纲面板的焦点。"
+  },
+  "outline_panel::ToggleSymbols": {
+    "name": "切换符号",
+    "description": "在多缓冲区视图中切换是否显示符号、摘录和搜索匹配项。"
+  },
+  "outline_panel::UnfoldDirectory": {
+    "name": "取消合并文件夹",
+    "description": "取消合并所选文件夹，逐级显示其子文件夹。"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "worktree_picker::DeleteWorktree": {
+    "name": "删除工作树",
+    "description": "删除所选的 Git 工作树。"
+  },
+  "worktree_picker::ForceDeleteWorktree": {
+    "name": "强制删除工作树",
+    "description": "强制删除所选的 Git 工作树。"
+  }
+}

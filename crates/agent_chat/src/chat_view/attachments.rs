@@ -5,6 +5,7 @@ use gpui::{
     ClipboardEntry, Context, ExternalPaths, Image, ImageFormat, IntoElement, ObjectFit,
     ParentElement, PathPromptOptions, SharedString, Styled, Window, div, img, px,
 };
+use i18n::t;
 use std::path::{Path, PathBuf};
 use ui::{IconName, Tooltip, prelude::*};
 use util::ResultExt as _;
@@ -45,10 +46,13 @@ fn write_upload(uploads: &Path, extension: &str, bytes: &[u8]) -> Result<PathBuf
 /// Agents only read PNG, JPEG, GIF and WebP, so other formats are converted to PNG.
 fn stage_image_file(path: &Path, uploads: &Path) -> Result<PathBuf> {
     let size = std::fs::metadata(path)
-        .with_context(|| format!("cannot read {}", path.display()))?
+        .with_context(|| t!("cannot read {path}", path = path.display()).to_string())?
         .len();
     if size > MAX_IMAGE_BYTES {
-        bail!("{} is larger than 24 MB", path.display());
+        bail!(
+            "{}",
+            t!("{path} is larger than 24 MB", path = path.display())
+        );
     }
     let extension = path
         .extension()
@@ -65,13 +69,13 @@ fn stage_image_file(path: &Path, uploads: &Path) -> Result<PathBuf> {
             let tree = usvg::Tree::from_data(&svg, &usvg::Options::default())?;
             let size = tree.size().to_int_size();
             let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
-                .context("the SVG has no size")?;
+                .context(t!("the SVG has no size").to_string())?;
             resvg::render(&tree, Default::default(), &mut pixmap.as_mut());
             write_upload(uploads, "png", &pixmap.encode_png()?)
         }
         _ => {
             let image = image::open(path)
-                .with_context(|| format!("cannot open {}", path.display()))?;
+                .with_context(|| t!("cannot open {path}", path = path.display()).to_string())?;
             let mut png = Vec::new();
             image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
             let converted = write_upload(uploads, "png", &png)?;
@@ -86,7 +90,8 @@ fn stage_image_file(path: &Path, uploads: &Path) -> Result<PathBuf> {
 }
 
 fn shrink(path: &Path, uploads: &Path) -> Result<PathBuf> {
-    let image = image::open(path).with_context(|| format!("cannot open {}", path.display()))?;
+    let image = image::open(path)
+        .with_context(|| t!("cannot open {path}", path = path.display()).to_string())?;
     let mut side = MAX_IMAGE_SIDE;
     loop {
         let resized = if image.width().max(image.height()) > side {
@@ -124,7 +129,7 @@ fn stage_clipboard_image(image: &Image, uploads: &Path) -> Result<PathBuf> {
         ImageFormat::Svg => "svg",
         ImageFormat::Bmp => "bmp",
         ImageFormat::Tiff => "tiff",
-        _ => bail!("this image format is not supported"),
+        _ => bail!("{}", t!("this image format is not supported")),
     };
     let path = write_upload(uploads, extension, &image.bytes)?;
     if matches!(extension, "png" | "jpg" | "gif" | "webp")
@@ -192,7 +197,7 @@ impl ChatView {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Attach".into()),
+            prompt: Some(t!("Attach")),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Some(paths) = picked.await.ok().and_then(|result| result.log_err()).flatten()
@@ -350,7 +355,7 @@ impl ChatView {
                                         .shadow_sm()
                                         .cursor_pointer()
                                         .visible_on_hover(group)
-                                        .tooltip(Tooltip::text("Remove"))
+                                        .tooltip(Tooltip::text(t!("Remove")))
                                         .child(icon(
                                             IconName::AgentClose,
                                             px(CLOSE_GLYPH),
@@ -371,7 +376,7 @@ impl ChatView {
                         div()
                             .text_size(ui(12.))
                             .text_color(colors.text_muted)
-                            .child("Preparing image…"),
+                            .child(t!("Preparing image…")),
                     )
                 })
                 .when_some(self.attachment_error.clone(), |this, error| {

@@ -1,0 +1,141 @@
+{
+  "debugger::ClearAllBreakpoints": {
+    "name": "清除所有断点",
+    "description": "清除项目中的所有断点。"
+  },
+  "debugger::Continue": {
+    "name": "继续",
+    "description": "让所有线程继续运行，直到下一个断点。"
+  },
+  "debugger::ContinueThread": {
+    "name": "继续线程",
+    "description": "让所选线程继续运行，直到下一个断点。"
+  },
+  "debugger::Detach": {
+    "name": "分离",
+    "description": "将调试器与正在运行的进程分离。"
+  },
+  "debugger::EvaluateSelectedText": {
+    "name": "求值所选文本",
+    "description": "在调试器上下文中对所选文本求值。"
+  },
+  "debugger::FocusBreakpointList": {
+    "name": "聚焦到断点列表",
+    "description": "将焦点移到断点列表面板。"
+  },
+  "debugger::FocusConsole": {
+    "name": "聚焦到控制台",
+    "description": "将焦点移到调试控制台面板。"
+  },
+  "debugger::FocusFrames": {
+    "name": "聚焦到调用堆栈",
+    "description": "将焦点移到调用堆栈帧面板。"
+  },
+  "debugger::FocusLoadedSources": {
+    "name": "聚焦到已加载的源",
+    "description": "将焦点移到已加载的源面板。"
+  },
+  "debugger::FocusModules": {
+    "name": "聚焦到模块",
+    "description": "将焦点移到已加载的模块面板。"
+  },
+  "debugger::FocusTerminal": {
+    "name": "聚焦到终端",
+    "description": "将焦点移到终端面板。"
+  },
+  "debugger::FocusVariables": {
+    "name": "聚焦到变量",
+    "description": "将焦点移到变量面板。"
+  },
+  "debugger::GoToSelectedAddress": {
+    "name": "转到所选地址"
+  },
+  "debugger::NextBreakpointProperty": {
+    "name": "下一个断点属性",
+    "description": "转到列表中的下一个断点属性。"
+  },
+  "debugger::OpenProjectDebugTasks": {
+    "name": "打开项目调试任务",
+    "description": "打开项目的调试任务配置。"
+  },
+  "debugger::Pause": {
+    "name": "暂停",
+    "description": "暂停当前正在运行的程序。"
+  },
+  "debugger::PreviousBreakpointProperty": {
+    "name": "上一个断点属性",
+    "description": "转到列表中的上一个断点属性。"
+  },
+  "debugger::Rerun": {
+    "name": "重新运行",
+    "description": "重新运行上一次调试会话。"
+  },
+  "debugger::RerunSession": {
+    "name": "重新运行会话",
+    "description": "使用相同的配置重新运行当前调试会话。"
+  },
+  "debugger::Restart": {
+    "name": "重启",
+    "description": "重启当前调试会话。"
+  },
+  "debugger::RunToCursor": {
+    "name": "运行到光标处",
+    "description": "让程序运行到当前光标所在的位置。"
+  },
+  "debugger::Start": {
+    "name": "开始调试",
+    "description": "开始新的调试会话。"
+  },
+  "debugger::StepBack": {
+    "name": "单步后退",
+    "description": "后退到上一条语句。"
+  },
+  "debugger::StepInto": {
+    "name": "单步执行",
+    "description": "进入下一个函数调用。"
+  },
+  "debugger::StepOut": {
+    "name": "单步跳出",
+    "description": "跳出当前函数。"
+  },
+  "debugger::StepOver": {
+    "name": "单步跳过",
+    "description": "跳过当前行。"
+  },
+  "debugger::Stop": {
+    "name": "停止",
+    "description": "停止调试会话。"
+  },
+  "debugger::ToggleDataBreakpoint": {
+    "name": "切换数据断点",
+    "description": "在所选变量或内存区域上设置数据断点。"
+  },
+  "debugger::ToggleEnableBreakpoint": {
+    "name": "切换断点启用状态",
+    "description": "启用或停用断点。"
+  },
+  "debugger::ToggleExpandItem": {
+    "name": "切换展开项",
+    "description": "在调试器界面中展开或折叠所选项。"
+  },
+  "debugger::ToggleIgnoreBreakpoints": {
+    "name": "切换忽略断点",
+    "description": "切换是否忽略所有断点。"
+  },
+  "debugger::ToggleSessionPicker": {
+    "name": "切换会话选择器",
+    "description": "打开或关闭会话选择下拉菜单。"
+  },
+  "debugger::ToggleThreadPicker": {
+    "name": "切换线程选择器",
+    "description": "打开或关闭线程选择下拉菜单。"
+  },
+  "debugger::ToggleUserFrames": {
+    "name": "切换用户帧",
+    "description": "切换调用堆栈列表中的用户帧筛选。开启时，只显示用户代码中的帧。关闭时，显示所有帧。"
+  },
+  "debugger::UnsetBreakpoint": {
+    "name": "移除断点",
+    "description": "移除断点。"
+  }
+}

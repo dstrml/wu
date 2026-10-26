@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use gpui::{Action, Entity, Global, Render, SharedString, TaskExt};
+use i18n::t;
 use ui::{ButtonLike, Tooltip, prelude::*};
 use util::ResultExt;
 
@@ -46,7 +47,7 @@ impl OnboardingBanner {
                 action,
                 icon_name,
                 label: label.into(),
-                subtitle: subtitle.or(Some(SharedString::from("Introducing:"))),
+                subtitle,
             },
             visible_when: None,
             dismissed: get_dismissed(source, cx),
@@ -138,13 +139,16 @@ impl Render for OnboardingBanner {
                             .child(
                                 h_flex()
                                     .gap_0p5()
-                                    .when_some(self.details.subtitle.as_ref(), |this, subtitle| {
-                                        this.child(
-                                            Label::new(subtitle)
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted),
+                                    .child(
+                                        Label::new(
+                                            self.details
+                                                .subtitle
+                                                .clone()
+                                                .unwrap_or_else(|| t!("Introducing:")),
                                         )
-                                    })
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                    )
                                     .child(Label::new(&self.details.label).size(LabelSize::Small)),
                             ),
                     )
@@ -160,9 +164,9 @@ impl Render for OnboardingBanner {
                         .on_click(cx.listener(|this, _, _window, cx| this.dismiss(cx)))
                         .tooltip(|_window, cx| {
                             Tooltip::with_meta(
-                                "Close Announcement Banner",
+                                t!("Close Announcement Banner"),
                                 None,
-                                "It won't show again for this feature",
+                                t!("It won't show again for this feature"),
                                 cx,
                             )
                         }),

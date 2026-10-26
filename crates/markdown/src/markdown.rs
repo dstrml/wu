@@ -36,6 +36,7 @@ use gpui::{
     StyleRefinement, StyledImage, StyledText, Task, TextAlign, TextLayout, TextRun, TextStyle,
     TextStyleRefinement, WrappedLineLayout, actions, canvas, img, point, quad, relative, size,
 };
+use i18n::t;
 use language::{CharClassifier, Language, LanguageRegistry, Rope};
 use parser::CodeBlockMetadata;
 use parser::{
@@ -1646,11 +1647,11 @@ impl MarkdownElement {
 
         let header = kind.map(|kind| {
             let (icon_name, label) = match kind {
-                BlockQuoteKind::Note => (IconName::Info, "Note"),
-                BlockQuoteKind::Tip => (IconName::Sparkle, "Tip"),
-                BlockQuoteKind::Important => (IconName::Chat, "Important"),
-                BlockQuoteKind::Warning => (IconName::Warning, "Warning"),
-                BlockQuoteKind::Caution => (IconName::Stop, "Caution"),
+                BlockQuoteKind::Note => (IconName::Info, t!("Note")),
+                BlockQuoteKind::Tip => (IconName::Sparkle, t!("Tip")),
+                BlockQuoteKind::Important => (IconName::Chat, t!("Important")),
+                BlockQuoteKind::Warning => (IconName::Warning, t!("Warning")),
+                BlockQuoteKind::Caution => (IconName::Stop, t!("Caution")),
             };
             h_flex()
                 .gap_1()
@@ -2975,15 +2976,15 @@ fn image_fallback_element(
         .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| dest_url.clone());
 
-    let label = format!("Failed to Load: {link_label}");
+    let label = t!("Failed to Load: {label}", label = link_label);
 
     div()
         .id("image-fallback")
         .min_w_0()
         .child(Label::new(label).color(Color::Warning).underline())
-        .tooltip(Tooltip::text(
-            "Image failed to load. Open `wu: log` for more details.",
-        ))
+        .tooltip(Tooltip::text(t!(
+            "Image failed to load. Open `wu: log` for more details."
+        )))
         .when(open_image_url_on_click, |this| {
             this.cursor_pointer()
                 .on_click(move |_, _, cx| cx.open_url(&dest_url))
@@ -3047,9 +3048,9 @@ fn render_wrap_code_block_button(
     markdown: Entity<Markdown>,
 ) -> impl IntoElement {
     let (icon, tooltip) = if is_wrapped {
-        (IconName::TextUnwrap, "Unwrap Content")
+        (IconName::TextUnwrap, t!("Unwrap Content"))
     } else {
-        (IconName::TextWrap, "Wrap Content")
+        (IconName::TextWrap, t!("Wrap Content"))
     };
     let button_id = ElementId::NamedChild(
         Arc::new(ElementId::from(("wrap-code-block", markdown.entity_id()))),

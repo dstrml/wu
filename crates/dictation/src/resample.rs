@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use i18n::t;
 use rubato::{FftFixedInOut, Resampler};
 
 pub(crate) const MODEL_SAMPLE_RATE: u32 = 16_000;
@@ -10,7 +11,7 @@ pub(crate) fn is_supported_sample_rate(sample_rate: u32) -> bool {
 pub(crate) fn to_model_sample_rate(samples: Vec<f32>, sample_rate: u32) -> Result<Vec<f32>> {
     ensure!(
         is_supported_sample_rate(sample_rate),
-        "Unsupported microphone sample rate"
+        t!("Unsupported microphone sample rate")
     );
     if sample_rate == MODEL_SAMPLE_RATE || samples.is_empty() {
         return Ok(samples);

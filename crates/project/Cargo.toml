@@ -58,6 +58,7 @@ git_hosting_providers.workspace = true
 globset.workspace = true
 gpui.workspace = true
 http_client = { workspace = true, features = ["github-download"] }
+i18n.workspace = true
 image.workspace = true
 indexmap.workspace = true
 itertools.workspace = true

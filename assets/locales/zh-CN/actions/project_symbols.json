@@ -1,0 +1,6 @@
+{
+  "project_symbols::Toggle": {
+    "name": "切换项目符号",
+    "description": "切换项目符号搜索。"
+  }
+}

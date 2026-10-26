@@ -1,17 +1,19 @@
 use std::sync::Arc;
 
+use convert_case::Case;
 use editor::Editor;
 use gpui::{
     App, AsyncWindowContext, Context, Entity, IntoElement, ParentElement, Render, Styled,
     Subscription, Task, WeakEntity, Window, div,
 };
+use i18n::{n, t};
 use language::{Buffer, BufferEvent, LanguageName, Toolchain, ToolchainScope};
 use project::{Project, ProjectPath, Toolchains, WorktreeId, toolchain_store::ToolchainStoreEvent};
 use ui::{Button, ButtonCommon, Clickable, LabelSize, SharedString, Tooltip};
 use util::{maybe, rel_path::RelPath};
 use workspace::{HideStatusItem, StatusItemView, Workspace, item::ItemHandle};
 
-use crate::ToolchainSelector;
+use crate::{ToolchainSelector, display_term};
 
 pub struct ActiveToolchain {
     active_toolchain: Option<Toolchain>,
@@ -47,7 +49,7 @@ impl ActiveToolchain {
         Self {
             active_toolchain: None,
             active_buffer: None,
-            term: SharedString::new_static("Toolchain"),
+            term: SharedString::new_static(n!("Toolchain")),
             workspace: workspace.weak_handle(),
 
             _update_toolchain_task: Self::spawn_tracker_task(window, cx),
@@ -248,7 +250,10 @@ impl Render for ActiveToolchain {
                         });
                     }
                 }))
-                .tooltip(Tooltip::text(format!("Select {}", self.term))),
+                .tooltip(Tooltip::text(t!(
+                    "Select {term}",
+                    term = display_term(&self.term, Case::Title)
+                ))),
         )
     }
 }

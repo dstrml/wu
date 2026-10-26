@@ -9,6 +9,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle,
     ParentElement, Point, Rems, Render, Styled, StyledText, Task, WeakEntity, Window, div, rems,
 };
+use i18n::t;
 use language::{OffsetRangeExt, Outline, OutlineItem, OutlineSearchEntry};
 use picker::{MatchLocation, Picker, PickerDelegate, PreviewUpdate};
 use theme::ActiveTheme;
@@ -272,7 +273,7 @@ impl PickerDelegate for OutlineViewDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Search buffer symbols...".into()
+        t!("Search buffer symbols...").as_ref().into()
     }
 
     fn match_count(&self) -> usize {

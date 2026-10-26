@@ -14,6 +14,7 @@ use gpui::{
     Subscription, Task, TextStyle, UniformList, UniformListScrollHandle, WeakEntity, actions,
     anchored, deferred, uniform_list,
 };
+use i18n::{n, t};
 use notifications::status_toast::StatusToast;
 use project::debugger::{MemoryCell, dap_command::DataBreakpointContext, session::Session};
 use settings::Settings;
@@ -328,12 +329,12 @@ impl MemoryView {
         let selected_width = self.view_state().line_width.clone();
         DropdownMenu::new(
             "memory-view-width-picker",
-            selected_width.label.clone(),
+            i18n::translate(selected_width.label),
             ContextMenu::build(window, cx, |mut this, window, cx| {
                 for width in &WIDTHS {
                     let weak = weak.clone();
                     let width = width.clone();
-                    this = this.entry(width.label.clone(), None, move |_, cx| {
+                    this = this.entry(i18n::translate(width.label), None, move |_, cx| {
                         _ = weak.update(cx, |this, _| {
                             let mut view_state = this.view_state();
                             // Convert base ix between 2 line widths to keep the shown memory address roughly the same.
@@ -402,14 +403,14 @@ impl MemoryView {
         if !self.is_writing_memory {
             self.query_editor.update(cx, |this, cx| {
                 this.clear(window, cx);
-                this.set_placeholder_text("Write to Selected Memory Range", window, cx);
+                this.set_placeholder_text(&t!("Write to Selected Memory Range"), window, cx);
             });
             self.is_writing_memory = true;
             self.query_editor.focus_handle(cx).focus(window, cx);
         } else {
             self.query_editor.update(cx, |this, cx| {
                 this.clear(window, cx);
-                this.set_placeholder_text("Go to Memory Address / Expression", window, cx);
+                this.set_placeholder_text(&t!("Go to Memory Address / Expression"), window, cx);
             });
             self.is_writing_memory = false;
         }
@@ -473,8 +474,9 @@ impl MemoryView {
                         // We cannot write memory with this adapter.
                         _ = self.workspace.update(cx, |this, cx| {
                             this.toggle_status_toast(
-                                StatusToast::new(format!(
-                                    "Debug Adapter `{adapter_name}` does not support writing to memory"
+                                StatusToast::new(t!(
+                                    "Debug Adapter `{adapter_name}` does not support writing to memory",
+                                    adapter_name = adapter_name
                                 ), cx, |this, cx| {
                                     cx.spawn(async move |this, cx| {
                                         cx.background_executor().timer(Duration::from_secs(2)).await;
@@ -632,14 +634,14 @@ impl MemoryView {
 
             let mut menu = menu.action_disabled_when(
                 range_too_large || *memory_unreadable,
-                "Go To Selected Address",
+                t!("Go To Selected Address"),
                 GoToSelectedAddress.boxed_clone(),
             );
 
             if supports_data_breakpoints {
                 menu = menu.action_disabled_when(
                     *memory_unreadable,
-                    "Set Data Breakpoint",
+                    t!("Set Data Breakpoint"),
                     ToggleDataBreakpoint { access_type: None }.boxed_clone(),
                 );
             }
@@ -668,26 +670,23 @@ impl MemoryView {
 #[derive(Clone)]
 struct ViewWidth {
     width: u8,
-    label: SharedString,
+    label: &'static str,
 }
 
 impl ViewWidth {
     const fn new(width: u8, label: &'static str) -> Self {
-        Self {
-            width,
-            label: SharedString::new_static(label),
-        }
+        Self { width, label }
     }
 }
 
 static WIDTHS: [ViewWidth; 7] = [
-    ViewWidth::new(1, "1 byte"),
-    ViewWidth::new(2, "2 bytes"),
-    ViewWidth::new(4, "4 bytes"),
-    ViewWidth::new(8, "8 bytes"),
-    ViewWidth::new(16, "16 bytes"),
-    ViewWidth::new(32, "32 bytes"),
-    ViewWidth::new(64, "64 bytes"),
+    ViewWidth::new(1, n!("1 byte")),
+    ViewWidth::new(2, n!("2 bytes")),
+    ViewWidth::new(4, n!("4 bytes")),
+    ViewWidth::new(8, n!("8 bytes")),
+    ViewWidth::new(16, n!("16 bytes")),
+    ViewWidth::new(32, n!("32 bytes")),
+    ViewWidth::new(64, n!("64 bytes")),
 ];
 
 fn render_single_memory_view_line(
@@ -850,11 +849,11 @@ fn render_single_memory_view_line(
 impl Render for MemoryView {
     fn render(&mut self, window: &mut ui::Window, cx: &mut ui::Context<Self>) -> impl IntoElement {
         let (icon, tooltip_text) = if self.is_writing_memory {
-            (IconName::Pencil, "Edit Memory at a Selected Address")
+            (IconName::Pencil, t!("Edit Memory at a Selected Address"))
         } else {
             (
                 IconName::LocationEdit,
-                "Change Address of Currently Viewed Memory",
+                t!("Change Address of Currently Viewed Memory"),
             )
         };
 

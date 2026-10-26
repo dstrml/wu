@@ -1,0 +1,10 @@
+{
+  "task::Rerun": {
+    "name": "重新运行",
+    "description": "重新运行上一个任务。"
+  },
+  "task::Spawn": {
+    "name": "运行任务",
+    "description": "按名称运行任务，或打开任务弹窗。"
+  }
+}

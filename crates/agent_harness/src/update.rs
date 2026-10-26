@@ -33,7 +33,7 @@ pub async fn update_cli(
     crate::compose_child_path(&mut command, &executable);
     let output = tokio::time::timeout(UPDATE_TIMEOUT, command.output())
         .await
-        .map_err(|_| UpdateFailed("The update took too long.".into()))?
+        .map_err(|_| UpdateFailed(i18n::t!("The update took too long.").to_string()))?
         .map_err(|error| UpdateFailed(error.to_string()))?;
     if !output.status.success() {
         return Err(UpdateFailed(failure_reason(&output)));

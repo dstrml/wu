@@ -3,6 +3,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, Focusable, Render, Task, WeakEntity, Window,
     actions,
 };
+use i18n::t;
 use picker::{Picker, PickerDelegate};
 use project::Fs;
 use settings::{BaseKeymap, Settings, update_settings_file};
@@ -107,7 +108,7 @@ impl PickerDelegate for BaseKeymapSelectorDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Select a base keymap...".into()
+        t!("Select a base keymap...").as_ref().into()
     }
 
     fn match_count(&self) -> usize {
@@ -134,9 +135,10 @@ impl PickerDelegate for BaseKeymapSelectorDelegate {
         cx: &mut Context<Picker<BaseKeymapSelectorDelegate>>,
     ) -> Task<()> {
         let background = cx.background_executor().clone();
-        let candidates = BaseKeymap::names()
+        let candidates = BaseKeymap::OPTIONS
+            .iter()
             .enumerate()
-            .map(|(id, name)| StringMatchCandidate::new(id, name))
+            .map(|(id, (name, _))| StringMatchCandidate::new(id, &i18n::translate(name)))
             .collect::<Vec<_>>();
 
         cx.spawn_in(window, async move |this, cx| {
@@ -181,9 +183,11 @@ impl PickerDelegate for BaseKeymapSelectorDelegate {
         _: &mut Window,
         cx: &mut Context<Picker<BaseKeymapSelectorDelegate>>,
     ) {
-        if let Some(selection) = self.matches.get(self.selected_index) {
-            let base_keymap = BaseKeymap::from_names(&selection.string);
-
+        if let Some(&(_, base_keymap)) = self
+            .matches
+            .get(self.selected_index)
+            .and_then(|selection| BaseKeymap::OPTIONS.get(selection.candidate_id))
+        {
             update_settings_file(self.fs.clone(), cx, move |setting, _| {
                 setting.base_keymap = Some(base_keymap.into())
             });

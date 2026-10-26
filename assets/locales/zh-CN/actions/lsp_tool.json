@@ -1,0 +1,6 @@
+{
+  "lsp_tool::ToggleMenu": {
+    "name": "切换菜单",
+    "description": "切换语言服务器工具菜单。"
+  }
+}

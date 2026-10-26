@@ -1,0 +1,10 @@
+{
+  "CLI should already be installed": "CLI 应该已经安装",
+  "Cannot install the Wu CLI": "无法安装 Wu CLI",
+  "Couldn't install the Wu CLI": "无法安装 Wu CLI",
+  "If you installed Wu from our official release add ~/.local/bin to your PATH.\n\nIf you installed Wu from a different source like your package manager, then you may need to create an alias/symlink manually.\n\nDepending on your package manager, the CLI might be named zeditor, zedit, zed-editor or something else.": "如果你是从官方发布版本安装的 Wu，请将 ~/.local/bin 添加到 PATH。\n\n如果你是通过其他来源（例如包管理器）安装的 Wu，可能需要手动创建别名或符号链接。\n\n根据包管理器的不同，CLI 的名称可能是 zeditor、zedit、zed-editor 或其他名称。",
+  "Installed `wu` to {path}. You can launch {app} from your terminal.": "已将 `wu` 安装到 {path}。现在可以从终端启动 {app}。",
+  "OK": "确定",
+  "Show me how": "查看方法",
+  "You can add `wu` to your PATH manually.": "你可以手动将 `wu` 添加到 PATH。"
+}

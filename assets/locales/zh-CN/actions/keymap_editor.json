@@ -1,0 +1,46 @@
+{
+  "keymap_editor::CopyAction": {
+    "name": "复制命令",
+    "description": "将命令名称复制到剪贴板。"
+  },
+  "keymap_editor::CopyContext": {
+    "name": "复制上下文",
+    "description": "将上下文条件复制到剪贴板。"
+  },
+  "keymap_editor::CreateBinding": {
+    "name": "创建快捷键",
+    "description": "为所选命令创建新的快捷键。"
+  },
+  "keymap_editor::DeleteBinding": {
+    "name": "删除快捷键",
+    "description": "删除所选快捷键。"
+  },
+  "keymap_editor::EditBinding": {
+    "name": "编辑快捷键",
+    "description": "编辑所选快捷键。"
+  },
+  "keymap_editor::OpenCreateKeybindingModal": {
+    "name": "新建快捷键",
+    "description": "从头创建新的快捷键，并提示选择命令。"
+  },
+  "keymap_editor::ShowMatchingKeybinds": {
+    "name": "显示匹配的快捷键",
+    "description": "显示与当前所选快捷键按键相同的快捷键。"
+  },
+  "keymap_editor::ToggleConflictFilter": {
+    "name": "切换冲突筛选",
+    "description": "切换冲突筛选。"
+  },
+  "keymap_editor::ToggleExactKeystrokeMatching": {
+    "name": "切换按键精确匹配",
+    "description": "切换按键搜索的精确匹配。"
+  },
+  "keymap_editor::ToggleKeystrokeSearch": {
+    "name": "切换按键搜索",
+    "description": "切换按键搜索。"
+  },
+  "keymap_editor::ToggleNoActionBindings": {
+    "name": "切换 NoAction 快捷键",
+    "description": "切换是否显示 NoAction 快捷键。"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "git_graph::CopyCommitSha": {
+    "name": "复制提交 SHA",
+    "description": "将所选提交的 SHA 复制到剪贴板。"
+  },
+  "git_graph::CopyCommitTag": {
+    "name": "复制提交标签",
+    "description": "将所选提交的一个标签复制到剪贴板。"
+  },
+  "git_graph::FocusNextTabStop": {
+    "name": "聚焦到下一个焦点位置",
+    "description": "将焦点移到 Git 图谱中的下一个 Tab 焦点位置。"
+  },
+  "git_graph::FocusPreviousTabStop": {
+    "name": "聚焦到上一个焦点位置",
+    "description": "将焦点移到 Git 图谱中的上一个 Tab 焦点位置。"
+  },
+  "git_graph::FocusSearch": {
+    "name": "聚焦到搜索框",
+    "description": "将焦点移到搜索框。"
+  },
+  "git_graph::Open": {
+    "name": "打开",
+    "description": "打开 Git 图谱标签页。"
+  },
+  "git_graph::OpenAtCommit": {
+    "name": "在指定提交处打开",
+    "description": "打开 Git 图谱标签页并定位到指定的提交。"
+  },
+  "git_graph::OpenCommitView": {
+    "name": "打开提交视图",
+    "description": "打开所选提交的提交视图。"
+  },
+  "git_graph::ScrollDown": {
+    "name": "向下滚动",
+    "description": "选择当前选中项下方半页处的提交。"
+  },
+  "git_graph::ScrollUp": {
+    "name": "向上滚动",
+    "description": "选择当前选中项上方半页处的提交。"
+  },
+  "git_graph::ToggleChangedFilesView": {
+    "name": "切换更改文件视图",
+    "description": "在平铺视图和树状视图之间切换所选提交的已更改文件。"
+  }
+}

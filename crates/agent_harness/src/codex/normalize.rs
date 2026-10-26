@@ -1,4 +1,5 @@
 use crate::{AgentEvent, DoneStatus, ExternalSession, TodoItem, TodoStatus, ToolCall};
+use i18n::{SharedString, t};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,15 +250,15 @@ pub(crate) fn map_item(phase: Phase, item: &Value) -> Vec<AgentEvent> {
                         failure.get("type").and_then(Value::as_str),
                         Some("usageLimitExceeded" | "usage_limit_exceeded")
                     ) {
-                        "Image generation usage limit exceeded"
+                        t!("Image generation usage limit exceeded")
                     } else {
-                        "Image generation failed"
+                        t!("Image generation failed")
                     },
                 )
             } else if matches!(status.as_str(), "failed" | "cancelled" | "canceled") {
-                Some("Image generation failed")
+                Some(t!("Image generation failed"))
             } else if path.trim().is_empty() {
-                Some("Image generation completed without a saved file")
+                Some(t!("Image generation completed without a saved file"))
             } else {
                 None
             };
@@ -275,7 +276,7 @@ pub(crate) fn map_item(phase: Phase, item: &Value) -> Vec<AgentEvent> {
             ];
             if let Some(message) = error {
                 events.push(AgentEvent::Error {
-                    message: message.into(),
+                    message: message.to_string(),
                 });
             } else {
                 let name = std::path::Path::new(&path)
@@ -396,7 +397,11 @@ pub(crate) fn map_item(phase: Phase, item: &Value) -> Vec<AgentEvent> {
                     "wait" => "Wait for agents".to_owned(),
                     "closeAgent" | "close_agent" => "Close agent".to_owned(),
                     "resumeAgent" | "resume_agent" => "Resume agent".to_owned(),
-                    _ => format!("Agent control: {tool}"),
+                    _ => i18n::format(
+                        SharedString::new_static(super::AGENT_CONTROL_TOOL),
+                        &[("tool", &tool)],
+                    )
+                    .to_string(),
                 }
             };
             tool_lifecycle(
@@ -690,8 +695,8 @@ impl ChildStream {
                     .pointer("/error/message")
                     .and_then(Value::as_str)
                     .or_else(|| params.get("message").and_then(Value::as_str))
-                    .unwrap_or("Codex subagent error")
-                    .to_owned(),
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| t!("Codex subagent error").to_string()),
             }],
             _ => Vec::new(),
         }

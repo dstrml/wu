@@ -4,6 +4,7 @@ use crate::{
     session::{AgentStore, StoreEvent},
 };
 use gpui::{App, AppContext as _, Entity, SystemNotification, TaskExt as _, WindowHandle};
+use i18n::t;
 use settings::Settings as _;
 use util::ResultExt as _;
 use workspace::MultiWorkspace;
@@ -98,13 +99,13 @@ pub(crate) fn watch(store: &Entity<AgentStore>, cx: &mut App) {
     cx.subscribe(store, |store, event, cx| {
         let (id, sound, status) = match event {
             StoreEvent::SessionFinished { id, errored: false } => {
-                (id.clone(), Sound::Done, "Run finished")
+                (id.clone(), Sound::Done, t!("Run finished"))
             }
             StoreEvent::SessionFinished { id, errored: true } => {
-                (id.clone(), Sound::Error, "Run failed")
+                (id.clone(), Sound::Error, t!("Run failed"))
             }
             StoreEvent::SessionNeedsInput { id } => {
-                (id.clone(), Sound::Input, "Waiting on your input")
+                (id.clone(), Sound::Input, t!("Waiting on your input"))
             }
         };
         let Some(metadata) = store
@@ -135,15 +136,11 @@ pub(crate) fn watch(store: &Entity<AgentStore>, cx: &mut App) {
             play(sound, cx);
         }
         if settings.notifications {
-            let title = if metadata.title.is_empty() {
-                "New chat".to_string()
-            } else {
-                metadata.title
-            };
+            let title = crate::session::display_title(&metadata.title);
             cx.show_system_notification(SystemNotification {
                 tag: id.into(),
-                title: title.into(),
-                body: status.into(),
+                title,
+                body: status,
                 actions: Vec::new(),
             });
         }

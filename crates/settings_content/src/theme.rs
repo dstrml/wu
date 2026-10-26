@@ -176,6 +176,10 @@ impl TryFrom<&ThemeColor> for gpui::Rgba {
 #[with_fallible_options]
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize, JsonSchema, MergeFrom)]
 pub struct ThemeSettingsContent {
+    /// The language of Wu's interface. `system` follows your system language.
+    ///
+    /// Default: system
+    pub ui_language: Option<UiLanguage>,
     /// The default font size for text in the UI.
     pub ui_font_size: Option<FontSize>,
     /// The name of a font to use for rendering in the UI.
@@ -414,6 +418,35 @@ pub enum ThemeAppearanceMode {
     /// Use the theme based on the system's appearance.
     #[default]
     System,
+}
+
+/// The language of Wu's interface.
+#[derive(
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+)]
+pub enum UiLanguage {
+    /// Follow the system language.
+    #[default]
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "zh-CN")]
+    SimplifiedChinese,
+}
+
+impl strum::VariantNames for UiLanguage {
+    const VARIANTS: &'static [&'static str] = &["System", "English", "简体中文"];
 }
 
 /// Specifies the density of the UI.

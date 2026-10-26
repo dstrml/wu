@@ -4,6 +4,7 @@ use crate::{
     chat_style::{composer_surface, icon, icon_size_px, tracked_upper},
     session::AgentUpdateStatus,
 };
+use i18n::t;
 
 const NEW_CHAT_TEXTAREA_MIN: f32 = 76.;
 const THREAD_TEXTAREA_MIN: f32 = 60.;
@@ -175,7 +176,7 @@ impl ChatView {
             return circle("agent-stop")
                 .cursor_pointer()
                 .hover(|style| style.opacity(0.85))
-                .tooltip(move |_, cx| Tooltip::for_action_in("Stop", &Stop, &focus_handle, cx))
+                .tooltip(move |_, cx| Tooltip::for_action_in(t!("Stop"), &Stop, &focus_handle, cx))
                 .on_click(cx.listener(|this, _, window, cx| this.stop(&Stop, window, cx)))
                 .child(div().size(px(11.)).rounded(px(3.)).bg(plate))
                 .into_any_element();
@@ -190,9 +191,9 @@ impl ChatView {
             .tooltip(move |_, cx| {
                 Tooltip::for_action_in(
                     if is_working {
-                        "Queue message"
+                        t!("Queue message")
                     } else {
-                        "Send message"
+                        t!("Send message")
                     },
                     &Send,
                     &focus_handle,
@@ -266,9 +267,9 @@ impl ChatView {
             .cursor_pointer()
             .hover(move |style| style.bg(hover))
             .tooltip(Tooltip::text(if dictating {
-                "Cancel dictation"
+                t!("Cancel dictation")
             } else {
-                "Attach images"
+                t!("Attach images")
             }))
             .child(if dictating {
                 icon(IconName::AgentClose, px(16.), muted)
@@ -442,7 +443,7 @@ impl ChatView {
         Some(match status {
             AgentUpdateStatus::Updating => label(
                 IconName::AgentRestart,
-                format!("Updating {}…", kind.label()).into(),
+                t!("Updating {agent}…", agent = kind.label()),
             )
             .with_animation(
                 "agent-update-pulse",
@@ -547,7 +548,7 @@ impl ChatView {
             .text_size(ui(11.))
             .when(failed, |this| {
                 this.text_color(cx.theme().status().error)
-                    .child("Run failed")
+                    .child(t!("Run failed"))
             })
     }
 
@@ -577,7 +578,7 @@ impl ChatView {
                     .text_size(ui(13.))
                     .hover(move |style| style.bg(hover_background).border_color(hover_border))
                     .child(div().text_color(colors.text_muted).child("↓"))
-                    .child(div().text_color(colors.text).child("Scroll to bottom"))
+                    .child(div().text_color(colors.text).child(t!("Scroll to bottom")))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.show_scroll_button = false;
                         this.list.set_follow_mode(gpui::FollowMode::Tail);
@@ -758,7 +759,11 @@ impl ChatView {
                         .text_color(colors.text_muted)
                         .cursor_pointer()
                         .hover(|style| style.text_color(colors.text))
-                        .child(if expanded { "Show less" } else { "Show all" })
+                        .child(if expanded {
+                            t!("Show less")
+                        } else {
+                            t!("Show all")
+                        })
                         .child(
                             super::icon(
                                 if expanded {
@@ -808,7 +813,7 @@ impl ChatView {
         let options: Vec<AnyElement> = if answer_editor.is_some() {
             Vec::new()
         } else if is_permission {
-            [("Allow", true), ("Deny", false)]
+            [(t!("Allow"), true), (t!("Deny"), false)]
                 .into_iter()
                 .enumerate()
                 .map(|(position, (label, allow))| {
@@ -816,7 +821,7 @@ impl ChatView {
                     self.render_option_row(
                         format!("permission-{pending_id}-{position}").into(),
                         position + 1,
-                        label.into(),
+                        label,
                         false,
                         cx,
                     )
@@ -863,7 +868,9 @@ impl ChatView {
         let answered = !self.answer_labels(&question.id, cx).is_empty();
         let is_last_page = page_index + 1 >= count;
         let header = if is_permission {
-            "Permission".to_string()
+            t!("Permission").to_string()
+        } else if question.header == agent_harness::claude::QUESTION_HEADER {
+            i18n::translate(agent_harness::claude::QUESTION_HEADER).to_string()
         } else {
             question.header.clone()
         };
@@ -908,7 +915,11 @@ impl ChatView {
                                         .text_size(ui(10.))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(muted_label)
-                                        .child(format!("{} of {count}", page_index + 1)),
+                                        .child(t!(
+                                            "{current} of {count}",
+                                            current = page_index + 1,
+                                            count = count
+                                        )),
                                 )
                             }),
                     )
@@ -919,7 +930,7 @@ impl ChatView {
                                 .mt(px(4.))
                                 .text_size(ui(12.))
                                 .text_color(colors.text_muted.opacity(0.65))
-                                .child("Select one or more options."),
+                                .child(t!("Select one or more options.")),
                         )
                     })
                     .child(
@@ -961,7 +972,7 @@ impl ChatView {
                             .text_size(ui(13.))
                             .text_color(colors.text_muted)
                             .hover(move |style| style.bg(back_hover).text_color(colors.text))
-                            .child("Back")
+                            .child(t!("Back"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.question_pages
                                     .insert(pending_id.to_string(), page_index - 1);
@@ -997,7 +1008,11 @@ impl ChatView {
                                             }
                                         }))
                                 })
-                                .child(if is_last_page { "Submit" } else { "Next" }),
+                                .child(if is_last_page {
+                                    t!("Submit")
+                                } else {
+                                    t!("Next")
+                                }),
                         )
                     }),
             )

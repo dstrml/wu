@@ -9,6 +9,7 @@ use gpui::{
     FontWeight, Hsla, IntoElement, ParentElement, PathBuilder, Render, SharedString, Styled,
     Subscription, Window, canvas, div, point, px, relative,
 };
+use i18n::t;
 use theme::ActiveTheme as _;
 use ui::prelude::*;
 
@@ -147,26 +148,34 @@ pub(crate) fn context_details(context: Option<ContextSnapshot>) -> String {
             tokens: Some(tokens),
             window: Some(window),
         } if window > 0 => format!(
-            "{} / {} tokens\n{} tokens remaining",
-            with_separators(tokens),
-            with_separators(window),
-            with_separators(window.saturating_sub(tokens))
+            "{}\n{}",
+            t!(
+                "{used} / {total} tokens",
+                used = with_separators(tokens),
+                total = with_separators(window)
+            ),
+            t!(
+                "{count} tokens remaining",
+                count = with_separators(window.saturating_sub(tokens))
+            )
         ),
         ContextSnapshot {
             tokens: Some(tokens),
             ..
         } => format!(
-            "{} tokens used\nContext limit not reported",
-            with_separators(tokens)
+            "{}\n{}",
+            t!("{count} tokens used", count = with_separators(tokens)),
+            t!("Context limit not reported")
         ),
         ContextSnapshot {
             window: Some(window),
             ..
         } if window > 0 => format!(
-            "{} token capacity\nWaiting for context usage",
-            with_separators(window)
+            "{}\n{}",
+            t!("{count} token capacity", count = with_separators(window)),
+            t!("Waiting for context usage")
         ),
-        _ => "Context usage not reported by this agent yet".into(),
+        _ => t!("Context usage not reported by this agent yet").to_string(),
     }
 }
 
@@ -275,9 +284,16 @@ fn resets_in(resets_at: chrono::DateTime<chrono::Utc>) -> Option<String> {
     }
     Some(
         match (minutes / (60 * 24), minutes / 60 % 24, minutes % 60) {
-            (0, 0, minutes) => format!("Resets in {minutes}m"),
-            (0, hours, minutes) => format!("Resets in {hours}h {minutes}m"),
-            (days, hours, _) => format!("Resets in {days}d {hours}h"),
+            (0, 0, minutes) => t!("Resets in {minutes}m", minutes = minutes).to_string(),
+            (0, hours, minutes) => t!(
+                "Resets in {hours}h {minutes}m",
+                hours = hours,
+                minutes = minutes
+            )
+            .to_string(),
+            (days, hours, _) => {
+                t!("Resets in {days}d {hours}h", days = days, hours = hours).to_string()
+            }
         },
     )
 }
@@ -311,7 +327,7 @@ impl Render for ContextCard {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| cx.emit(DismissEvent)))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
-            .child(menu_heading("Context window", cx))
+            .child(menu_heading(&t!("Context window"), cx))
             .child(
                 div()
                     .px(px(8.))
@@ -415,7 +431,7 @@ impl Render for UsageCard {
                             div()
                                 .text_size(px(12.))
                                 .text_color(colors.text_muted)
-                                .child("Loading…"),
+                                .child(t!("Loading…")),
                         )
                     }),
             )
@@ -451,12 +467,17 @@ impl UsageCard {
                 .map(|plan| div().child(plan.clone()).into_any_element())
                 .collect();
             if account.active {
-                meta.push(div().text_color(accent(cx)).child("In use").into_any_element());
+                meta.push(
+                    div()
+                        .text_color(accent(cx))
+                        .child(t!("In use"))
+                        .into_any_element(),
+                );
             } else if let Some(reason) = usage_error {
                 meta.push(div().child(reason).into_any_element());
             }
             if switching.as_deref() == Some(account.id.as_str()) {
-                meta.push(div().child("Switching…").into_any_element());
+                meta.push(div().child(t!("Switching…")).into_any_element());
             }
             let account_id = account.id.clone();
             let active = account.active;
@@ -509,7 +530,7 @@ impl UsageCard {
         });
         let mut elements = vec![
             menu_separator(cx).into_any_element(),
-            menu_heading(&format!("{} accounts", self.kind.label()), cx).into_any_element(),
+            menu_heading(&t!("{agent} accounts", agent = self.kind.label()), cx).into_any_element(),
         ];
         elements.extend(rows);
         if let Some(error) = state.error.clone() {
@@ -529,7 +550,9 @@ impl UsageCard {
                 .pb(px(6.))
                 .text_size(ui(11.))
                 .text_color(text_faint(cx))
-                .child("Sign in to another account in the CLI and Wu remembers it here.")
+                .child(t!(
+                    "Sign in to another account in the CLI and Wu remembers it here."
+                ))
                 .into_any_element(),
         );
         Some(elements)

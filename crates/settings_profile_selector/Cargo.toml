@@ -15,6 +15,7 @@ doctest = false
 [dependencies]
 fuzzy.workspace = true
 gpui.workspace = true
+i18n.workspace = true
 picker.workspace = true
 settings.workspace = true
 ui.workspace = true

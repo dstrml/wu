@@ -11,6 +11,7 @@ use gpui::{
     Subscription, Task, TitlebarOptions, UniformListScrollHandle, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowOptions, actions, div, list, point, prelude::*, px, uniform_list,
 };
+use i18n::{n, t};
 
 use language::Buffer;
 use platform_title_bar::PlatformTitleBar;
@@ -49,7 +50,8 @@ use wu_actions::{
 
 use crate::components::{
     EnumVariantDropdown, NumberField, NumberFieldMode, NumberFieldType, SettingsInputField,
-    SettingsSectionHeader, font_picker, icon_theme_picker, text_field_a11y_state, theme_picker,
+    SettingsSectionHeader, font_picker, icon_theme_picker, setting_value_label,
+    text_field_a11y_state, theme_picker,
 };
 
 const NAVBAR_CONTAINER_TAB_INDEX: isize = 0;
@@ -262,19 +264,31 @@ struct SettingFieldRenderer {
             >,
         >,
     >,
+    #[cfg(test)]
+    dropdown_labels: Vec<(&'static str, &'static [&'static str])>,
 }
 
 impl Global for SettingFieldRenderer {}
 
 impl SettingFieldRenderer {
+    fn add_dropdown_renderer<T>(&mut self) -> &mut Self
+    where
+        T: strum::VariantArray + strum::VariantNames + Copy + PartialEq + Send + Sync + 'static,
+    {
+        #[cfg(test)]
+        self.dropdown_labels
+            .push((type_name::<T>(), <T as strum::VariantNames>::VARIANTS));
+        self.add_basic_renderer::<T>(render_dropdown)
+    }
+
     fn add_basic_renderer<T: 'static>(
         &mut self,
         render_control: impl Fn(
             SettingField<T>,
             SettingsUiFile,
             Option<&SettingsFieldMetadata>,
-            &'static str,
-            &'static str,
+            SharedString,
+            SharedString,
             &mut Window,
             &mut App,
         ) -> AnyElement
@@ -293,8 +307,8 @@ impl SettingFieldRenderer {
                     field,
                     settings_file.clone(),
                     metadata,
-                    item.title,
-                    item.description,
+                    i18n::translate(item.title),
+                    i18n::translate(item.description),
                     window,
                     cx,
                 );
@@ -469,12 +483,12 @@ fn init_renderers(cx: &mut App) {
                     settings_window,
                     item,
                     settings_file,
-                    Button::new("open-in-settings-file", "Edit in settings.json")
+                    Button::new("open-in-settings-file", t!("Edit in settings.json"))
                         .style(ButtonStyle::Outlined)
                         .size(ButtonSize::Medium)
                         .tab_index(0_isize)
                         .tooltip(Tooltip::for_action_title_in(
-                            "Edit in settings.json",
+                            t!("Edit in settings.json"),
                             &OpenCurrentFile,
                             &settings_window.focus_handle,
                         ))
@@ -491,62 +505,63 @@ fn init_renderers(cx: &mut App) {
         .add_basic_renderer::<String>(render_text_field)
         .add_basic_renderer::<SharedString>(render_text_field)
         .add_basic_renderer::<settings::SaturatingBool>(render_toggle_button)
-        .add_basic_renderer::<settings::CursorShape>(render_dropdown)
-        .add_basic_renderer::<settings::RestoreOnStartupBehavior>(render_dropdown)
-        .add_basic_renderer::<settings::BottomDockLayout>(render_dropdown)
-        .add_basic_renderer::<settings::ActivityBarPosition>(render_dropdown)
-        .add_basic_renderer::<settings::OnLastWindowClosed>(render_dropdown)
-        .add_basic_renderer::<settings::CliDefaultOpenBehavior>(render_dropdown)
-        .add_basic_renderer::<settings::DefaultOpenBehavior>(render_dropdown)
-        .add_basic_renderer::<settings::CloseWindowWhenNoItems>(render_dropdown)
-        .add_basic_renderer::<settings::TextRenderingMode>(render_dropdown)
+        .add_dropdown_renderer::<settings::CursorShape>()
+        .add_dropdown_renderer::<settings::RestoreOnStartupBehavior>()
+        .add_dropdown_renderer::<settings::BottomDockLayout>()
+        .add_dropdown_renderer::<settings::ActivityBarPosition>()
+        .add_dropdown_renderer::<settings::OnLastWindowClosed>()
+        .add_dropdown_renderer::<settings::CliDefaultOpenBehavior>()
+        .add_dropdown_renderer::<settings::DefaultOpenBehavior>()
+        .add_dropdown_renderer::<settings::CloseWindowWhenNoItems>()
+        .add_dropdown_renderer::<settings::TextRenderingMode>()
         .add_basic_renderer::<settings::FontFamilyName>(render_font_picker)
-        .add_basic_renderer::<settings::BaseKeymapContent>(render_dropdown)
-        .add_basic_renderer::<settings::MultiCursorModifier>(render_dropdown)
-        .add_basic_renderer::<settings::HideMouseMode>(render_dropdown)
-        .add_basic_renderer::<settings::ReduceMotionMode>(render_dropdown)
-        .add_basic_renderer::<settings::CurrentLineHighlight>(render_dropdown)
-        .add_basic_renderer::<settings::ShowWhitespaceSetting>(render_dropdown)
-        .add_basic_renderer::<settings::SoftWrap>(render_dropdown)
-        .add_basic_renderer::<settings::AutoIndentMode>(render_dropdown)
-        .add_basic_renderer::<settings::ScrollBeyondLastLine>(render_dropdown)
-        .add_basic_renderer::<settings::SnippetSortOrder>(render_dropdown)
-        .add_basic_renderer::<settings::ClosePosition>(render_dropdown)
-        .add_basic_renderer::<settings::DockSide>(render_dropdown)
-        .add_basic_renderer::<settings::TerminalDockPosition>(render_dropdown)
-        .add_basic_renderer::<settings::DockPosition>(render_dropdown)
-        .add_basic_renderer::<settings::GitGutterSetting>(render_dropdown)
-        .add_basic_renderer::<settings::GitHunkStyleSetting>(render_dropdown)
-        .add_basic_renderer::<settings::GitDiffBaseSetting>(render_dropdown)
-        .add_basic_renderer::<settings::GitPathStyle>(render_dropdown)
-        .add_basic_renderer::<settings::InlineBlameLocation>(render_dropdown)
-        .add_basic_renderer::<settings::DiagnosticSeverityContent>(render_dropdown)
-        .add_basic_renderer::<settings::SeedQuerySetting>(render_dropdown)
-        .add_basic_renderer::<settings::DoubleClickInMultibuffer>(render_dropdown)
-        .add_basic_renderer::<settings::GoToDefinitionFallback>(render_dropdown)
-        .add_basic_renderer::<settings::GoToDefinitionScrollStrategy>(render_dropdown)
-        .add_basic_renderer::<settings::OpenResultsIn>(render_dropdown)
-        .add_basic_renderer::<settings::ActivateOnClose>(render_dropdown)
-        .add_basic_renderer::<settings::ShowDiagnostics>(render_dropdown)
-        .add_basic_renderer::<settings::ShowCloseButton>(render_dropdown)
-        .add_basic_renderer::<settings::FolderIndicator>(render_dropdown)
-        .add_basic_renderer::<settings::ProjectPanelEntrySpacing>(render_dropdown)
-        .add_basic_renderer::<settings::ProjectPanelSortMode>(render_dropdown)
-        .add_basic_renderer::<settings::ProjectPanelSortOrder>(render_dropdown)
-        .add_basic_renderer::<settings::RewrapBehavior>(render_dropdown)
-        .add_basic_renderer::<settings::FormatOnSave>(render_dropdown)
-        .add_basic_renderer::<settings::LineEndingSetting>(render_dropdown)
-        .add_basic_renderer::<settings::IndentGuideColoring>(render_dropdown)
-        .add_basic_renderer::<settings::IndentGuideBackgroundColoring>(render_dropdown)
-        .add_basic_renderer::<settings::ShowDiagnostics>(render_dropdown)
-        .add_basic_renderer::<settings::WordsCompletionMode>(render_dropdown)
-        .add_basic_renderer::<settings::LspInsertMode>(render_dropdown)
-        .add_basic_renderer::<settings::CompletionDetailAlignment>(render_dropdown)
-        .add_basic_renderer::<settings::CompletionMenuItemKind>(render_dropdown)
-        .add_basic_renderer::<settings::DiffViewStyle>(render_dropdown)
-        .add_basic_renderer::<settings::AlternateScroll>(render_dropdown)
-        .add_basic_renderer::<settings::TerminalBlink>(render_dropdown)
-        .add_basic_renderer::<settings::CursorShapeContent>(render_dropdown)
+        .add_dropdown_renderer::<settings::BaseKeymapContent>()
+        .add_dropdown_renderer::<settings::UiLanguage>()
+        .add_dropdown_renderer::<settings::MultiCursorModifier>()
+        .add_dropdown_renderer::<settings::HideMouseMode>()
+        .add_dropdown_renderer::<settings::ReduceMotionMode>()
+        .add_dropdown_renderer::<settings::CurrentLineHighlight>()
+        .add_dropdown_renderer::<settings::ShowWhitespaceSetting>()
+        .add_dropdown_renderer::<settings::SoftWrap>()
+        .add_dropdown_renderer::<settings::AutoIndentMode>()
+        .add_dropdown_renderer::<settings::ScrollBeyondLastLine>()
+        .add_dropdown_renderer::<settings::SnippetSortOrder>()
+        .add_dropdown_renderer::<settings::ClosePosition>()
+        .add_dropdown_renderer::<settings::DockSide>()
+        .add_dropdown_renderer::<settings::TerminalDockPosition>()
+        .add_dropdown_renderer::<settings::DockPosition>()
+        .add_dropdown_renderer::<settings::GitGutterSetting>()
+        .add_dropdown_renderer::<settings::GitHunkStyleSetting>()
+        .add_dropdown_renderer::<settings::GitDiffBaseSetting>()
+        .add_dropdown_renderer::<settings::GitPathStyle>()
+        .add_dropdown_renderer::<settings::InlineBlameLocation>()
+        .add_dropdown_renderer::<settings::DiagnosticSeverityContent>()
+        .add_dropdown_renderer::<settings::SeedQuerySetting>()
+        .add_dropdown_renderer::<settings::DoubleClickInMultibuffer>()
+        .add_dropdown_renderer::<settings::GoToDefinitionFallback>()
+        .add_dropdown_renderer::<settings::GoToDefinitionScrollStrategy>()
+        .add_dropdown_renderer::<settings::OpenResultsIn>()
+        .add_dropdown_renderer::<settings::ActivateOnClose>()
+        .add_dropdown_renderer::<settings::ShowDiagnostics>()
+        .add_dropdown_renderer::<settings::ShowCloseButton>()
+        .add_dropdown_renderer::<settings::FolderIndicator>()
+        .add_dropdown_renderer::<settings::ProjectPanelEntrySpacing>()
+        .add_dropdown_renderer::<settings::ProjectPanelSortMode>()
+        .add_dropdown_renderer::<settings::ProjectPanelSortOrder>()
+        .add_dropdown_renderer::<settings::RewrapBehavior>()
+        .add_dropdown_renderer::<settings::FormatOnSave>()
+        .add_dropdown_renderer::<settings::LineEndingSetting>()
+        .add_dropdown_renderer::<settings::IndentGuideColoring>()
+        .add_dropdown_renderer::<settings::IndentGuideBackgroundColoring>()
+        .add_dropdown_renderer::<settings::ShowDiagnostics>()
+        .add_dropdown_renderer::<settings::WordsCompletionMode>()
+        .add_dropdown_renderer::<settings::LspInsertMode>()
+        .add_dropdown_renderer::<settings::CompletionDetailAlignment>()
+        .add_dropdown_renderer::<settings::CompletionMenuItemKind>()
+        .add_dropdown_renderer::<settings::DiffViewStyle>()
+        .add_dropdown_renderer::<settings::AlternateScroll>()
+        .add_dropdown_renderer::<settings::TerminalBlink>()
+        .add_dropdown_renderer::<settings::CursorShapeContent>()
         .add_basic_renderer::<f32>(render_editable_number_field)
         .add_basic_renderer::<u32>(render_editable_number_field)
         .add_basic_renderer::<u64>(render_editable_number_field)
@@ -562,53 +577,53 @@ fn init_renderers(cx: &mut App) {
         .add_basic_renderer::<settings::CenteredPaddingSettings>(render_editable_number_field)
         .add_basic_renderer::<settings::InactiveOpacity>(render_editable_number_field)
         .add_basic_renderer::<settings::MinimumContrast>(render_editable_number_field)
-        .add_basic_renderer::<settings::ShowScrollbar>(render_dropdown)
-        .add_basic_renderer::<settings::ScrollbarDiagnostics>(render_dropdown)
-        .add_basic_renderer::<settings::ShowMinimap>(render_dropdown)
-        .add_basic_renderer::<settings::DisplayIn>(render_dropdown)
-        .add_basic_renderer::<settings::MinimapThumb>(render_dropdown)
-        .add_basic_renderer::<settings::MinimapThumbBorder>(render_dropdown)
-        .add_basic_renderer::<settings::SteppingGranularity>(render_dropdown)
-        .add_basic_renderer::<settings::ImageFileSizeUnit>(render_dropdown)
-        .add_basic_renderer::<settings::AgentChatSendKey>(render_dropdown)
-        .add_basic_renderer::<settings::AgentChatModelPickerLayout>(render_dropdown)
-        .add_basic_renderer::<settings::AgentChatWhileWorking>(render_dropdown)
-        .add_basic_renderer::<settings::AgentChatDefaultEffort>(render_dropdown)
-        .add_basic_renderer::<settings::ClaudeCodePermissionDefault>(render_dropdown)
-        .add_basic_renderer::<settings::CodexPermissionDefault>(render_dropdown)
-        .add_basic_renderer::<settings::OpencodePermissionDefault>(render_dropdown)
-        .add_basic_renderer::<settings::StatusStyle>(render_dropdown)
-        .add_basic_renderer::<settings::GitPanelClickBehavior>(render_dropdown)
-        .add_basic_renderer::<settings::GitPanelSortBy>(render_dropdown)
-        .add_basic_renderer::<settings::GitPanelGroupBy>(render_dropdown)
-        .add_basic_renderer::<settings::EncodingDisplayOptions>(render_dropdown)
-        .add_basic_renderer::<settings::PaneSplitDirectionHorizontal>(render_dropdown)
-        .add_basic_renderer::<settings::PaneSplitDirectionVertical>(render_dropdown)
-        .add_basic_renderer::<settings::PaneSplitDirectionVertical>(render_dropdown)
-        .add_basic_renderer::<settings::CodeLens>(render_dropdown)
-        .add_basic_renderer::<settings::DocumentColorsRenderMode>(render_dropdown)
-        .add_basic_renderer::<settings::ThemeSelectionDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::ThemeAppearanceMode>(render_dropdown)
+        .add_dropdown_renderer::<settings::ShowScrollbar>()
+        .add_dropdown_renderer::<settings::ScrollbarDiagnostics>()
+        .add_dropdown_renderer::<settings::ShowMinimap>()
+        .add_dropdown_renderer::<settings::DisplayIn>()
+        .add_dropdown_renderer::<settings::MinimapThumb>()
+        .add_dropdown_renderer::<settings::MinimapThumbBorder>()
+        .add_dropdown_renderer::<settings::SteppingGranularity>()
+        .add_dropdown_renderer::<settings::ImageFileSizeUnit>()
+        .add_dropdown_renderer::<settings::AgentChatSendKey>()
+        .add_dropdown_renderer::<settings::AgentChatModelPickerLayout>()
+        .add_dropdown_renderer::<settings::AgentChatWhileWorking>()
+        .add_dropdown_renderer::<settings::AgentChatDefaultEffort>()
+        .add_dropdown_renderer::<settings::ClaudeCodePermissionDefault>()
+        .add_dropdown_renderer::<settings::CodexPermissionDefault>()
+        .add_dropdown_renderer::<settings::OpencodePermissionDefault>()
+        .add_dropdown_renderer::<settings::StatusStyle>()
+        .add_dropdown_renderer::<settings::GitPanelClickBehavior>()
+        .add_dropdown_renderer::<settings::GitPanelSortBy>()
+        .add_dropdown_renderer::<settings::GitPanelGroupBy>()
+        .add_dropdown_renderer::<settings::EncodingDisplayOptions>()
+        .add_dropdown_renderer::<settings::PaneSplitDirectionHorizontal>()
+        .add_dropdown_renderer::<settings::PaneSplitDirectionVertical>()
+        .add_dropdown_renderer::<settings::PaneSplitDirectionVertical>()
+        .add_dropdown_renderer::<settings::CodeLens>()
+        .add_dropdown_renderer::<settings::DocumentColorsRenderMode>()
+        .add_dropdown_renderer::<settings::ThemeSelectionDiscriminants>()
+        .add_dropdown_renderer::<settings::ThemeAppearanceMode>()
         .add_basic_renderer::<settings::ThemeName>(render_theme_picker)
-        .add_basic_renderer::<settings::IconThemeSelectionDiscriminants>(render_dropdown)
+        .add_dropdown_renderer::<settings::IconThemeSelectionDiscriminants>()
         .add_basic_renderer::<settings::IconThemeName>(render_icon_theme_picker)
-        .add_basic_renderer::<settings::BufferLineHeightDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::GitGutterWidthDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::AutosaveSettingDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::WorkingDirectoryDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::IncludeIgnoredContent>(render_dropdown)
-        .add_basic_renderer::<settings::ShowIndentGuides>(render_dropdown)
-        .add_basic_renderer::<settings::ShellDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::RelativeLineNumbers>(render_dropdown)
-        .add_basic_renderer::<settings::WindowDecorations>(render_dropdown)
-        .add_basic_renderer::<settings::FullscreenMode>(render_dropdown)
-        .add_basic_renderer::<settings::WindowButtonLayoutContentDiscriminants>(render_dropdown)
-        .add_basic_renderer::<settings::ScanSymlinksSetting>(render_dropdown)
+        .add_dropdown_renderer::<settings::BufferLineHeightDiscriminants>()
+        .add_dropdown_renderer::<settings::GitGutterWidthDiscriminants>()
+        .add_dropdown_renderer::<settings::AutosaveSettingDiscriminants>()
+        .add_dropdown_renderer::<settings::WorkingDirectoryDiscriminants>()
+        .add_dropdown_renderer::<settings::IncludeIgnoredContent>()
+        .add_dropdown_renderer::<settings::ShowIndentGuides>()
+        .add_dropdown_renderer::<settings::ShellDiscriminants>()
+        .add_dropdown_renderer::<settings::RelativeLineNumbers>()
+        .add_dropdown_renderer::<settings::WindowDecorations>()
+        .add_dropdown_renderer::<settings::FullscreenMode>()
+        .add_dropdown_renderer::<settings::WindowButtonLayoutContentDiscriminants>()
+        .add_dropdown_renderer::<settings::ScanSymlinksSetting>()
         .add_basic_renderer::<settings::FontSize>(render_editable_number_field)
-        .add_basic_renderer::<settings::SemanticTokens>(render_dropdown)
-        .add_basic_renderer::<settings::DocumentFoldingRanges>(render_dropdown)
-        .add_basic_renderer::<settings::DocumentSymbols>(render_dropdown)
-        .add_basic_renderer::<settings::TerminalBell>(render_dropdown)
+        .add_dropdown_renderer::<settings::SemanticTokens>()
+        .add_dropdown_renderer::<settings::DocumentFoldingRanges>()
+        .add_dropdown_renderer::<settings::DocumentSymbols>()
+        .add_dropdown_renderer::<settings::TerminalBell>()
         // please semicolon stay on next line
         ;
 }
@@ -746,7 +761,7 @@ fn open_settings_editor_at_target(
                 && let SettingsPageItem::SubPageLink(link) = item
                 && let SettingsPageItem::SectionHeader(header) = page.items[header_index]
             {
-                settings_window.push_sub_page(link.clone(), SharedString::from(header), window, cx);
+                settings_window.push_sub_page(link.clone(), i18n::translate(header), window, cx);
             }
         }
 
@@ -812,7 +827,7 @@ fn open_settings_editor_with(
         cx.open_window(
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
-                    title: Some("Wu — Settings".into()),
+                    title: Some(t!("Wu \u{2014} Settings")),
                     appears_transparent: true,
                     traffic_light_position: Some(point(px(12.0), px(12.0))),
                 }),
@@ -906,12 +921,169 @@ pub struct SettingsWindow {
 struct SearchDocument {
     id: usize,
     words: Vec<String>,
+    translated_text: String,
 }
 
 struct SearchIndex {
+    language: i18n::Language,
     documents: Vec<SearchDocument>,
     fuzzy_match_candidates: Vec<StringMatchCandidate>,
     key_lut: Vec<SearchKeyLUTEntry>,
+}
+
+impl SearchDocument {
+    fn matches(&self, query_words: &[&str]) -> bool {
+        query_words.iter().all(|query_word| {
+            self.words.iter().any(|word| word.starts_with(query_word))
+                || translation_matches_query_word(&self.translated_text, query_word)
+        })
+    }
+}
+
+fn translation_matches_query_word(translation: &str, query_word: &str) -> bool {
+    if query_word.is_ascii() {
+        translation
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| word.starts_with(query_word))
+    } else {
+        translation.contains(query_word)
+    }
+}
+
+impl SearchIndex {
+    fn new(pages: &[SettingsPage]) -> Self {
+        fn split_into_words(parts: &[&str]) -> Vec<String> {
+            parts
+                .iter()
+                .flat_map(|s| {
+                    s.split(|c: char| !c.is_alphanumeric())
+                        .filter(|w| !w.is_empty())
+                        .map(|w| w.to_lowercase())
+                })
+                .collect()
+        }
+
+        fn translated_text(parts: &[&str]) -> String {
+            parts
+                .iter()
+                .filter_map(|part| i18n::lookup(part))
+                .map(|translation| translation.to_lowercase())
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+
+        let mut key_lut: Vec<SearchKeyLUTEntry> = vec![];
+        let mut documents: Vec<SearchDocument> = Vec::default();
+        let mut fuzzy_match_candidates = Vec::default();
+
+        fn push_candidates(
+            fuzzy_match_candidates: &mut Vec<StringMatchCandidate>,
+            key_index: usize,
+            input: &str,
+        ) {
+            for word in input.split_ascii_whitespace() {
+                fuzzy_match_candidates.push(StringMatchCandidate::new(key_index, word));
+            }
+        }
+
+        // PERF: We are currently searching all items even in project files
+        // where many settings are filtered out, using the logic in filter_matches_to_file
+        // we could only search relevant items based on the current file
+        for (page_index, page) in pages.iter().enumerate() {
+            let mut header_index = 0;
+            let mut header_str = "";
+            for (item_index, item) in page.items.iter().enumerate() {
+                let key_index = key_lut.len();
+                let mut json_path = None;
+                match item {
+                    SettingsPageItem::DynamicItem(DynamicItem {
+                        discriminant: item, ..
+                    })
+                    | SettingsPageItem::SettingItem(item) => {
+                        json_path = item
+                            .field
+                            .json_path()
+                            .map(|path| path.trim_end_matches('$'));
+                        let parts = [page.title, header_str, item.title, item.description];
+                        documents.push(SearchDocument {
+                            id: key_index,
+                            words: split_into_words(&parts),
+                            translated_text: translated_text(&parts),
+                        });
+                        push_candidates(&mut fuzzy_match_candidates, key_index, item.title);
+                        push_candidates(&mut fuzzy_match_candidates, key_index, item.description);
+                        for text in [item.title, item.description] {
+                            if let Some(translation) = i18n::lookup(text) {
+                                push_candidates(
+                                    &mut fuzzy_match_candidates,
+                                    key_index,
+                                    &translation,
+                                );
+                            }
+                        }
+                    }
+                    SettingsPageItem::SectionHeader(header) => {
+                        documents.push(SearchDocument {
+                            id: key_index,
+                            words: split_into_words(&[header]),
+                            translated_text: translated_text(&[header]),
+                        });
+                        push_candidates(&mut fuzzy_match_candidates, key_index, header);
+                        header_index = item_index;
+                        header_str = *header;
+                    }
+                    SettingsPageItem::SubPageLink(sub_page_link) => {
+                        json_path = sub_page_link.json_path;
+                        let mut parts = vec![page.title, header_str, sub_page_link.title.as_ref()];
+                        parts.extend(sub_page_link.search_aliases);
+                        documents.push(SearchDocument {
+                            id: key_index,
+                            words: split_into_words(&parts),
+                            translated_text: translated_text(&[page.title, header_str]),
+                        });
+                        push_candidates(
+                            &mut fuzzy_match_candidates,
+                            key_index,
+                            sub_page_link.title.as_ref(),
+                        );
+                        for alias in sub_page_link.search_aliases {
+                            push_candidates(&mut fuzzy_match_candidates, key_index, alias);
+                        }
+                    }
+                    SettingsPageItem::ActionLink(action_link) => {
+                        let mut parts = vec![page.title, header_str, action_link.title];
+                        parts.extend(action_link.description);
+                        documents.push(SearchDocument {
+                            id: key_index,
+                            words: split_into_words(&parts),
+                            translated_text: translated_text(&parts),
+                        });
+                        push_candidates(&mut fuzzy_match_candidates, key_index, action_link.title);
+                    }
+                }
+                push_candidates(&mut fuzzy_match_candidates, key_index, page.title);
+                push_candidates(&mut fuzzy_match_candidates, key_index, header_str);
+                for text in [page.title, header_str] {
+                    if let Some(translation) = i18n::lookup(text) {
+                        push_candidates(&mut fuzzy_match_candidates, key_index, &translation);
+                    }
+                }
+
+                key_lut.push(SearchKeyLUTEntry {
+                    page_index,
+                    header_index,
+                    item_index,
+                    json_path,
+                });
+            }
+        }
+        Self {
+            language: i18n::language(),
+            documents,
+            key_lut,
+            fuzzy_match_candidates,
+        }
+    }
 }
 
 struct SearchKeyLUTEntry {
@@ -1088,7 +1260,7 @@ impl SettingsPageItem {
 
         match self {
             SettingsPageItem::SectionHeader(header) => {
-                SettingsSectionHeader::new(SharedString::new_static(header)).into_any_element()
+                SettingsSectionHeader::new(i18n::translate(header)).into_any_element()
             }
             SettingsPageItem::SettingItem(setting_item) => {
                 let (field_with_padding, _) =
@@ -1131,9 +1303,9 @@ impl SettingsPageItem {
                         .child(
                             Button::new(
                                 ("sub-page".into(), sub_page_link.title.clone()),
-                                "Configure",
+                                t!("Configure"),
                             )
-                            .aria_label(format!("Configure {}", sub_page_link.title))
+                            .aria_label(t!("Configure {name}", name = sub_page_link.title))
                             .tab_index(0_isize)
                             .end_icon(
                                 Icon::new(IconName::ChevronRight)
@@ -1156,7 +1328,7 @@ impl SettingsPageItem {
                                                 .take(item_index)
                                                 .rev()
                                                 .find_map(|item| {
-                                                    item.header_text().map(SharedString::new_static)
+                                                    item.header_text().map(i18n::translate)
                                                 })
                                         });
 
@@ -1242,7 +1414,7 @@ impl SettingsPageItem {
                 .px_8()
                 .child(
                     h_flex()
-                        .id(action_link.title.clone())
+                        .id(action_link.title)
                         .w_full()
                         .min_w_0()
                         .justify_between()
@@ -1252,22 +1424,22 @@ impl SettingsPageItem {
                                 .relative()
                                 .w_full()
                                 .max_w_1_2()
-                                .child(Label::new(action_link.title.clone()))
-                                .when_some(
-                                    action_link.description.as_ref(),
-                                    |this, description| {
-                                        this.child(
-                                            Label::new(description.clone())
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted),
-                                        )
-                                    },
-                                ),
+                                .child(Label::new(i18n::translate(action_link.title)))
+                                .when_some(action_link.description, |this, description| {
+                                    this.child(
+                                        Label::new(i18n::translate(description))
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    )
+                                }),
                         )
                         .child(
                             Button::new(
-                                ("action-link".into(), action_link.title.clone()),
-                                action_link.button_text.clone(),
+                                (
+                                    "action-link".into(),
+                                    SharedString::new_static(action_link.title),
+                                ),
+                                i18n::translate(action_link.button_text),
                             )
                             .tab_index(0_isize)
                             .end_icon(
@@ -1324,14 +1496,14 @@ fn render_settings_item_layout(
                     h_flex()
                         .w_full()
                         .gap_1()
-                        .child(Label::new(SharedString::new_static(title)))
+                        .child(Label::new(i18n::translate(title)))
                         .when_some(reset_fn, |this, reset_to_default| {
                             this.child(
                                 IconButton::new("reset-to-default-btn", IconName::Undo)
                                     .icon_color(Color::Muted)
                                     .icon_size(IconSize::Small)
-                                    .aria_label("Reset to Default")
-                                    .tooltip(Tooltip::text("Reset to Default"))
+                                    .aria_label(t!("Reset to Default"))
+                                    .tooltip(Tooltip::text(t!("Reset to Default")))
                                     .on_click(move |_, window, cx| {
                                         reset_to_default(window, cx);
                                     }),
@@ -1339,14 +1511,17 @@ fn render_settings_item_layout(
                         })
                         .when_some(modified_in, |this, modified_in| {
                             this.child(
-                                Label::new(format!("\u{2014}  Modified in {modified_in}"))
-                                    .color(Color::Muted)
-                                    .size(LabelSize::Small),
+                                Label::new(format!(
+                                    "\u{2014}  {}",
+                                    t!("Modified in {file}", file = modified_in)
+                                ))
+                                .color(Color::Muted)
+                                .size(LabelSize::Small),
                             )
                         }),
                 )
                 .child(
-                    Label::new(SharedString::new_static(description))
+                    Label::new(i18n::translate(description))
                         .size(LabelSize::Small)
                         .color(Color::Muted)
                         .render_code_spans(),
@@ -1433,8 +1608,8 @@ fn render_settings_item_link(
                 .icon_color(link_icon_color)
                 .icon_size(IconSize::Small)
                 .shape(IconButtonShape::Square)
-                .aria_label("Copy Link")
-                .tooltip(Tooltip::text("Copy Link"))
+                .aria_label(t!("Copy Link"))
+                .tooltip(Tooltip::text(t!("Copy Link")))
                 .when_some(json_path, |this, path| {
                     this.on_click(cx.listener(move |this, _, _, cx| {
                         let link = format!("wu://settings/{}", path);
@@ -1557,9 +1732,9 @@ impl PartialEq for SubPageLink {
 
 #[derive(Clone)]
 struct ActionLink {
-    title: SharedString,
-    description: Option<SharedString>,
-    button_text: SharedString,
+    title: &'static str,
+    description: Option<&'static str>,
+    button_text: &'static str,
     on_click: Arc<dyn Fn(&mut SettingsWindow, &mut Window, &mut App) + Send + Sync>,
     files: FileMask,
 }
@@ -1568,6 +1743,16 @@ impl PartialEq for ActionLink {
     fn eq(&self, other: &Self) -> bool {
         self.title == other.title
     }
+}
+
+fn title_matches_query_word(title: &'static str, query_word: &str) -> bool {
+    title
+        .to_lowercase()
+        .split_whitespace()
+        .any(|title_word| title_word.starts_with(query_word))
+        || i18n::lookup(title).is_some_and(|translation| {
+            translation_matches_query_word(&translation.to_lowercase(), query_word)
+        })
 }
 
 fn all_language_names(cx: &App) -> Vec<SharedString> {
@@ -1592,9 +1777,9 @@ enum SettingsUiFile {
 impl SettingsUiFile {
     fn setting_type(&self) -> &'static str {
         match self {
-            SettingsUiFile::User => "User",
-            SettingsUiFile::Project(_) => "Project",
-            SettingsUiFile::Server(_) => "Server",
+            SettingsUiFile::User => n!("User"),
+            SettingsUiFile::Project(_) => n!("Project"),
+            SettingsUiFile::Server(_) => n!("Server"),
         }
     }
 
@@ -1656,7 +1841,7 @@ impl SettingsWindow {
         let current_file = SettingsUiFile::User;
         let search_bar = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Search settings…", window, cx);
+            editor.set_placeholder_text(&t!("Search settings…"), window, cx);
             editor
         });
         cx.subscribe(&search_bar, |this, _, event: &EditorEvent, cx| {
@@ -1678,7 +1863,11 @@ impl SettingsWindow {
 
             let pages_with_feature_off =
                 page_data::pages_with_feature_off(SettingsStore::global(cx).merged_settings());
-            if pages_with_feature_off != this.pages_with_feature_off {
+            let language_changed = this
+                .search_index
+                .as_ref()
+                .is_some_and(|search_index| search_index.language != i18n::language());
+            if pages_with_feature_off != this.pages_with_feature_off || language_changed {
                 this.pages_with_feature_off = pages_with_feature_off;
                 this.update_matches(cx);
             }
@@ -2130,6 +2319,13 @@ impl SettingsWindow {
 
     fn update_matches(&mut self, cx: &mut Context<SettingsWindow>) {
         self.search_task.take();
+        if self
+            .search_index
+            .as_ref()
+            .is_some_and(|search_index| search_index.language != i18n::language())
+        {
+            self.build_search_index();
+        }
         let query = self.search_bar.read(cx).text(cx);
         if query.is_empty() || self.search_index.is_none() {
             for page in &mut self.filter_table {
@@ -2167,13 +2363,7 @@ impl SettingsWindow {
                     search_index
                         .documents
                         .iter()
-                        .filter(|doc| {
-                            query_words.iter().all(|query_word| {
-                                doc.words
-                                    .iter()
-                                    .any(|doc_word| doc_word.starts_with(query_word))
-                            })
-                        })
+                        .filter(|doc| doc.matches(&query_words))
                         .map(|doc| doc.id)
                         .collect::<Vec<usize>>()
                 }
@@ -2218,119 +2408,7 @@ impl SettingsWindow {
     }
 
     fn build_search_index(&mut self) {
-        fn split_into_words(parts: &[&str]) -> Vec<String> {
-            parts
-                .iter()
-                .flat_map(|s| {
-                    s.split(|c: char| !c.is_alphanumeric())
-                        .filter(|w| !w.is_empty())
-                        .map(|w| w.to_lowercase())
-                })
-                .collect()
-        }
-
-        let mut key_lut: Vec<SearchKeyLUTEntry> = vec![];
-        let mut documents: Vec<SearchDocument> = Vec::default();
-        let mut fuzzy_match_candidates = Vec::default();
-
-        fn push_candidates(
-            fuzzy_match_candidates: &mut Vec<StringMatchCandidate>,
-            key_index: usize,
-            input: &str,
-        ) {
-            for word in input.split_ascii_whitespace() {
-                fuzzy_match_candidates.push(StringMatchCandidate::new(key_index, word));
-            }
-        }
-
-        // PERF: We are currently searching all items even in project files
-        // where many settings are filtered out, using the logic in filter_matches_to_file
-        // we could only search relevant items based on the current file
-        for (page_index, page) in self.pages.iter().enumerate() {
-            let mut header_index = 0;
-            let mut header_str = "";
-            for (item_index, item) in page.items.iter().enumerate() {
-                let key_index = key_lut.len();
-                let mut json_path = None;
-                match item {
-                    SettingsPageItem::DynamicItem(DynamicItem {
-                        discriminant: item, ..
-                    })
-                    | SettingsPageItem::SettingItem(item) => {
-                        json_path = item
-                            .field
-                            .json_path()
-                            .map(|path| path.trim_end_matches('$'));
-                        documents.push(SearchDocument {
-                            id: key_index,
-                            words: split_into_words(&[
-                                page.title,
-                                header_str,
-                                item.title,
-                                item.description,
-                            ]),
-                        });
-                        push_candidates(&mut fuzzy_match_candidates, key_index, item.title);
-                        push_candidates(&mut fuzzy_match_candidates, key_index, item.description);
-                    }
-                    SettingsPageItem::SectionHeader(header) => {
-                        documents.push(SearchDocument {
-                            id: key_index,
-                            words: split_into_words(&[header]),
-                        });
-                        push_candidates(&mut fuzzy_match_candidates, key_index, header);
-                        header_index = item_index;
-                        header_str = *header;
-                    }
-                    SettingsPageItem::SubPageLink(sub_page_link) => {
-                        json_path = sub_page_link.json_path;
-                        let mut parts = vec![page.title, header_str, sub_page_link.title.as_ref()];
-                        parts.extend(sub_page_link.search_aliases);
-                        documents.push(SearchDocument {
-                            id: key_index,
-                            words: split_into_words(&parts),
-                        });
-                        push_candidates(
-                            &mut fuzzy_match_candidates,
-                            key_index,
-                            sub_page_link.title.as_ref(),
-                        );
-                        for alias in sub_page_link.search_aliases {
-                            push_candidates(&mut fuzzy_match_candidates, key_index, alias);
-                        }
-                    }
-                    SettingsPageItem::ActionLink(action_link) => {
-                        documents.push(SearchDocument {
-                            id: key_index,
-                            words: split_into_words(&[
-                                page.title,
-                                header_str,
-                                action_link.title.as_ref(),
-                            ]),
-                        });
-                        push_candidates(
-                            &mut fuzzy_match_candidates,
-                            key_index,
-                            action_link.title.as_ref(),
-                        );
-                    }
-                }
-                push_candidates(&mut fuzzy_match_candidates, key_index, page.title);
-                push_candidates(&mut fuzzy_match_candidates, key_index, header_str);
-
-                key_lut.push(SearchKeyLUTEntry {
-                    page_index,
-                    header_index,
-                    item_index,
-                    json_path,
-                });
-            }
-        }
-        self.search_index = Some(Arc::new(SearchIndex {
-            documents,
-            key_lut,
-            fuzzy_match_candidates,
-        }));
+        self.search_index = Some(Arc::new(SearchIndex::new(&self.pages)));
     }
 
     fn build_content_handles(&mut self, window: &mut Window, cx: &mut Context<SettingsWindow>) {
@@ -2490,14 +2568,9 @@ impl SettingsWindow {
             .enumerate()
             .filter(|(_, (_, entry))| !entry.is_root)
             .map(|(logical_index, (index, entry))| {
-                let title_lower = entry.title.to_lowercase();
                 let matching_words = query_words
                     .iter()
-                    .filter(|query_word| {
-                        title_lower
-                            .split_whitespace()
-                            .any(|title_word| title_word.starts_with(*query_word))
-                    })
+                    .filter(|query_word| title_matches_query_word(entry.title, query_word))
                     .count();
                 (logical_index, index, matching_words)
             })
@@ -2516,14 +2589,9 @@ impl SettingsWindow {
             .visible_page_items()
             .enumerate()
             .find(|(_, (_, item))| match item {
-                SettingsPageItem::SectionHeader(title) => {
-                    let title_lower = title.to_lowercase();
-                    query_words.iter().all(|query_word| {
-                        title_lower
-                            .split_whitespace()
-                            .any(|title_word| title_word.starts_with(query_word))
-                    })
-                }
+                SettingsPageItem::SectionHeader(title) => query_words
+                    .iter()
+                    .all(|query_word| title_matches_query_word(title, query_word)),
                 _ => false,
             })
             .map(|(position, _)| position);
@@ -2675,7 +2743,7 @@ impl SettingsWindow {
         h_flex()
             .id("settings-ui-files-header")
             .role(Role::Group)
-            .aria_label("Settings File")
+            .aria_label(t!("Settings File"))
             .w_full()
             .gap_1()
             .justify_between()
@@ -2740,7 +2808,7 @@ impl SettingsWindow {
                                         }),
                                     )
                                     .style(DropdownStyle::Subtle)
-                                    .trigger_tooltip(Tooltip::text("View Other Projects"))
+                                    .trigger_tooltip(Tooltip::text(t!("View Other Projects")))
                                     .trigger_icon(IconName::ChevronDown)
                                     .attach(gpui::Anchor::BottomLeft)
                                     .offset(gpui::Point {
@@ -2753,11 +2821,11 @@ impl SettingsWindow {
                     }),
             )
             .child(
-                Button::new(edit_in_json_id, "Edit in settings.json")
+                Button::new(edit_in_json_id, t!("Edit in settings.json"))
                     .tab_index(0_isize)
                     .style(ButtonStyle::OutlinedGhost)
                     .tooltip(Tooltip::for_action_title_in(
-                        "Edit in settings.json",
+                        t!("Edit in settings.json"),
                         &OpenCurrentFile,
                         &self.focus_handle,
                     ))
@@ -2769,7 +2837,7 @@ impl SettingsWindow {
 
     pub(crate) fn display_name(&self, file: &SettingsUiFile) -> Option<String> {
         match file {
-            SettingsUiFile::User => Some("User".to_string()),
+            SettingsUiFile::User => Some(t!("User").to_string()),
             SettingsUiFile::Project((worktree_id, path)) => self
                 .worktree_root_dirs
                 .get(&worktree_id)
@@ -2825,7 +2893,7 @@ impl SettingsWindow {
         h_flex()
             .id("settings-ui-search")
             .role(Role::SearchInput)
-            .aria_label("Search Settings")
+            .aria_label(t!("Search Settings"))
             .aria_value(a11y_value)
             .track_focus(&self.search_bar.focus_handle(cx))
             .a11y_synthetic_children(a11y_text_runs)
@@ -2846,7 +2914,7 @@ impl SettingsWindow {
                     IconButton::new("clear-btn", IconName::Close)
                         .icon_color(Color::Muted)
                         .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text("Clear"))
+                        .tooltip(Tooltip::text(t!("Clear")))
                         .on_click(cx.listener(|settings_window, _, window, cx| {
                             settings_window.clear_search(window, cx);
                         })),
@@ -2870,9 +2938,9 @@ impl SettingsWindow {
                 .visible_navbar_entries()
                 .any(|(_, entry)| entry.focus_handle.is_focused(window))
         {
-            "Focus Content"
+            t!("Focus Content")
         } else {
-            "Focus Navbar"
+            t!("Focus Navbar")
         };
 
         let mut key_context = KeyContext::new_with_defaults();
@@ -3013,7 +3081,7 @@ impl SettingsWindow {
                 v_flex()
                     .id("settings-ui-nav")
                     .role(Role::Tree)
-                    .aria_label("Settings Navigation")
+                    .aria_label(t!("Settings Navigation"))
                     .flex_1()
                     .overflow_hidden()
                     .track_focus(&self.navbar_focus_handle.focus_handle(cx))
@@ -3030,7 +3098,7 @@ impl SettingsWindow {
                                     .map(|(entry_index, entry)| {
                                         TreeViewItem::new(
                                             ("settings-ui-navbar-entry", entry_index),
-                                            entry.title,
+                                            i18n::translate(entry.title),
                                         )
                                         .track_focus(&entry.focus_handle)
                                         .root_item(entry.is_root)
@@ -3263,8 +3331,8 @@ impl SettingsWindow {
     ) -> impl IntoElement {
         let scope_name: SharedString = self
             .display_name(&self.current_file)
-            .unwrap_or_else(|| self.current_file.setting_type().to_string())
-            .into();
+            .map(SharedString::from)
+            .unwrap_or_else(|| i18n::translate(self.current_file.setting_type()));
 
         // Only offer scopes in which every sub-page in the stack is available.
         let allowed_mask = self
@@ -3287,7 +3355,7 @@ impl SettingsWindow {
                 "sub-page-scope-picker",
                 scope_name,
                 ContextMenu::build(window, cx, move |mut menu, _, _| {
-                    menu = menu.header("Scope");
+                    menu = menu.header(t!("Scope"));
 
                     for ix in allowed_file_indices {
                         let (file, focus_handle) = &self.files[ix];
@@ -3317,7 +3385,7 @@ impl SettingsWindow {
                 }),
             )
             .style(DropdownStyle::Subtle)
-            .trigger_tooltip(Tooltip::text("Change Scope"))
+            .trigger_tooltip(Tooltip::text(t!("Change Scope")))
             .attach(gpui::Anchor::BottomLeft)
             .offset(gpui::Point {
                 x: px(0.0),
@@ -3339,7 +3407,7 @@ impl SettingsWindow {
             .child(Label::new("/").color(Color::Muted))
             .children(
                 itertools::intersperse(
-                    std::iter::once(self.current_page().title.into()).chain(
+                    std::iter::once(i18n::translate(self.current_page().title)).chain(
                         self.sub_page_stack
                             .iter()
                             .enumerate()
@@ -3364,9 +3432,9 @@ impl SettingsWindow {
             .items_center()
             .justify_center()
             .gap_1()
-            .child(Label::new("No Results"))
+            .child(Label::new(t!("No Results")))
             .child(
-                Label::new(format!("No settings match \"{}\"", search_query))
+                Label::new(t!("No settings match \"{query}\"", query = search_query))
                     .size(LabelSize::Small)
                     .color(Color::Muted),
             )
@@ -3381,7 +3449,7 @@ impl SettingsWindow {
         let mut page_content = v_flex()
             .id("settings-ui-page")
             .role(Role::Group)
-            .aria_label("Settings Content")
+            .aria_label(t!("Settings Content"))
             .size_full();
 
         let has_active_search = !self.search_bar.read(cx).is_empty(cx);
@@ -3401,7 +3469,7 @@ impl SettingsWindow {
                 .navbar_entries
                 .iter()
                 .find(|entry| entry.is_root && entry.page_index == self.current_page_index())
-                .map(|entry| entry.title);
+                .map(|entry| i18n::translate(entry.title));
 
             let list_content = list(
                 self.list_state.clone(),
@@ -3410,7 +3478,7 @@ impl SettingsWindow {
                         return div()
                             .px_8()
                             .when(this.sub_page_stack.is_empty(), |this| {
-                                this.when_some(root_nav_label, |this, title| {
+                                this.when_some(root_nav_label.clone(), |this, title| {
                                     this.child(
                                         Label::new(title).size(LabelSize::Large).mt_2().mb_3(),
                                     )
@@ -3509,7 +3577,7 @@ impl SettingsWindow {
                 .navbar_entries
                 .iter()
                 .find(|entry| entry.is_root && entry.page_index == self.current_page_index())
-                .map(|entry| entry.title);
+                .map(|entry| i18n::translate(entry.title));
 
             page_content
                 .when(self.sub_page_stack.is_empty(), |this| {
@@ -3577,11 +3645,11 @@ impl SettingsWindow {
                         .flex_shrink_0()
                         .when(current_sub_page.link.in_json, |this| {
                             this.child(
-                                Button::new("open-in-settings-file", "Edit in settings.json")
+                                Button::new("open-in-settings-file", t!("Edit in settings.json"))
                                     .tab_index(0_isize)
                                     .style(ButtonStyle::OutlinedGhost)
                                     .tooltip(Tooltip::for_action_title_in(
-                                        "Edit in settings.json",
+                                        t!("Edit in settings.json"),
                                         &OpenCurrentFile,
                                         &self.focus_handle,
                                     ))
@@ -3611,7 +3679,7 @@ impl SettingsWindow {
             SettingsStore::global(cx).error_for_file(self.current_file.to_settings())
         {
             fn banner(
-                label: &'static str,
+                label: SharedString,
                 error: String,
                 cx: &mut Context<SettingsWindow>,
             ) -> impl IntoElement {
@@ -3626,7 +3694,7 @@ impl SettingsWindow {
                     )
                     .action_slot(
                         div().pr_1().pb_1().child(
-                            Button::new("fix-in-json", "Fix in settings.json")
+                            Button::new("fix-in-json", t!("Fix in settings.json"))
                                 .tab_index(0_isize)
                                 .style(ButtonStyle::Tinted(ui::TintColor::Warning))
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -3642,7 +3710,7 @@ impl SettingsWindow {
                 .gap_2()
                 .when_some(parse_error, |this, err| {
                     this.child(banner(
-                        "Failed to load your settings. Some values may be incorrect and changes may be lost.",
+                        t!("Failed to load your settings. Some values may be incorrect and changes may be lost."),
                         err,
                         cx,
                     ))
@@ -3672,18 +3740,18 @@ impl SettingsWindow {
                         v_flex()
                             .my_0p5()
                             .gap_0p5()
-                            .child(Label::new("Restricted Mode"))
+                            .child(Label::new(t!("Restricted Mode")))
                             .child(
-                                Label::new(
-                                    "This project is in restricted mode. Some project settings may not apply.",
-                                )
+                                Label::new(t!(
+                                    "This project is in restricted mode. Some project settings may not apply."
+                                ))
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                             ),
                     )
                     .action_slot(
                         div().pr_2().pb_1().child(
-                            Button::new("manage-trust", "Manage Trust")
+                            Button::new("manage-trust", t!("Manage Trust"))
                                 .style(ButtonStyle::Tinted(ui::TintColor::Warning))
                                 .on_click(cx.listener(move |_this, _, window, cx| {
                                     if let Some(original_window) = original_window {
@@ -4022,8 +4090,8 @@ impl SettingsWindow {
                             .iter()
                             .take(item_index)
                             .rev()
-                            .find_map(|item| item.header_text().map(SharedString::new_static))
-                            .unwrap_or_else(|| "Settings".into());
+                            .find_map(|item| item.header_text().map(i18n::translate))
+                            .unwrap_or_else(|| t!("Settings"));
 
                         self.push_sub_page(sub_page_link.clone(), section_header, window, cx);
                         return true;
@@ -4521,8 +4589,8 @@ fn render_text_field<T: From<String> + Into<String> + AsRef<str> + Clone>(
     field: SettingField<T>,
     file: SettingsUiFile,
     metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -4580,8 +4648,8 @@ fn render_toggle_button<B: Into<bool> + From<bool> + Copy>(
     field: SettingField<B>,
     file: SettingsUiFile,
     _metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -4617,8 +4685,8 @@ fn render_activity_bar_icon_size(
     field: SettingField<settings::ActivityBarIconSize>,
     file: SettingsUiFile,
     _metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -4631,8 +4699,8 @@ fn render_editable_number_field<T: NumberFieldType + Send + Sync>(
     field: SettingField<T>,
     file: SettingsUiFile,
     _metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -4642,8 +4710,8 @@ fn render_editable_number_field<T: NumberFieldType + Send + Sync>(
 fn render_number_field_with_default<T: NumberFieldType + Send + Sync>(
     field: SettingField<T>,
     file: SettingsUiFile,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     default: T,
     window: &mut Window,
     cx: &mut App,
@@ -4679,8 +4747,8 @@ fn render_dropdown<T>(
     field: SettingField<T>,
     file: SettingsUiFile,
     metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement
@@ -4697,7 +4765,12 @@ where
         .copied()
         .unwrap_or(variants()[0]);
 
-    EnumVariantDropdown::new("dropdown", current_value, variants(), labels(), {
+    let labels = labels()
+        .iter()
+        .map(|label| setting_value_label(label, should_do_titlecase))
+        .collect::<Rc<[_]>>();
+
+    EnumVariantDropdown::new("dropdown", current_value, variants(), labels, {
         move |value, window, cx| {
             if value == current_value {
                 return;
@@ -4713,7 +4786,6 @@ where
         this.aria_description(description)
     })
     .tab_index(0)
-    .title_case(should_do_titlecase)
     .into_any_element()
 }
 
@@ -4752,8 +4824,8 @@ fn render_font_picker(
     field: SettingField<settings::FontFamilyName>,
     file: SettingsUiFile,
     _metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -4807,8 +4879,8 @@ fn render_theme_picker(
     field: SettingField<settings::ThemeName>,
     file: SettingsUiFile,
     _metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -4862,8 +4934,8 @@ fn render_icon_theme_picker(
     field: SettingField<settings::IconThemeName>,
     file: SettingsUiFile,
     _metadata: Option<&SettingsFieldMetadata>,
-    title: &'static str,
-    description: &'static str,
+    title: SharedString,
+    description: SharedString,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -6078,5 +6150,177 @@ mod project_settings_update_tests {
             "Buffer should not contain the external modification value: {}",
             text
         );
+    }
+}
+
+#[cfg(test)]
+mod translation_tests {
+    use super::*;
+    use crate::components::translated_setting_value;
+
+    const UNTRANSLATED_SETTING_VALUES: &[&str] = &[
+        "Atom",
+        "Cursor",
+        "Emacs",
+        "English",
+        "JetBrains",
+        "Sublime Text",
+        "TextMate",
+        "VSCode",
+        "Wu",
+        "简体中文",
+    ];
+
+    static LANGUAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct SimplifiedChinese {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl SimplifiedChinese {
+        fn enable() -> Self {
+            let lock = LANGUAGE_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            i18n::set_language(i18n::Language::SimplifiedChinese);
+            Self { _lock: lock }
+        }
+    }
+
+    impl Drop for SimplifiedChinese {
+        fn drop(&mut self) {
+            i18n::set_language(i18n::Language::English);
+        }
+    }
+
+    fn settings_pages(cx: &mut gpui::TestAppContext) -> Vec<SettingsPage> {
+        cx.update(|cx| {
+            test::register_settings(cx);
+            AppState::set_global(AppState::test(cx), cx);
+            page_data::settings_data(cx)
+        })
+    }
+
+    fn collect_item_texts(items: &[SettingsPageItem], texts: &mut Vec<&'static str>) {
+        let push_setting = |item: &SettingItem, texts: &mut Vec<&'static str>| {
+            texts.push(item.title);
+            if !item.description.is_empty() {
+                texts.push(item.description);
+            }
+        };
+        for item in items {
+            match item {
+                SettingsPageItem::SectionHeader(header) => texts.push(header),
+                SettingsPageItem::SettingItem(item) => push_setting(item, texts),
+                SettingsPageItem::DynamicItem(dynamic_item) => {
+                    push_setting(&dynamic_item.discriminant, texts);
+                    for item in dynamic_item.fields.iter().flatten() {
+                        push_setting(item, texts);
+                    }
+                }
+                SettingsPageItem::ActionLink(action_link) => {
+                    texts.push(action_link.title);
+                    texts.extend(action_link.description);
+                    texts.push(action_link.button_text);
+                }
+                SettingsPageItem::SubPageLink(_) => {}
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn settings_ui_text_has_simplified_chinese(cx: &mut gpui::TestAppContext) {
+        let pages = settings_pages(cx);
+        let dropdown_labels = cx.update(|cx| {
+            init_renderers(cx);
+            cx.global::<SettingFieldRenderer>().dropdown_labels.clone()
+        });
+
+        let mut texts = Vec::new();
+        for page in &pages {
+            texts.push(page.title);
+            collect_item_texts(&page.items, &mut texts);
+        }
+        collect_item_texts(&page_data::language_settings_data(), &mut texts);
+        collect_item_texts(&page_data::non_editor_language_settings_data(), &mut texts);
+
+        let _simplified_chinese = SimplifiedChinese::enable();
+
+        let mut missing = texts
+            .into_iter()
+            .filter(|text| i18n::lookup(text).is_none())
+            .map(|text| format!("{text:?}"))
+            .collect::<Vec<_>>();
+        for (type_name, labels) in dropdown_labels {
+            for label in labels {
+                if !UNTRANSLATED_SETTING_VALUES.contains(label)
+                    && translated_setting_value(label).is_none()
+                {
+                    missing.push(format!("dropdown value {label:?} of {type_name}"));
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "missing Chinese text:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    #[gpui::test]
+    fn search_matches_chinese_and_english_text(cx: &mut gpui::TestAppContext) {
+        let pages = settings_pages(cx);
+        let _simplified_chinese = SimplifiedChinese::enable();
+        let search_index = SearchIndex::new(&pages);
+
+        let matching_titles = |query: &str| {
+            let query = query.to_lowercase();
+            let query_words = query.split_whitespace().collect::<Vec<_>>();
+            search_index
+                .documents
+                .iter()
+                .filter(|document| document.matches(&query_words))
+                .filter_map(|document| {
+                    let entry = &search_index.key_lut[document.id];
+                    match &pages[entry.page_index].items[entry.item_index] {
+                        SettingsPageItem::SettingItem(item) => Some(item.title),
+                        SettingsPageItem::DynamicItem(item) => Some(item.discriminant.title),
+                        _ => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert!(matching_titles("自动保存").contains(&"Auto Save Mode"));
+        assert!(matching_titles("auto save").contains(&"Auto Save Mode"));
+        assert!(matching_titles("字号").contains(&"Font Size"));
+
+        let english_index = {
+            i18n::set_language(i18n::Language::English);
+            let english_index = SearchIndex::new(&pages);
+            i18n::set_language(i18n::Language::SimplifiedChinese);
+            english_index
+        };
+        let matching_ids = |search_index: &SearchIndex, query: &str| {
+            search_index
+                .documents
+                .iter()
+                .filter(|document| document.matches(&[query]))
+                .map(|document| document.id)
+                .collect::<Vec<_>>()
+        };
+        for query in ["on", "son"] {
+            let english_matches = matching_ids(&english_index, query);
+            let extra_matches = matching_ids(&search_index, query)
+                .into_iter()
+                .filter(|id| !english_matches.contains(id))
+                .collect::<Vec<_>>();
+            assert!(
+                extra_matches.is_empty(),
+                "{query:?} matched more settings in Chinese mode: {extra_matches:?}"
+            );
+        }
     }
 }

@@ -1,51 +1,75 @@
+use i18n::{SharedString, t};
+
 pub fn single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
-    if n == 1 {
-        format!("{n} {one}")
+fn plural(count: usize, one: SharedString, many: SharedString) -> String {
+    if count == 1 {
+        one.to_string()
     } else {
-        format!("{n} {many}")
+        many.to_string()
     }
 }
 
-pub fn tool_chip_content(call: &crate::ToolCall) -> (&'static str, String) {
+fn search_detail(pattern: &str, path: Option<&str>) -> String {
+    match path {
+        Some(path) => t!("{pattern} in {path}", pattern = pattern, path = path).to_string(),
+        None => pattern.to_owned(),
+    }
+}
+
+pub fn tool_chip_content(call: &crate::ToolCall) -> (SharedString, String) {
     let (label, detail) = tool_chip_content_raw(call);
     (label, single_line(&detail))
 }
 
-fn tool_chip_content_raw(call: &crate::ToolCall) -> (&'static str, String) {
+fn tool_chip_content_raw(call: &crate::ToolCall) -> (SharedString, String) {
     use crate::ToolCall;
     match call {
-        ToolCall::Exec { command } => ("Run", command.clone()),
-        ToolCall::ReadFile { path } => ("Read", path.clone()),
-        ToolCall::WriteFile { path, .. } => ("Write", path.clone()),
-        ToolCall::EditFile { path, .. } => ("Edit", path.clone()),
-        ToolCall::ApplyPatch { path } => {
-            ("Patch", path.clone().unwrap_or_else(|| "workspace".into()))
-        }
-        ToolCall::Search { pattern, path } => (
-            "Search",
-            match path {
-                Some(path) => format!("{pattern} in {path}"),
-                None => pattern.clone(),
-            },
+        ToolCall::Exec { command } => (t!("Run"), command.clone()),
+        ToolCall::ReadFile { path } => (t!("Read"), path.clone()),
+        ToolCall::WriteFile { path, .. } => (t!("Write"), path.clone()),
+        ToolCall::EditFile { path, .. } => (t!("Edit"), path.clone()),
+        ToolCall::ApplyPatch { path } => (
+            t!("Patch"),
+            path.clone().unwrap_or_else(|| t!("workspace").to_string()),
         ),
-        ToolCall::Glob { pattern } => ("Glob", pattern.clone()),
-        ToolCall::WebFetch { url, .. } => ("Fetch", url.clone()),
-        ToolCall::WebSearch { query } => ("Web", query.clone()),
+        ToolCall::Search { pattern, path } => {
+            (t!("Search"), search_detail(pattern, path.as_deref()))
+        }
+        ToolCall::Glob { pattern } => (t!("Glob"), pattern.clone()),
+        ToolCall::WebFetch { url, .. } => (t!("Fetch"), url.clone()),
+        ToolCall::WebSearch { query } => (t!("Web"), query.clone()),
         ToolCall::Todo { items } => {
             let done = items.iter().filter(|i| i.done).count();
-            ("Todo", format!("{done}/{} done", items.len()))
+            (
+                t!("Todo"),
+                t!("{done}/{total} done", done = done, total = items.len()).to_string(),
+            )
         }
-        ToolCall::Mcp { server, tool, .. } => ("MCP", format!("{server} · {tool}")),
+        ToolCall::Mcp { server, tool, .. } => ("MCP".into(), format!("{server} · {tool}")),
         ToolCall::Unknown { name, .. } => match name.strip_prefix("Agent: ") {
-            Some(description) => ("Agent", description.to_owned()),
-            None if name == "Agent" => ("Agent", String::new()),
-            None => ("Tool", name.clone()),
+            Some(description) => (t!("Agent"), description.to_owned()),
+            None if name == "Agent" => (t!("Agent"), String::new()),
+            None => (t!("Tool"), tool_name_label(name)),
         },
     }
+}
+
+fn tool_name_label(name: &str) -> String {
+    match name {
+        "Generate image" => t!("Generate image"),
+        "Send agent message" => t!("Send agent message"),
+        "Wait for agents" => t!("Wait for agents"),
+        "Close agent" => t!("Close agent"),
+        "Resume agent" => t!("Resume agent"),
+        _ => {
+            return i18n::translate_filled(name, &[crate::codex::AGENT_CONTROL_TOOL])
+                .map_or_else(|| name.to_owned(), |label| label.to_string());
+        }
+    }
+    .to_string()
 }
 
 pub fn tool_group_summary(tools: &[(crate::ToolCall, bool)]) -> String {
@@ -86,31 +110,59 @@ pub fn tool_group_summary(tools: &[(crate::ToolCall, bool)]) -> String {
     }
     let mut segments: Vec<String> = Vec::new();
     if commands > 0 {
-        segments.push(format!("ran {}", plural(commands, "command", "commands")));
+        segments.push(plural(
+            commands,
+            t!("ran 1 command"),
+            t!("ran {count} commands", count = commands),
+        ));
     }
     if !edited.is_empty() {
-        segments.push(format!("edited {}", plural(edited.len(), "file", "files")));
+        segments.push(plural(
+            edited.len(),
+            t!("edited 1 file"),
+            t!("edited {count} files", count = edited.len()),
+        ));
     }
     if reads > 0 {
-        segments.push(format!("read {}", plural(reads, "file", "files")));
+        segments.push(plural(
+            reads,
+            t!("read 1 file"),
+            t!("read {count} files", count = reads),
+        ));
     }
     if searches > 0 {
-        segments.push(format!("searched {}", plural(searches, "time", "times")));
+        segments.push(plural(
+            searches,
+            t!("searched 1 time"),
+            t!("searched {count} times", count = searches),
+        ));
     }
     if fetches > 0 {
-        segments.push(format!("fetched {}", plural(fetches, "page", "pages")));
+        segments.push(plural(
+            fetches,
+            t!("fetched 1 page"),
+            t!("fetched {count} pages", count = fetches),
+        ));
     }
     if todos > 0 {
-        segments.push("updated todos".to_string());
+        segments.push(t!("updated todos").to_string());
     }
     if other > 0 {
-        segments.push(format!("called {}", plural(other, "tool", "tools")));
+        segments.push(plural(
+            other,
+            t!("called 1 tool"),
+            t!("called {count} tools", count = other),
+        ));
     }
     if segments.is_empty() {
-        segments.push(plural(tools.len(), "tool", "tools"));
+        segments.push(plural(
+            tools.len(),
+            t!("1 tool"),
+            t!("{count} tools", count = tools.len()),
+        ));
     }
     if failed > 0 {
-        segments.push(format!("{failed} failed"));
+        segments.push(t!("{count} failed", count = failed).to_string());
     }
     let mut summary = segments.join(" · ");
     if let Some(first) = summary.get(0..1) {
@@ -130,11 +182,10 @@ pub fn tool_call_text(call: &crate::ToolCall) -> String {
             None => path.clone(),
         },
         ToolCall::EditFile { path, .. } => path.clone(),
-        ToolCall::ApplyPatch { path } => path.clone().unwrap_or_else(|| "workspace".into()),
-        ToolCall::Search { pattern, path } => match path {
-            Some(path) => format!("{pattern} in {path}"),
-            None => pattern.clone(),
-        },
+        ToolCall::ApplyPatch { path } => {
+            path.clone().unwrap_or_else(|| t!("workspace").to_string())
+        }
+        ToolCall::Search { pattern, path } => search_detail(pattern, path.as_deref()),
         ToolCall::Glob { pattern } => pattern.clone(),
         ToolCall::WebFetch { url, prompt } => match prompt {
             Some(prompt) => format!("{url}\n{prompt}"),
@@ -212,18 +263,18 @@ pub fn clamp_reasoning(
     }
 }
 
-pub fn permission_label(mode: crate::PermissionMode, harness: crate::HarnessId) -> &'static str {
+pub fn permission_label(mode: crate::PermissionMode, harness: crate::HarnessId) -> SharedString {
     use crate::PermissionMode;
     match mode {
-        PermissionMode::Ask => "Ask",
-        PermissionMode::AcceptEdits => "Accept edits",
-        PermissionMode::Auto => "Auto",
-        PermissionMode::DontAsk => "Don't ask",
-        PermissionMode::ReadOnly => "Read only",
-        PermissionMode::ApproveForMe => "Approve for me",
+        PermissionMode::Ask => t!("Ask"),
+        PermissionMode::AcceptEdits => t!("Accept edits"),
+        PermissionMode::Auto => t!("Auto"),
+        PermissionMode::DontAsk => t!("Don't ask"),
+        PermissionMode::ReadOnly => t!("Read only"),
+        PermissionMode::ApproveForMe => t!("Approve for me"),
         PermissionMode::FullAccess => match harness {
-            crate::HarnessId::ClaudeCode => "Bypass",
-            crate::HarnessId::Codex | crate::HarnessId::Opencode => "Full access",
+            crate::HarnessId::ClaudeCode => t!("Bypass"),
+            crate::HarnessId::Codex | crate::HarnessId::Opencode => t!("Full access"),
         },
     }
 }
@@ -231,38 +282,40 @@ pub fn permission_label(mode: crate::PermissionMode, harness: crate::HarnessId) 
 pub fn permission_description(
     mode: crate::PermissionMode,
     harness: crate::HarnessId,
-) -> &'static str {
+) -> SharedString {
     use crate::{HarnessId, PermissionMode};
     match (mode, harness) {
-        (PermissionMode::Ask, _) => "Asks before commands and file edits",
-        (PermissionMode::AcceptEdits, _) => "Edits files freely, asks before commands",
+        (PermissionMode::Ask, _) => t!("Asks before commands and file edits"),
+        (PermissionMode::AcceptEdits, _) => t!("Edits files freely, asks before commands"),
         (PermissionMode::Auto, HarnessId::ClaudeCode) => {
-            "Approves routine actions, asks about risky ones"
+            t!("Approves routine actions, asks about risky ones")
         }
         (PermissionMode::Auto, HarnessId::Codex) => {
-            "Works freely in the project, asks to go beyond"
+            t!("Works freely in the project, asks to go beyond")
         }
-        (PermissionMode::Auto, HarnessId::Opencode) => "Follows your OpenCode permission settings",
-        (PermissionMode::DontAsk, _) => "Never asks, denies anything not already allowed",
-        (PermissionMode::ReadOnly, _) => "Reads files, asks before changing anything",
-        (PermissionMode::ApproveForMe, _) => "An automatic reviewer answers approval requests",
-        (PermissionMode::FullAccess, HarnessId::ClaudeCode) => "Skips every permission check",
-        (PermissionMode::FullAccess, HarnessId::Codex) => "No sandbox and no approval requests",
-        (PermissionMode::FullAccess, HarnessId::Opencode) => "Never asks for permission",
+        (PermissionMode::Auto, HarnessId::Opencode) => {
+            t!("Follows your OpenCode permission settings")
+        }
+        (PermissionMode::DontAsk, _) => t!("Never asks, denies anything not already allowed"),
+        (PermissionMode::ReadOnly, _) => t!("Reads files, asks before changing anything"),
+        (PermissionMode::ApproveForMe, _) => t!("An automatic reviewer answers approval requests"),
+        (PermissionMode::FullAccess, HarnessId::ClaudeCode) => t!("Skips every permission check"),
+        (PermissionMode::FullAccess, HarnessId::Codex) => t!("No sandbox and no approval requests"),
+        (PermissionMode::FullAccess, HarnessId::Opencode) => t!("Never asks for permission"),
     }
 }
 
-pub fn reasoning_label(level: crate::ReasoningLevel) -> &'static str {
+pub fn reasoning_label(level: crate::ReasoningLevel) -> SharedString {
     match level {
-        crate::ReasoningLevel::Minimal => "Minimal",
-        crate::ReasoningLevel::Low => "Low",
-        crate::ReasoningLevel::Medium => "Medium",
-        crate::ReasoningLevel::High => "High",
-        crate::ReasoningLevel::XHigh => "X-High",
-        crate::ReasoningLevel::Max => "Max",
-        crate::ReasoningLevel::Ultra => "Ultra",
-        crate::ReasoningLevel::Ultracode => "Ultracode",
-        crate::ReasoningLevel::Ultrathink => "Ultrathink",
+        crate::ReasoningLevel::Minimal => t!("Minimal"),
+        crate::ReasoningLevel::Low => t!("Low"),
+        crate::ReasoningLevel::Medium => t!("Medium"),
+        crate::ReasoningLevel::High => t!("High"),
+        crate::ReasoningLevel::XHigh => t!("X-High"),
+        crate::ReasoningLevel::Max => t!("Max"),
+        crate::ReasoningLevel::Ultra => "Ultra".into(),
+        crate::ReasoningLevel::Ultracode => "Ultracode".into(),
+        crate::ReasoningLevel::Ultrathink => "Ultrathink".into(),
     }
 }
 

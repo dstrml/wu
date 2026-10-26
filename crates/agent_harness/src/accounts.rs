@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD as BASE64_URL};
+use i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -34,8 +35,9 @@ pub struct Account {
     pub active: bool,
 }
 
-const OPENCODE_NO_ACCOUNTS: &str =
-    "OpenCode manages its own provider logins (`opencode auth login`); Wu can't switch them";
+const OPENCODE_NO_ACCOUNTS: &str = i18n::n!(
+    "OpenCode manages its own provider logins (`opencode auth login`); Wu can't switch them"
+);
 
 pub async fn list(harness: HarnessId, data_dir: &Path) -> Result<Vec<Account>, String> {
     if harness == HarnessId::Opencode {
@@ -46,7 +48,7 @@ pub async fn list(harness: HarnessId, data_dir: &Path) -> Result<Vec<Account>, S
 
 pub async fn activate(harness: HarnessId, account_id: &str, data_dir: &Path) -> Result<(), String> {
     if harness == HarnessId::Opencode {
-        return Err(OPENCODE_NO_ACCOUNTS.into());
+        return Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string());
     }
     Stores::detect(data_dir)?
         .activate(harness, account_id)
@@ -59,7 +61,7 @@ pub async fn usage_request(
     data_dir: &Path,
 ) -> Result<UsageRequest, String> {
     if harness == HarnessId::Opencode {
-        return Err(crate::usage::OPENCODE_NO_USAGE.into());
+        return Err(i18n::translate(crate::usage::OPENCODE_NO_USAGE).to_string());
     }
     Stores::detect(data_dir)?
         .usage_request(harness, account_id)
@@ -68,7 +70,7 @@ pub async fn usage_request(
 
 pub async fn remove(harness: HarnessId, account_id: &str, data_dir: &Path) -> Result<(), String> {
     if harness == HarnessId::Opencode {
-        return Err(OPENCODE_NO_ACCOUNTS.into());
+        return Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string());
     }
     Stores::detect(data_dir)?.remove(harness, account_id).await
 }
@@ -110,9 +112,11 @@ impl Keychain for SystemKeychain {
         });
         match tokio::time::timeout(UNANSWERED_PROMPT_TIMEOUT, write).await {
             Ok(Ok(Ok(()))) => Ok(()),
-            Ok(Ok(Err(error))) => Err(format!("Keychain write failed: {error}")),
-            Ok(Err(error)) => Err(format!("Keychain write failed: {error}")),
-            Err(_) => Err("The macOS Keychain didn't answer in time".into()),
+            Ok(Ok(Err(error))) => {
+                Err(t!("Keychain write failed: {error}", error = error).to_string())
+            }
+            Ok(Err(error)) => Err(t!("Keychain write failed: {error}", error = error).to_string()),
+            Err(_) => Err(t!("The macOS Keychain didn't answer in time").to_string()),
         }
     }
 }
@@ -174,7 +178,7 @@ struct Stores {
 impl Stores {
     fn detect(data_dir: &Path) -> Result<Self, String> {
         let home = crate::executable::home_dir()
-            .ok_or_else(|| "Couldn't find your home directory".to_string())?;
+            .ok_or_else(|| t!("Couldn't find your home directory").to_string())?;
         let env_dir = |name: &str| {
             std::env::var_os(name)
                 .filter(|value| !value.is_empty())
@@ -247,33 +251,33 @@ impl Stores {
                 credentials: Err(reason),
                 ..
             }) => {
-                return Err(format!(
-                    "Couldn't back up the current login before switching: {reason}"
-                ));
+                return Err(t!(
+                    "Couldn't back up the current login before switching: {reason}",
+                    reason = reason
+                )
+                .to_string());
             }
             None if harness == HarnessId::Codex && self.codex_auth_file().exists() => {
                 return Err(
-                    "Codex's auth.json holds a login that couldn't be read, so it can't be backed \
-                     up. Not switching."
-                        .into(),
+                    t!("Codex's auth.json holds a login that couldn't be read, so it can't be backed up. Not switching.")
+                        .to_string(),
                 );
             }
             None if harness == HarnessId::ClaudeCode && self.claude_login_present().await => {
                 return Err(
-                    "Claude Code is signed in, but ~/.claude.json doesn't say which account it is, \
-                     so the login can't be backed up. Not switching."
-                        .into(),
+                    t!("Claude Code is signed in, but ~/.claude.json doesn't say which account it is, so the login can't be backed up. Not switching.")
+                        .to_string(),
                 );
             }
             _ => {}
         }
         let slot = read_slot(&slot_file).ok_or_else(|| {
-            "That saved login no longer exists. Refresh and try again.".to_string()
+            t!("That saved login no longer exists. Refresh and try again.").to_string()
         })?;
         match harness {
             HarnessId::ClaudeCode => self.activate_claude(&slot).await,
             HarnessId::Codex => self.activate_codex(&slot),
-            HarnessId::Opencode => Err(OPENCODE_NO_ACCOUNTS.into()),
+            HarnessId::Opencode => Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string()),
         }
     }
 
@@ -282,15 +286,14 @@ impl Stores {
         let config = read_json(config_file);
         if config.is_none() && config_file.exists() {
             return Err(
-                "~/.claude.json exists but couldn't be parsed, so it was left alone. Fix or \
-                 remove the file and try again."
-                    .into(),
+                t!("~/.claude.json exists but couldn't be parsed, so it was left alone. Fix or remove the file and try again.")
+                    .to_string(),
             );
         }
         let mut merged = config.unwrap_or_else(|| json!({}));
         let map = merged
             .as_object_mut()
-            .ok_or_else(|| "~/.claude.json is not a JSON object. Not switching.".to_string())?;
+            .ok_or_else(|| t!("~/.claude.json is not a JSON object. Not switching.").to_string())?;
         let (oauth_account, user_id) = match &slot.claude_config {
             Some(config) => (
                 config.get("oauthAccount").cloned(),
@@ -335,8 +338,9 @@ impl Stores {
 
     fn activate_codex(&self, slot: &Slot) -> Result<(), String> {
         create_dir_all(&self.codex_home)?;
-        let json = serde_json::to_string_pretty(&slot.credentials)
-            .map_err(|error| format!("Couldn't serialize the Codex login: {error}"))?;
+        let json = serde_json::to_string_pretty(&slot.credentials).map_err(|error| {
+            t!("Couldn't serialize the Codex login: {error}", error = error).to_string()
+        })?;
         write_file_atomic(&self.codex_auth_file(), json.as_bytes(), true)
     }
 
@@ -360,12 +364,14 @@ impl Stores {
         {
             return Err(reason);
         }
-        let slot =
-            read_slot(&slot_file).ok_or_else(|| "That saved login no longer exists".to_string())?;
+        let slot = read_slot(&slot_file)
+            .ok_or_else(|| t!("That saved login no longer exists").to_string())?;
         match harness {
             HarnessId::ClaudeCode => claude_usage_request(&slot.credentials),
             HarnessId::Codex => codex_usage_request(&slot.credentials),
-            HarnessId::Opencode => Err(crate::usage::OPENCODE_NO_USAGE.into()),
+            HarnessId::Opencode => {
+                Err(i18n::translate(crate::usage::OPENCODE_NO_USAGE).to_string())
+            }
         }
     }
 
@@ -374,11 +380,10 @@ impl Stores {
         let _operation = OPERATIONS.lock().await;
         let live = self.refresh_live(harness).await?;
         if live.is_some_and(|live| slot_id_for(harness, &live.account_key) == account_id) {
-            return Err(
-                "That account is signed in right now. Switch to another account before \
-                 removing it."
-                    .into(),
-            );
+            return Err(t!(
+                "That account is signed in right now. Switch to another account before removing it."
+            )
+            .to_string());
         }
         remove_if_exists(&slot_file)
     }
@@ -480,7 +485,7 @@ impl Stores {
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
         if !is_slot_id {
-            return Err("Unknown account".into());
+            return Err(t!("Unknown account").to_string());
         }
         Ok(self.slots_dir(harness).join(format!("{account_id}.json")))
     }
@@ -490,7 +495,14 @@ impl Stores {
         let entries = match std::fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(format!("Couldn't read {}: {error}", dir.display())),
+            Err(error) => {
+                return Err(t!(
+                    "Couldn't read {path}: {error}",
+                    path = dir.display(),
+                    error = error
+                )
+                .to_string());
+            }
         };
         let mut slots: Vec<Slot> = entries
             .flatten()
@@ -537,8 +549,9 @@ impl Stores {
             created_at: Some(created_at),
             ..slot.clone()
         };
-        let json = serde_json::to_string_pretty(&full)
-            .map_err(|error| format!("Couldn't serialize the saved login: {error}"))?;
+        let json = serde_json::to_string_pretty(&full).map_err(|error| {
+            t!("Couldn't serialize the saved login: {error}", error = error).to_string()
+        })?;
         write_file_atomic(&file, json.as_bytes(), true)
     }
 }
@@ -668,12 +681,25 @@ fn compose_claude_credentials(target: &Value, live: Option<&Value>) -> Value {
 }
 
 fn create_dir_all(dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir)
-        .map_err(|error| format!("Couldn't create {}: {error}", dir.display()))
+    std::fs::create_dir_all(dir).map_err(|error| {
+        t!(
+            "Couldn't create {path}: {error}",
+            path = dir.display(),
+            error = error
+        )
+        .to_string()
+    })
 }
 
 fn private_dir(dir: &Path) -> Result<(), String> {
-    create_private_dir(dir).map_err(|error| format!("Couldn't create {}: {error}", dir.display()))
+    create_private_dir(dir).map_err(|error| {
+        t!(
+            "Couldn't create {path}: {error}",
+            path = dir.display(),
+            error = error
+        )
+        .to_string()
+    })
 }
 
 #[cfg(unix)]
@@ -697,9 +723,12 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 
 fn remove_if_exists(file: &Path) -> Result<(), String> {
     match std::fs::remove_file(file) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            Err(format!("Couldn't remove {}: {error}", file.display()))
-        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(t!(
+            "Couldn't remove {path}: {error}",
+            path = file.display(),
+            error = error
+        )
+        .to_string()),
         _ => Ok(()),
     }
 }
@@ -722,7 +751,14 @@ fn write_file_atomic(file: &Path, bytes: &[u8], secret: bool) -> Result<(), Stri
     {
         log::warn!("couldn't remove {}: {error}", temp.display());
     }
-    result.map_err(|error| format!("Couldn't write {}: {error}", file.display()))
+    result.map_err(|error| {
+        t!(
+            "Couldn't write {path}: {error}",
+            path = file.display(),
+            error = error
+        )
+        .to_string()
+    })
 }
 
 #[cfg_attr(not(unix), allow(unused_variables))]

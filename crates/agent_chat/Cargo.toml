@@ -29,6 +29,7 @@ fuzzy_nucleo.workspace = true
 gpui.workspace = true
 gpui_tokio.workspace = true
 http_client.workspace = true
+i18n.workspace = true
 image.workspace = true
 language.workspace = true
 log.workspace = true

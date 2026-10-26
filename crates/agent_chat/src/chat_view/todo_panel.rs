@@ -11,6 +11,7 @@ use gpui::{
     AnyElement, App, Context, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled,
     div, px,
 };
+use i18n::t;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -206,7 +207,7 @@ impl ChatView {
         let success = cx.theme().status().success;
         let hover = colors.element_hover;
         let headline: Option<(SharedString, Hsla)> = if summary.finished() {
-            Some(("All done".into(), faint))
+            Some((t!("All done"), faint))
         } else {
             summary
                 .headline()
@@ -238,7 +239,7 @@ impl ChatView {
                         div()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(colors.text)
-                            .child("Todo"),
+                            .child(t!("Todo")),
                     )
                     .child(
                         div()
@@ -339,9 +340,9 @@ impl ChatView {
                                 .into_any_element()
                         }
                         Row::Fold { side, count, open } => {
-                            let noun = match side {
-                                Fold::Earlier => "earlier",
-                                Fold::Later => "later",
+                            let label = match side {
+                                Fold::Earlier => t!("{count} earlier", count = count),
+                                Fold::Later => t!("{count} later", count = count),
                             };
                             let glyph = match (side, open) {
                                 (Fold::Earlier, false) | (Fold::Later, true) => {
@@ -368,12 +369,7 @@ impl ChatView {
                                         .justify_center()
                                         .child(icon(glyph, px(12.), faint)),
                                 )
-                                .child(
-                                    div()
-                                        .text_size(px(11.5))
-                                        .text_color(faint)
-                                        .child(format!("{count} {noun}")),
-                                )
+                                .child(div().text_size(px(11.5)).text_color(faint).child(label))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     match side {
                                         Fold::Earlier => this.todo_panel.show_earlier = !open,

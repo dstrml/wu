@@ -171,7 +171,7 @@ unsafe extern "system" fn wnd_proc(
                 &HSTRING::from(font_name),
             );
             let temp = SelectObject(hdc, font.into());
-            let string = HSTRING::from("Updating Wu...");
+            let string = HSTRING::from(i18n::t!("Updating Wu...").as_str());
             return_if_failed!(TextOutW(hdc, 20, 15, &string).ok());
             return_if_failed!(DeleteObject(temp).ok());
 
@@ -190,7 +190,7 @@ unsafe extern "system" fn wnd_proc(
                     && let Err(e) = result
                 {
                     log::error!("Failed to update Wu: {:?}", e);
-                    show_error(format!("Error: {:?}", e));
+                    show_error(i18n::t!("Error: {error}", error = format!("{e:?}")).to_string());
                 }
             });
             unsafe { PostQuitMessage(0) };

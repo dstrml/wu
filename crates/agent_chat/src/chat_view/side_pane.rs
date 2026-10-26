@@ -6,6 +6,7 @@ use gpui::{
     Focusable, IntoElement, ParentElement, SharedString, Styled, Task, Window, canvas,
     ease_out_quint, px,
 };
+use i18n::t;
 use std::time::Duration;
 use theme::ActiveTheme as _;
 use ui::{Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip, prelude::*};
@@ -284,7 +285,7 @@ impl ChatView {
             .child(
                 IconButton::new("agent-side-pane-open-in-tab", IconName::Maximize)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Open in Tab"))
+                    .tooltip(Tooltip::text(t!("Open in Tab")))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.move_side_pane_to_tab(window, cx)),
                     ),
@@ -292,7 +293,7 @@ impl ChatView {
             .child(
                 IconButton::new("agent-side-pane-close", IconName::Close)
                     .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Close"))
+                    .tooltip(Tooltip::text(t!("Close")))
                     .on_click(cx.listener(|this, _, window, cx| this.close_side_pane(window, cx))),
             );
         let pane = div()

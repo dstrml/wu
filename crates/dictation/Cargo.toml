@@ -20,6 +20,7 @@ async_zip.workspace = true
 cpal.workspace = true
 futures.workspace = true
 http_client.workspace = true
+i18n.workspace = true
 log.workspace = true
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "api-28"] }
 parakeet-rs = { version = "=0.3.8", default-features = false, features = ["cpu", "load-dynamic", "api-28"] }

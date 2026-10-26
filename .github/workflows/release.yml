@@ -61,6 +61,9 @@ jobs:
           APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
           APPLE_NOTARIZATION_TEAM: ${{ secrets.APPLE_NOTARIZATION_TEAM }}
         run: script/bundle-mac ${{ matrix.arch }}-apple-darwin
+      - name: Check that every string and command has its Chinese text
+        if: matrix.arch == 'aarch64'
+        run: script/check-translations --binary target/aarch64-apple-darwin/release/wu
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}

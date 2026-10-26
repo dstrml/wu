@@ -1,0 +1,22 @@
+{
+  "image_viewer::FitToView": {
+    "name": "适应视图",
+    "description": "将图片缩放到适合视图的大小。"
+  },
+  "image_viewer::ResetZoom": {
+    "name": "重置缩放",
+    "description": "将缩放重置为 100%。"
+  },
+  "image_viewer::ZoomIn": {
+    "name": "放大",
+    "description": "放大图片。"
+  },
+  "image_viewer::ZoomOut": {
+    "name": "缩小",
+    "description": "缩小图片。"
+  },
+  "image_viewer::ZoomToActualSize": {
+    "name": "缩放到实际大小",
+    "description": "缩放到实际大小（100%）。"
+  }
+}

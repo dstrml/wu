@@ -1,0 +1,14 @@
+{
+  "file_finder::OpenWithoutDismiss": {
+    "name": "打开但不关闭",
+    "description": "在编辑器中打开所选文件，但不关闭文件查找器，以便接着打开更多文件。"
+  },
+  "file_finder::SelectPrevious": {
+    "name": "选择上一项",
+    "description": "选择文件查找器中的上一项。"
+  },
+  "file_finder::Toggle": {
+    "name": "切换文件查找器",
+    "description": "切换文件查找器界面。"
+  }
+}

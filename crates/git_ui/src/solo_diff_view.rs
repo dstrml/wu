@@ -15,6 +15,7 @@ use gpui::{
     Action, App, AppContext as _, Context, Empty, Entity, EventEmitter, FocusHandle, Focusable,
     HighlightStyle, IntoElement, Render, Subscription, Task, WeakEntity, Window,
 };
+use i18n::t;
 use language::{Anchor, Buffer, HighlightedText, OffsetRangeExt as _, Point};
 use multi_buffer::{MultiBuffer, PathKey, excerpt_context_lines};
 use project::{
@@ -352,9 +353,9 @@ impl SoloDiffView {
                 .await
                 .with_context(|| {
                     if stage {
-                        "failed to stage file"
+                        t!("failed to stage file")
                     } else {
-                        "failed to unstage file"
+                        t!("failed to unstage file")
                     }
                 })
         });
@@ -616,9 +617,9 @@ impl Render for SoloDiffStyleToolbar {
             GitPanelSettings::get_global(cx).status_style != StatusStyle::LabelColor;
 
         let (expand_icon, expand_tooltip) = if showing_full_file {
-            (IconName::ChevronDownUp, "Show Changes Only")
+            (IconName::ChevronDownUp, t!("Show Changes Only"))
         } else {
-            (IconName::ChevronUpDown, "Show Full File")
+            (IconName::ChevronUpDown, t!("Show Full File"))
         };
 
         h_flex()

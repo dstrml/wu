@@ -6,6 +6,7 @@ use fs::RemoveOptions;
 use futures::{StreamExt, TryStreamExt};
 use gpui::http_client::AsyncBody;
 use gpui::{AsyncApp, SharedString};
+use i18n::t;
 use json_dotpath::DotPaths;
 use language::{LanguageName, Toolchain};
 use paths::debug_adapters_dir;
@@ -137,7 +138,9 @@ impl PythonDebugAdapter {
             .status
             .success();
         if !installation_succeeded {
-            bail!("debugpy installation failed (could not fetch Debugpy's wheel)");
+            bail!(t!(
+                "debugpy installation failed (could not fetch Debugpy's wheel)"
+            ));
         }
 
         let wheel_path = std::fs::read_dir(&download_dir)?
@@ -261,11 +264,11 @@ impl PythonDebugAdapter {
                     toolchain.path.to_string()
                 } else {
                     Self::system_python_name(delegate).await.ok_or_else(|| {
-                        let mut message = "Could not find a Python installation".to_owned();
-                        if cfg!(windows){
-                            message.push_str(". Install Python from the Microsoft Store, or manually from https://www.python.org/downloads/windows.")
+                        if cfg!(windows) {
+                            t!("Could not find a Python installation. Install Python from the Microsoft Store, or manually from https://www.python.org/downloads/windows.").to_string()
+                        } else {
+                            t!("Could not find a Python installation").to_string()
                         }
-                        message
                     })?
                 };
 
@@ -285,7 +288,7 @@ impl PythonDebugAdapter {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let debug_adapter_path = debug_adapter_path.display();
-                    return Err(format!("Failed to create base virtual environment with {base_python} in:\n{debug_adapter_path}\nstderr:\n{stderr}\nstdout:\n{stdout}\n"));
+                    return Err(t!("Failed to create base virtual environment with {base_python} in:\n{debug_adapter_path}\nstderr:\n{stderr}\nstdout:\n{stdout}\n", base_python = base_python, debug_adapter_path = debug_adapter_path, stderr = stderr, stdout = stdout).to_string());
                 }
 
                 const PYTHON_PATH: &str = if cfg!(target_os = "windows") {
@@ -374,9 +377,9 @@ impl PythonDebugAdapter {
             .is_some_and(|val| val.as_str().is_some_and(|request| request == "attach"))
         {
             if tcp_connection.host.is_some() && config_host.is_some() {
-                bail!("Cannot have two different hosts in debug configuration")
+                bail!(t!("Cannot have two different hosts in debug configuration"))
             } else if tcp_connection.port.is_some() && config_port.is_some() {
-                bail!("Cannot have two different ports in debug configuration")
+                bail!(t!("Cannot have two different ports in debug configuration"))
             }
 
             if let Some(hostname) = config_host {
@@ -396,7 +399,7 @@ impl PythonDebugAdapter {
             Self::system_python_name(delegate).await
         };
 
-        let python_command = python_path.context("failed to find binary path for Python")?;
+        let python_command = python_path.context(t!("failed to find binary path for Python"))?;
         log::debug!("Using Python executable: {}", python_command);
 
         let arguments = Self::generate_debugpy_arguments(

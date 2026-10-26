@@ -5,6 +5,7 @@ mod resample;
 use anyhow::{Context as _, Result, anyhow, bail};
 use capture::{Capture, CapturedAudio, Recording};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use i18n::t;
 use model::Recognizer;
 use std::{
     path::{Path, PathBuf},
@@ -175,7 +176,7 @@ where
         }
         let audio = capture
             .join()
-            .map_err(|_| anyhow!("The microphone thread failed"))?;
+            .map_err(|_| anyhow!(t!("The microphone thread failed")))?;
         let transcribe = transcribe?;
         if job.is_cancelled() {
             return Ok(None);
@@ -206,7 +207,9 @@ impl Admission {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
-            bail!("Dictation is still finishing. Wait a moment, then try again.");
+            bail!(t!(
+                "Dictation is still finishing. Wait a moment, then try again."
+            ));
         }
         Ok(Self)
     }
@@ -234,16 +237,16 @@ fn submit_to_worker(worker_job: WorkerJob) -> Result<()> {
             std::thread::Builder::new()
                 .name("dictation-worker".into())
                 .spawn(move || run_worker(receiver))
-                .context("Could not start the dictation worker")?;
+                .context(t!("Could not start the dictation worker"))?;
             worker.insert(sender).clone()
         }
     };
     match sender.try_send(worker_job) {
         Ok(()) => Ok(()),
-        Err(TrySendError::Full(_)) => bail!("Dictation is still finishing"),
+        Err(TrySendError::Full(_)) => bail!(t!("Dictation is still finishing")),
         Err(TrySendError::Disconnected(_)) => {
             worker.take();
-            bail!("The dictation worker stopped. Try again.")
+            bail!(t!("The dictation worker stopped. Try again."))
         }
     }
 }
@@ -277,7 +280,7 @@ fn run_worker(jobs: Receiver<WorkerJob>) {
                     }
                     let (_, recognizer) = cached_model
                         .as_mut()
-                        .context("The speech model is not loaded")?;
+                        .context(t!("The speech model is not loaded"))?;
                     Ok(move |audio: CapturedAudio| {
                         recognizer.transcribe(audio.samples, audio.sample_rate)
                     })
@@ -286,7 +289,7 @@ fn run_worker(jobs: Receiver<WorkerJob>) {
         }))
         .unwrap_or_else(|_| {
             cached_model = None;
-            Err(anyhow!("Dictation stopped unexpectedly"))
+            Err(anyhow!(t!("Dictation stopped unexpectedly")))
         });
         match result {
             Ok(Some(text)) => job.emit(DictationEvent::Transcribed(text)),

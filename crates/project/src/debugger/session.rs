@@ -41,6 +41,7 @@ use gpui::{
     Task, TaskExt, WeakEntity,
 };
 use http_client::HttpClient;
+use i18n::t;
 use node_runtime::NodeRuntime;
 use remote::RemoteClient;
 use serde::{Deserialize, Serialize};
@@ -481,15 +482,19 @@ impl RunningMode {
                             .strip_prefix(worktree.read(cx).abs_path())
                             .unwrap_or(failed_path)
                             .display();
-                        let message = format!(
-                            "Failed to set breakpoints for {failed_path}{}",
-                            match errors_by_path.len() {
-                                0 => unreachable!(),
-                                1 => "".into(),
-                                2 => " and 1 other path".into(),
-                                n => format!(" and {} other paths", n - 1),
-                            }
-                        );
+                        let message = match errors_by_path.len() {
+                            1 => t!("Failed to set breakpoints for {path}", path = failed_path),
+                            2 => t!(
+                                "Failed to set breakpoints for {path} and 1 other path",
+                                path = failed_path
+                            ),
+                            count => t!(
+                                "Failed to set breakpoints for {path} and {count} other paths",
+                                path = failed_path,
+                                count = count - 1
+                            ),
+                        }
+                        .to_string();
                         cx.emit(super::dap_store::DapStoreEvent::Notification(message));
                     }
                 })?;

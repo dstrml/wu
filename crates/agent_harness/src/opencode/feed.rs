@@ -233,7 +233,7 @@ pub(super) fn external_sessions(list: &Value) -> Vec<ExternalSession> {
         .filter_map(|session| {
             let id = session.get("id")?.as_str()?.to_owned();
             let title = generated_title(session)
-                .unwrap_or("Untitled chat")
+                .unwrap_or(super::UNTITLED_CHAT)
                 .to_owned();
             let updated_at = session
                 .pointer("/time/updated")
@@ -448,7 +448,7 @@ pub(super) fn map_questions(properties: &Value) -> Vec<UserInputQuestion> {
                 header: question
                     .get("header")
                     .and_then(Value::as_str)
-                    .unwrap_or("Question")
+                    .unwrap_or(crate::claude::QUESTION_HEADER)
                     .to_owned(),
                 question: question.get("question").and_then(Value::as_str)?.to_owned(),
                 options: question

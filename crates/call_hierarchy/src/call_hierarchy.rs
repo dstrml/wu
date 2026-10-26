@@ -14,6 +14,7 @@ use gpui::{
     FocusHandle, Focusable, HighlightStyle, ParentElement, Point, Render, Styled, StyledText,
     Subscription, Task, TextRun, WeakEntity, Window,
 };
+use i18n::t;
 use language::{
     Buffer, CodeLabel, File as _, Language, Location, Rope, ToOffset, ToPoint, lsp_to_symbol_kind,
 };
@@ -542,13 +543,17 @@ impl PickerDelegate for CallHierarchyDelegate {
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
         match (&self.root_item, self.mode) {
             (Some(root), CallHierarchyMode::Incoming) => {
-                Arc::from(format!("Search calls to `{}`...", root.name))
+                Arc::from(t!("Search calls to `{name}`...", name = root.name).as_ref())
             }
             (Some(root), CallHierarchyMode::Outgoing) => {
-                Arc::from(format!("Search calls from `{}`...", root.name))
+                Arc::from(t!("Search calls from `{name}`...", name = root.name).as_ref())
             }
-            (None, CallHierarchyMode::Incoming) => Arc::from("Search incoming calls..."),
-            (None, CallHierarchyMode::Outgoing) => Arc::from("Search outgoing calls..."),
+            (None, CallHierarchyMode::Incoming) => {
+                Arc::from(t!("Search incoming calls...").as_ref())
+            }
+            (None, CallHierarchyMode::Outgoing) => {
+                Arc::from(t!("Search outgoing calls...").as_ref())
+            }
         }
     }
 
@@ -561,20 +566,20 @@ impl PickerDelegate for CallHierarchyDelegate {
     }
 
     fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
-        Some(SharedString::new_static(match self.state {
-            FetchState::Loading => "Fetching call hierarchy…",
-            FetchState::NoSymbol => "No callable symbol under the cursor",
+        Some(match self.state {
+            FetchState::Loading => t!("Fetching call hierarchy…"),
+            FetchState::NoSymbol => t!("No callable symbol under the cursor"),
             FetchState::Loaded => {
                 if self.calls.is_empty() {
                     match self.mode {
-                        CallHierarchyMode::Incoming => "No incoming calls found",
-                        CallHierarchyMode::Outgoing => "No outgoing calls found",
+                        CallHierarchyMode::Incoming => t!("No incoming calls found"),
+                        CallHierarchyMode::Outgoing => t!("No outgoing calls found"),
                     }
                 } else {
-                    "No matches"
+                    t!("No matches")
                 }
             }
-        }))
+        })
     }
 
     fn set_selected_index(
@@ -697,8 +702,8 @@ impl PickerDelegate for CallHierarchyDelegate {
         }
         let focus_handle = self.focus_handle.clone();
         let expand_label = match self.mode {
-            CallHierarchyMode::Incoming => "Show Callers",
-            CallHierarchyMode::Outgoing => "Show Callees",
+            CallHierarchyMode::Incoming => t!("Show Callers"),
+            CallHierarchyMode::Outgoing => t!("Show Callees"),
         };
         Some(
             h_flex()
@@ -711,7 +716,7 @@ impl PickerDelegate for CallHierarchyDelegate {
                 .border_color(cx.theme().colors().border_variant)
                 .when(!self.root_stack.is_empty(), |this| {
                     this.child(
-                        Button::new("collapse-call", "Back")
+                        Button::new("collapse-call", t!("Back"))
                             .key_binding(
                                 KeyBinding::for_action_in(&menu::SelectParent, &focus_handle, cx)
                                     .map(|key_binding| key_binding.size(rems_from_px(12_f32))),
@@ -734,7 +739,7 @@ impl PickerDelegate for CallHierarchyDelegate {
                     )
                 })
                 .child(
-                    Button::new("toggle-direction", "Switch Direction")
+                    Button::new("toggle-direction", t!("Switch Direction"))
                         .key_binding(
                             KeyBinding::for_action_in(&ToggleDirection, &focus_handle, cx)
                                 .map(|key_binding| key_binding.size(rems_from_px(12_f32))),
@@ -1100,11 +1105,16 @@ fn compute_call_display(call: &Call, cx: &App) -> CallDisplay {
     let line_number = call.target.range.start.to_point(&buffer.snapshot()).row + 1;
     let path = call_display_path(buffer, cx).map(|path| {
         let path = path.to_string_lossy();
-        SharedString::from(if call.site_count > 1 {
-            format!("{path}:{line_number} ({} calls)", call.site_count)
+        if call.site_count > 1 {
+            t!(
+                "{path}:{line} ({count} calls)",
+                path = path,
+                line = line_number,
+                count = call.site_count
+            )
         } else {
-            format!("{path}:{line_number}")
-        })
+            SharedString::from(format!("{path}:{line_number}"))
+        }
     });
 
     let detail = extract_call_detail(call).map(SharedString::from);

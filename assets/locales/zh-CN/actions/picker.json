@@ -1,0 +1,38 @@
+{
+  "picker::ConfirmCompletion": {
+    "description": "确认选择器中所选的补全项。",
+    "name": "确认补全"
+  },
+  "picker::ConfirmInput": {
+    "description": "ConfirmInput 是另一种编辑器操作：它不会选择选择器中的当前条目，而是直接按字面使用选择器输入框中的文字执行某种操作。",
+    "name": "确认输入"
+  },
+  "picker::MultiSelectNext": {
+    "description": "在多选中切换当前项并前进到下一项；如果尚未开启多选模式，则会开启。",
+    "name": "多选并选择下一项"
+  },
+  "picker::SetPreviewBelow": {
+    "description": "在结果下方显示预览。",
+    "name": "在下方显示预览"
+  },
+  "picker::SetPreviewHidden": {
+    "description": "隐藏预览。",
+    "name": "隐藏预览"
+  },
+  "picker::SetPreviewRight": {
+    "description": "在结果右侧显示预览。",
+    "name": "在右侧显示预览"
+  },
+  "picker::ToggleActionsMenu": {
+    "description": "打开底部的操作菜单。",
+    "name": "切换操作菜单"
+  },
+  "picker::ToggleMultiSelect": {
+    "description": "开启或关闭多选模式。在多选模式下，点击项会将其加入选区，而不是打开它。",
+    "name": "切换多选"
+  },
+  "picker::TogglePreview": {
+    "description": "显示或隐藏预览。",
+    "name": "切换预览"
+  }
+}

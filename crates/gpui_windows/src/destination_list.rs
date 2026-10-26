@@ -47,8 +47,8 @@ impl DockMenuItem {
         match item {
             MenuItem::Action { name, action, .. } => Ok(Self {
                 name: name.clone(),
-                description: if name == "New Window" {
-                    "Opens a new window".into()
+                description: if action.name() == "workspace::NewWindow" {
+                    i18n::t!("Opens a new window")
                 } else {
                     name
                 },

@@ -1,0 +1,15 @@
+{
+  "Auto-updates disabled for non-bundled app.": "非打包版本的应用已停用自动更新。",
+  "Could not auto-update because the required rsync utility was not found.": "找不到所需的 rsync 工具，无法自动更新。",
+  "Could not check for updates": "无法检查更新",
+  "Downloading remote server": "正在下载远程服务器",
+  "Fetching remote server release": "正在获取远程服务器版本",
+  "Install it with: sudo apt install rsync": "安装命令：sudo apt install rsync",
+  "Install it with: sudo dnf install rsync": "安装命令：sudo dnf install rsync",
+  "Install it with: sudo pacman -S rsync": "安装命令：sudo pacman -S rsync",
+  "Install pkgs.rsync from nixpkgs": "请从 nixpkgs 安装 pkgs.rsync",
+  "OK": "确定",
+  "Please install rsync using your package manager": "请使用包管理器安装 rsync",
+  "Wu was installed via a package manager.": "Wu 是通过包管理器安装的。",
+  "rsync is required for auto-updates but is not installed. {install_hint}": "自动更新需要 rsync，但尚未安装。{install_hint}"
+}

@@ -13,6 +13,7 @@ use gpui::{
     FocusHandle, Focusable, HighlightStyle, StyledText, Subscription, Task, TextStyle, WeakEntity,
     prelude::*,
 };
+use i18n::t;
 use language::{Buffer, HighlightId, LanguageAwareStyling};
 use picker::{Picker, PickerDelegate};
 use project::{Location, Project, ProjectPath};
@@ -179,7 +180,7 @@ fn show_no_results_toast(
             workspace.show_toast(
                 Toast::new(
                     NotificationId::unique::<NoLspResults>(),
-                    kind.empty_message(),
+                    kind.empty_message().to_string(),
                 )
                 .autohide(),
                 cx,
@@ -198,25 +199,25 @@ pub enum LspPickerKind {
 }
 
 impl LspPickerKind {
-    fn placeholder(self) -> &'static str {
+    fn placeholder(self) -> SharedString {
         match self {
-            LspPickerKind::References => "Filter references…",
-            LspPickerKind::Definition => "Filter definitions…",
-            LspPickerKind::Declaration => "Filter declarations…",
-            LspPickerKind::Implementation => "Filter implementations…",
-            LspPickerKind::TypeDefinition => "Filter type definitions…",
+            LspPickerKind::References => t!("Filter references…"),
+            LspPickerKind::Definition => t!("Filter definitions…"),
+            LspPickerKind::Declaration => t!("Filter declarations…"),
+            LspPickerKind::Implementation => t!("Filter implementations…"),
+            LspPickerKind::TypeDefinition => t!("Filter type definitions…"),
         }
     }
 
     /// Message shown when the query produces no results, so the command does not
     /// appear to silently do nothing.
-    fn empty_message(self) -> &'static str {
+    fn empty_message(self) -> SharedString {
         match self {
-            LspPickerKind::References => "No references found",
-            LspPickerKind::Definition => "No definitions found",
-            LspPickerKind::Declaration => "No declarations found",
-            LspPickerKind::Implementation => "No implementations found",
-            LspPickerKind::TypeDefinition => "No type definitions found",
+            LspPickerKind::References => t!("No references found"),
+            LspPickerKind::Definition => t!("No definitions found"),
+            LspPickerKind::Declaration => t!("No declarations found"),
+            LspPickerKind::Implementation => t!("No implementations found"),
+            LspPickerKind::TypeDefinition => t!("No type definitions found"),
         }
     }
 
@@ -591,7 +592,7 @@ impl PickerDelegate for LspLocationsDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> std::sync::Arc<str> {
-        self.kind.placeholder().into()
+        self.kind.placeholder().as_ref().into()
     }
 
     fn match_count(&self) -> usize {

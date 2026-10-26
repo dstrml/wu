@@ -6,6 +6,7 @@ use collections::HashMap;
 use dap::adapters::{DebugTaskDefinition, latest_github_release};
 use futures::StreamExt;
 use gpui::AsyncApp;
+use i18n::t;
 use serde_json::Value;
 use task::{DebugRequest, DebugScenario, ZedDebugConfig};
 use util::fs::remove_matching;
@@ -338,7 +339,9 @@ impl DebugAdapter for CodeLldbDebugAdapter {
             .or(self.path_to_codelldb.get().cloned());
 
         if command.is_none() {
-            delegate.output_to_console(format!("Checking latest version of {}...", self.name()));
+            delegate.output_to_console(
+                t!("Checking latest version of {name}...", name = self.name()).to_string(),
+            );
             let adapter_path = paths::debug_adapters_dir().join(&Self::ADAPTER_NAME);
             let version_path = match self.fetch_latest_adapter_version(delegate).await {
                 Ok(version) => {
@@ -355,22 +358,25 @@ impl DebugAdapter for CodeLldbDebugAdapter {
                     version_path
                 }
                 Err(e) => {
-                    delegate.output_to_console("Unable to fetch latest version".to_string());
+                    delegate.output_to_console(t!("Unable to fetch latest version").to_string());
                     log::error!("Error fetching latest version of {}: {}", self.name(), e);
-                    delegate.output_to_console(format!(
-                        "Searching for adapters in: {}",
-                        adapter_path.display()
-                    ));
+                    delegate.output_to_console(
+                        t!(
+                            "Searching for adapters in: {path}",
+                            path = adapter_path.display()
+                        )
+                        .to_string(),
+                    );
                     let mut paths = delegate
                         .fs()
                         .read_dir(&adapter_path)
                         .await
-                        .context("No cached adapter directory")?;
+                        .context(t!("No cached adapter directory"))?;
                     paths
                         .next()
                         .await
-                        .context("No cached adapter found")?
-                        .context("No cached adapter found")?
+                        .context(t!("No cached adapter found"))?
+                        .context(t!("No cached adapter found"))?
                 }
             };
             let adapter_dir = version_path.join("extension").join("adapter");

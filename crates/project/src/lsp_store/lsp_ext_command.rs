@@ -65,7 +65,7 @@ impl LspCommand for ExpandMacro {
     type ProtoRequest = proto::LspExtExpandMacro;
 
     fn display_name(&self) -> &str {
-        "Expand macro"
+        i18n::n!("Expand macro")
     }
 
     fn check_capabilities(&self, _: AdapterServerCapabilities) -> bool {
@@ -197,7 +197,7 @@ impl LspCommand for OpenDocs {
     type ProtoRequest = proto::LspExtOpenDocs;
 
     fn display_name(&self) -> &str {
-        "Open docs"
+        i18n::n!("Open docs")
     }
 
     fn check_capabilities(&self, _: AdapterServerCapabilities) -> bool {
@@ -331,7 +331,7 @@ impl LspCommand for SwitchSourceHeader {
     type ProtoRequest = proto::LspExtSwitchSourceHeader;
 
     fn display_name(&self) -> &str {
-        "Switch source header"
+        i18n::n!("Switch source header")
     }
 
     fn check_capabilities(&self, _: AdapterServerCapabilities) -> bool {
@@ -413,7 +413,7 @@ impl LspCommand for GoToParentModule {
     type ProtoRequest = proto::LspExtGoToParentModule;
 
     fn display_name(&self) -> &str {
-        "Go to parent module"
+        i18n::n!("Go to parent module")
     }
 
     fn check_capabilities(&self, _: AdapterServerCapabilities) -> bool {
@@ -670,7 +670,7 @@ impl LspCommand for GetLspRunnables {
     type ProtoRequest = proto::LspExtRunnables;
 
     fn display_name(&self) -> &str {
-        "LSP Runnables"
+        i18n::n!("LSP Runnables")
     }
 
     fn check_capabilities(&self, _: AdapterServerCapabilities) -> bool {

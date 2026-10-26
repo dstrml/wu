@@ -1,0 +1,335 @@
+{
+  "workspace::ActivateLastPane": {
+    "description": "激活工作区中的最后一个窗格。",
+    "name": "激活最后一个窗格"
+  },
+  "workspace::ActivateNextPane": {
+    "description": "激活工作区中的下一个窗格。",
+    "name": "激活下一个窗格"
+  },
+  "workspace::ActivateNextWindow": {
+    "description": "切换到下一个窗口。",
+    "name": "切换到下一个窗口"
+  },
+  "workspace::ActivatePane": {
+    "description": "按序号激活指定的窗格。",
+    "name": "激活窗格"
+  },
+  "workspace::ActivatePaneDown": {
+    "description": "激活下方的窗格。",
+    "name": "激活下方窗格"
+  },
+  "workspace::ActivatePaneLeft": {
+    "description": "激活左侧的窗格。",
+    "name": "激活左侧窗格"
+  },
+  "workspace::ActivatePaneRight": {
+    "description": "激活右侧的窗格。",
+    "name": "激活右侧窗格"
+  },
+  "workspace::ActivatePaneUp": {
+    "description": "激活上方的窗格。",
+    "name": "激活上方窗格"
+  },
+  "workspace::ActivatePreviousPane": {
+    "description": "激活工作区中的上一个窗格。",
+    "name": "激活上一个窗格"
+  },
+  "workspace::ActivatePreviousWindow": {
+    "description": "切换到上一个窗口。",
+    "name": "切换到上一个窗口"
+  },
+  "workspace::AddFolderToProject": {
+    "description": "将文件夹添加到当前项目。",
+    "name": "将文件夹添加到项目"
+  },
+  "workspace::ClearAllNotifications": {
+    "description": "清除所有通知。",
+    "name": "清除所有通知"
+  },
+  "workspace::ClearBookmarks": {
+    "description": "清除项目中的所有书签。",
+    "name": "清除书签"
+  },
+  "workspace::ClearNavigationHistory": {
+    "description": "清除所有导航历史记录，包括前进/后退导航、最近打开的文件和最近关闭的标签页。**此操作无法撤销**。",
+    "name": "清除导航历史记录"
+  },
+  "workspace::ClearTrustedWorktrees": {
+    "description": "清除所有受信任的工作树，下次打开时它们将处于受限模式。\n已打开的项目需要重启后才会生效。",
+    "name": "清除受信任的工作树"
+  },
+  "workspace::CloseActiveDock": {
+    "description": "关闭当前的停靠栏。",
+    "name": "关闭当前停靠栏"
+  },
+  "workspace::CloseAllDocks": {
+    "description": "关闭所有停靠栏。",
+    "name": "关闭所有停靠栏"
+  },
+  "workspace::CloseAllItemsAndPanes": {
+    "description": "关闭工作区中的所有项和窗格。",
+    "name": "关闭所有项和窗格"
+  },
+  "workspace::CloseInactiveTabsAndPanes": {
+    "description": "关闭工作区中所有非活动的标签页和窗格。",
+    "name": "关闭非活动标签页和窗格"
+  },
+  "workspace::CloseItemInAllPanes": {
+    "description": "在所有窗格中关闭当前项。",
+    "name": "在所有窗格中关闭此项"
+  },
+  "workspace::CloseProject": {
+    "description": "关闭当前项目。",
+    "name": "关闭项目"
+  },
+  "workspace::CloseWindow": {
+    "description": "关闭当前窗口。",
+    "name": "关闭窗口"
+  },
+  "workspace::CopyPath": {
+    "name": "复制路径"
+  },
+  "workspace::CopyRelativePath": {
+    "name": "复制相对路径"
+  },
+  "workspace::DecreaseActiveDockSize": {
+    "description": "将当前聚焦的停靠栏缩小指定的像素数。",
+    "name": "缩小当前停靠栏"
+  },
+  "workspace::DecreaseOpenDocksSize": {
+    "description": "将所有当前可见的停靠栏统一缩小指定的像素数。",
+    "name": "缩小所有打开的停靠栏"
+  },
+  "workspace::FocusCenterPane": {
+    "description": "将焦点移到工作区中间的窗格。",
+    "name": "聚焦中间窗格"
+  },
+  "workspace::FocusNextPart": {
+    "description": "将焦点移到窗口的下一个主要区域（编辑器、打开的面板、状态栏），到末尾后从头循环。这是一种便于发现、对屏幕阅读器友好的窗口导航方式。",
+    "name": "聚焦下一个区域"
+  },
+  "workspace::FocusPreviousPart": {
+    "description": "将焦点移到窗口的上一个主要区域。参见 [`FocusNextPart`]。",
+    "name": "聚焦上一个区域"
+  },
+  "workspace::FormatAndSave": {
+    "description": "格式化并保存当前文件，不受 format_on_save 设置影响。",
+    "name": "格式化并保存"
+  },
+  "workspace::IncreaseActiveDockSize": {
+    "description": "将当前聚焦的停靠栏放大指定的像素数。",
+    "name": "放大当前停靠栏"
+  },
+  "workspace::IncreaseOpenDocksSize": {
+    "description": "将所有当前可见的停靠栏统一放大指定的像素数。",
+    "name": "放大所有打开的停靠栏"
+  },
+  "workspace::MoveFocusedPanelToNextPosition": {
+    "description": "将当前聚焦的面板移到下一个位置。",
+    "name": "将聚焦的面板移到下一个位置"
+  },
+  "workspace::MoveItemToPane": {
+    "description": "按序号将项移到指定的窗格。",
+    "name": "将项移到窗格"
+  },
+  "workspace::MoveItemToPaneInDirection": {
+    "description": "将项移到指定方向上的窗格。",
+    "name": "将项移到指定方向的窗格"
+  },
+  "workspace::MovePaneDown": {
+    "description": "将当前窗格移到最底部。",
+    "name": "将窗格移到最底部"
+  },
+  "workspace::MovePaneLeft": {
+    "description": "将当前窗格移到最左侧。",
+    "name": "将窗格移到最左侧"
+  },
+  "workspace::MovePaneRight": {
+    "description": "将当前窗格移到最右侧。",
+    "name": "将窗格移到最右侧"
+  },
+  "workspace::MovePaneUp": {
+    "description": "将当前窗格移到最顶部。",
+    "name": "将窗格移到最顶部"
+  },
+  "workspace::NewCenterTerminal": {
+    "description": "在编辑器区域打开一个新终端。",
+    "name": "在编辑器区域新建终端"
+  },
+  "workspace::NewFile": {
+    "description": "新建一个文件。",
+    "name": "新建文件"
+  },
+  "workspace::NewFileSplit": {
+    "description": "在指定方向的拆分窗格中新建文件。",
+    "name": "在拆分窗格中新建文件"
+  },
+  "workspace::NewFileSplitHorizontal": {
+    "description": "在水平拆分的窗格中新建文件。",
+    "name": "在水平拆分中新建文件"
+  },
+  "workspace::NewFileSplitVertical": {
+    "description": "在垂直拆分的窗格中新建文件。",
+    "name": "在垂直拆分中新建文件"
+  },
+  "workspace::NewSearch": {
+    "description": "打开一个新的搜索。",
+    "name": "新建搜索"
+  },
+  "workspace::NewTerminal": {
+    "description": "打开一个新终端。",
+    "name": "新建终端"
+  },
+  "workspace::NewWindow": {
+    "description": "打开一个新窗口。",
+    "name": "新建窗口"
+  },
+  "workspace::Open": {
+    "description": "打开文件或文件夹。",
+    "name": "打开"
+  },
+  "workspace::OpenComponentPreview": {
+    "description": "打开组件预览。",
+    "name": "打开组件预览"
+  },
+  "workspace::OpenFiles": {
+    "description": "一次打开多个文件。",
+    "name": "打开多个文件"
+  },
+  "workspace::OpenInTerminal": {
+    "description": "在终端中打开当前位置。",
+    "name": "在终端中打开"
+  },
+  "workspace::OpenTerminal": {
+    "description": "使用指定的工作目录打开一个新终端。",
+    "name": "打开终端"
+  },
+  "workspace::OpenWithSystem": {
+    "description": "使用系统默认应用打开所选文件。",
+    "name": "使用系统默认应用打开"
+  },
+  "workspace::Reload": {
+    "description": "重新加载应用。",
+    "name": "重新加载"
+  },
+  "workspace::ReloadActiveItem": {
+    "description": "重新加载当前项。",
+    "name": "重新加载当前项"
+  },
+  "workspace::ReopenLastPicker": {
+    "description": "重新打开当前窗口中最近关闭的选择器。",
+    "name": "重新打开上一个选择器"
+  },
+  "workspace::ResetActiveDockSize": {
+    "description": "将当前停靠栏恢复为默认大小。",
+    "name": "重置当前停靠栏大小"
+  },
+  "workspace::ResetOpenDocksSize": {
+    "description": "将所有打开的停靠栏恢复为默认大小。",
+    "name": "重置所有打开的停靠栏大小"
+  },
+  "workspace::ResetPaneSizes": {
+    "description": "将中间区域的所有窗格恢复为相同大小，保留拆分布局。",
+    "name": "重置窗格大小"
+  },
+  "workspace::RestoreBanner": {
+    "description": "恢复横幅。",
+    "name": "恢复横幅"
+  },
+  "workspace::Save": {
+    "description": "按指定选项保存当前文件。",
+    "name": "保存"
+  },
+  "workspace::SaveAll": {
+    "description": "保存工作区中所有打开的文件。",
+    "name": "全部保存"
+  },
+  "workspace::SaveAs": {
+    "description": "用新名称保存当前文件。",
+    "name": "另存为"
+  },
+  "workspace::SaveWithoutFormat": {
+    "description": "保存文件，但不进行格式化。",
+    "name": "保存但不格式化"
+  },
+  "workspace::SendKeystrokes": {
+    "description": "向当前元素发送一串按键。",
+    "name": "发送按键"
+  },
+  "workspace::ShutdownDebugAdapters": {
+    "description": "关闭所有调试适配器。",
+    "name": "关闭调试适配器"
+  },
+  "workspace::SuppressNotification": {
+    "description": "不再显示当前通知。",
+    "name": "不再显示此通知"
+  },
+  "workspace::SwapPaneAdjacent": {
+    "name": "与相邻窗格交换"
+  },
+  "workspace::SwapPaneDown": {
+    "description": "将当前窗格与下方的窗格交换。",
+    "name": "与下方窗格交换"
+  },
+  "workspace::SwapPaneLeft": {
+    "description": "将当前窗格与左侧的窗格交换。",
+    "name": "与左侧窗格交换"
+  },
+  "workspace::SwapPaneRight": {
+    "description": "将当前窗格与右侧的窗格交换。",
+    "name": "与右侧窗格交换"
+  },
+  "workspace::SwapPaneUp": {
+    "description": "将当前窗格与上方的窗格交换。",
+    "name": "与上方窗格交换"
+  },
+  "workspace::ToggleAllDocks": {
+    "description": "显示或隐藏所有停靠栏。",
+    "name": "切换所有停靠栏"
+  },
+  "workspace::ToggleBottomDock": {
+    "description": "显示或隐藏底部停靠栏。",
+    "name": "切换底部停靠栏"
+  },
+  "workspace::ToggleCenteredLayout": {
+    "description": "开启或关闭居中布局模式。",
+    "name": "切换居中布局"
+  },
+  "workspace::ToggleEditorZoom": {
+    "description": "在中间区域内最大化或还原当前编辑器窗格，最大化时隐藏其他拆分窗格，但不影响停靠栏和面板。",
+    "name": "切换编辑器最大化"
+  },
+  "workspace::ToggleExpandItem": {
+    "description": "展开或折叠所选项。",
+    "name": "切换项展开"
+  },
+  "workspace::ToggleLeftDock": {
+    "description": "显示或隐藏左侧停靠栏。",
+    "name": "切换左侧停靠栏"
+  },
+  "workspace::ToggleReadOnlyFile": {
+    "description": "为当前项开启或关闭只读模式（如果该项支持）。",
+    "name": "切换只读"
+  },
+  "workspace::ToggleRightDock": {
+    "description": "显示或隐藏右侧停靠栏。",
+    "name": "切换右侧停靠栏"
+  },
+  "workspace::ToggleWorktreeSecurity": {
+    "description": "如果有工作树处于受限模式，则显示一个列出可用操作的对话框。\n如果对话框已显示，则关闭它，不信任任何工作树。",
+    "name": "切换工作树安全"
+  },
+  "workspace::ToggleZoom": {
+    "description": "最大化或还原当前窗格。",
+    "name": "切换窗格最大化"
+  },
+  "workspace::ZoomIn": {
+    "description": "最大化当前窗格。",
+    "name": "最大化窗格"
+  },
+  "workspace::ZoomOut": {
+    "description": "将最大化的当前窗格还原。",
+    "name": "还原窗格"
+  }
+}

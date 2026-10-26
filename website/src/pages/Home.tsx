@@ -8,9 +8,10 @@ import { AppIcon, GithubIcon } from '../components/icons';
 import { HeroBackground } from '../components/HeroBackground';
 import { InstallCommand } from '../components/InstallCommand';
 import { MemoryChart } from '../components/MemoryChart';
+import { RichText } from '../components/RichText';
 import { CenterSection, MediaSection, frameOutline, mediaFrame, sectionBody, sectionTitle } from '../components/Section';
 import { WuWindowFrame } from '../components/WuWindow';
-import { INSTALL_GUIDE_URL, MEMORY_BENCHMARK_URL, RELEASES_URL, REPO_URL } from '../consts';
+import { MEMORY_BENCHMARK_URL, REPO_URL } from '../consts';
 import {
   detectMacArchitecture,
   detectPlatform,
@@ -21,8 +22,11 @@ import {
   type MacArchitecture,
   type Platform
 } from '../data/downloads';
+import { PageContext, localePath, messagesFor, type Locale } from '../i18n/locale';
 
-export function Home() {
+export function Home({ locale }: { locale: Locale }) {
+  const messages = messagesFor(locale);
+  const t = messages.home;
   const [platform, setPlatform] = useState<Platform | null>(null);
   const [macArchitecture, setMacArchitecture] = useState<MacArchitecture>('arm');
 
@@ -40,18 +44,18 @@ export function Home() {
     <div className="mt-2 flex flex-wrap justify-center gap-2">
       {downloads.map((download) => (
         <a
-          key={download.label}
+          key={download.id}
           className={`btn btn-md ${highlightSuggested && isSuggested(download, platform, macArchitecture) ? 'btn-light' : 'btn-soft'}`}
           href={download.href}
         >
-          {download.label}
+          {messages.downloads[download.id]}
         </a>
       ))}
     </div>
   );
 
   return (
-    <>
+    <PageContext value={{ locale, path: '/' }}>
       <Header downloadHref={hasInstallScript ? '#download' : downloadHref} />
       <main>
         <div className="relative isolate m-1 mb-40 overflow-hidden rounded-xl max-sm:mb-18">
@@ -65,27 +69,24 @@ export function Home() {
           <section className="px-8 pt-42 pb-26 max-sm:px-4 max-sm:pt-30 max-sm:pb-14">
             <div className="mx-auto flex max-w-[1240px] flex-col items-start gap-5">
               <h1 className="max-w-[800px] text-[clamp(36px,5.2vw,60px)] leading-[1.1] font-medium tracking-[-0.03em]">
-                The fast, native code&nbsp;editor and agent workspace
+                {t.title}
               </h1>
-              <p className="max-w-[600px] text-xl leading-[1.35] max-sm:text-lg">
-                Written in Rust. Batteries included: coding agents, a delightful UX and everything you need from day
-                one.
-              </p>
+              <p className="max-w-[600px] text-xl leading-[1.35] max-sm:text-lg">{t.tagline}</p>
               {hasInstallScript ? (
                 <div className="mt-2 flex max-w-full flex-col items-start gap-3">
                   <InstallCommand />
                   <p className="pl-[18px] text-sm text-tertiary">
-                    Or <a href={downloadHref}>install manually</a>
+                    <RichText source={t.installManually(downloadHref)} />
                   </p>
                 </div>
               ) : (
                 <div className="mt-2 flex flex-wrap gap-2">
                   <a className="btn btn-lg btn-light" href={downloadHref}>
                     <Download size={18} aria-hidden="true" />
-                    {direct && platform ? `Download for ${platformNames[platform]}` : 'Download Wu'}
+                    {direct && platform ? t.downloadFor(platformNames[platform]) : t.downloadWu}
                   </a>
                   <a className="btn btn-lg btn-primary" href="#download">
-                    All platforms
+                    {t.allPlatforms}
                   </a>
                 </div>
               )}
@@ -101,10 +102,10 @@ export function Home() {
           mediaFirst
           text={
             <>
-              <h2 className={sectionTitle}>Light on memory</h2>
-              <p className={sectionBody}>Wu used less memory than Zed and VS Code in every test we ran.</p>
+              <h2 className={sectionTitle}>{t.memory.title}</h2>
+              <p className={sectionBody}>{t.memory.body}</p>
               <a className="btn btn-md btn-light mt-2" href={MEMORY_BENCHMARK_URL} target="_blank" rel="noopener">
-                See benchmarks
+                {t.memory.link}
                 <ArrowUpRight size={18} aria-hidden="true" />
               </a>
             </>
@@ -115,12 +116,10 @@ export function Home() {
         <MediaSection
           text={
             <>
-              <h2 className={sectionTitle}>Your coding agents, built in</h2>
-              <p className={sectionBody}>
-                Work with Claude Code, Codex and OpenCode right next to your code, using the existing accounts you're signed in from.
-              </p>
-              <a className="btn btn-md btn-soft mt-2" href="/docs/#agent-chat">
-                How it works
+              <h2 className={sectionTitle}>{t.agents.title}</h2>
+              <p className={sectionBody}>{t.agents.body}</p>
+              <a className="btn btn-md btn-soft mt-2" href={localePath(locale, '/docs/#agent-chat')}>
+                {t.agents.link}
               </a>
             </>
           }
@@ -128,34 +127,28 @@ export function Home() {
         />
 
         <CenterSection>
-          <h2 className={sectionTitle}>Open source, built on Zed</h2>
-          <p className={sectionBody}>
-            Wu is a fork of Zed. It keeps Zed's editor core, GPU rendering and language tooling, and every Zed
-            extension works in Wu.
-          </p>
+          <h2 className={sectionTitle}>{t.openSource.title}</h2>
+          <p className={sectionBody}>{t.openSource.body}</p>
           <div className="mt-2 flex flex-wrap justify-center gap-2">
             <a className="btn btn-md btn-light" href={REPO_URL} target="_blank" rel="noopener">
               <GithubIcon />
-              Check out the source
+              {t.openSource.source}
             </a>
-            <a className="btn btn-md btn-primary" href="/docs/">
+            <a className="btn btn-md btn-primary" href={localePath(locale, '/docs/')}>
               <BookOpen size={18} aria-hidden="true" />
-              Read the docs
+              {t.openSource.docs}
             </a>
           </div>
         </CenterSection>
 
         <CenterSection id="download">
-          <AppIcon className="mb-2 size-24 rounded-[24%]" alt="Wu app icon" />
-          <h2 className={sectionTitle}>Ready when you are</h2>
-          <p className={`${sectionBody} max-w-[520px]`}>
-            Wu is free and takes a minute to install.{' '}
-            {hasInstallScript ? 'Run this in your terminal.' : 'Pick your platform.'}
-          </p>
+          <AppIcon className="mb-2 size-24 rounded-[24%]" alt={t.ready.iconAlt} />
+          <h2 className={sectionTitle}>{t.ready.title}</h2>
+          <p className={`${sectionBody} max-w-[520px]`}>{hasInstallScript ? t.ready.bodyScript : t.ready.bodyPick}</p>
           {hasInstallScript ? (
             <>
               <InstallCommand className="mt-2" />
-              <p className="mt-6 text-sm text-tertiary">Or install manually</p>
+              <p className="mt-6 text-sm text-tertiary">{t.ready.orInstallManually}</p>
               {downloadButtons(false)}
             </>
           ) : (
@@ -163,24 +156,20 @@ export function Home() {
               {downloadButtons(true)}
               {platform !== 'windows' && (
                 <>
-                  <p className="mt-6 text-sm text-tertiary">On macOS or Linux, you can also run</p>
+                  <p className="mt-6 text-sm text-tertiary">{t.ready.alsoRun}</p>
                   <InstallCommand className="mt-2" />
                 </>
               )}
             </>
           )}
           <p className="mt-2 text-sm leading-[1.4] text-tertiary">
-            First time on macOS or Linux? See the{' '}
-            <a href={INSTALL_GUIDE_URL} target="_blank" rel="noopener">
-              install guide
-            </a>
-            .
+            <RichText source={t.ready.firstTime} />
           </p>
         </CenterSection>
 
         <Faq />
       </main>
       <Footer />
-    </>
+    </PageContext>
   );
 }

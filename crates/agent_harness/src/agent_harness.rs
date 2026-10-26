@@ -9,14 +9,18 @@ pub use proto::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HarnessError {
-    #[error("harness binary not found: {0}")]
+    #[error("{}", i18n::t!("harness binary not found: {detail}", detail = .0))]
     NotInstalled(String),
-    #[error("harness protocol error: {0}")]
+    #[error("{}", i18n::t!("harness protocol error: {detail}", detail = translated_detail(.0)))]
     Protocol(String),
     #[error(transparent)]
     Discovery(#[from] CatalogFailure),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+}
+
+fn translated_detail(detail: &str) -> i18n::SharedString {
+    i18n::lookup(detail).unwrap_or_else(|| detail.to_owned().into())
 }
 
 pub struct SteerMessage {
@@ -211,19 +215,19 @@ impl StderrTail {
 
 pub(crate) fn describe_exit(status: Option<std::process::ExitStatus>) -> String {
     let Some(status) = status else {
-        return "still running".into();
+        return i18n::t!("still running").to_string();
     };
     if let Some(code) = status.code() {
-        return format!("exit code {code}");
+        return i18n::t!("exit code {code}", code = code).to_string();
     }
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
         if let Some(signal) = status.signal() {
-            return format!("killed by signal {signal}");
+            return i18n::t!("killed by signal {signal}", signal = signal).to_string();
         }
     }
-    "unknown exit".into()
+    i18n::t!("unknown exit").to_string()
 }
 
 fn redact_secrets(text: &str) -> String {
@@ -293,11 +297,19 @@ pub(crate) fn crash_message(
 ) -> String {
     let status = describe_exit(status);
     match stderr.snapshot() {
-        Some(tail) => format!(
-            "{name} exited unexpectedly ({status}): {}",
-            redact_secrets(&tail)
-        ),
-        None => format!("{name} exited unexpectedly ({status})"),
+        Some(tail) => i18n::t!(
+            "{name} exited unexpectedly ({status}): {output}",
+            name = name,
+            status = status,
+            output = redact_secrets(&tail)
+        )
+        .to_string(),
+        None => i18n::t!(
+            "{name} exited unexpectedly ({status})",
+            name = name,
+            status = status
+        )
+        .to_string(),
     }
 }
 

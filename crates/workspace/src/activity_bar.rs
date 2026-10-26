@@ -4,6 +4,7 @@ use gpui::{
     Action, Anchor, App, Context, Entity, FocusHandle, Focusable as _, IntoElement, ParentElement,
     Pixels, Render, SharedString, Styled, Subscription, Task, WeakEntity, Window, px,
 };
+use i18n::t;
 use settings::{ActivityBarPosition, Settings as _, SettingsStore};
 use std::sync::Arc;
 use ui::{
@@ -287,7 +288,7 @@ impl ActivityBar {
                 .icon_size(IconSize::Custom(icon_rems))
                 .toggle_state(is_active)
                 .tab_index(0isize)
-                .aria_label(icon_tooltip)
+                .aria_label(i18n::translate(icon_tooltip))
                 .on_click({
                     let action = action.boxed_clone();
                     move |_, window, cx| activate_panel_button(&focus_handle, &*action, window, cx)
@@ -396,23 +397,23 @@ impl ActivityBar {
                     .height(button_height(window, cx).into())
                     .icon_size(IconSize::Custom(icon_rems(window, cx)))
                     .tab_index(0isize)
-                    .aria_label("Manage"),
-                Tooltip::text("Manage"),
+                    .aria_label(t!("Manage")),
+                Tooltip::text(t!("Manage")),
             )
             .menu(|window, cx| {
                 ContextMenu::build(window, cx, |menu, _, _| {
-                    menu.action("Settings", wu_actions::OpenSettings.boxed_clone())
-                        .action("Keymap", Box::new(wu_actions::OpenKeymap))
+                    menu.action(t!("Settings"), wu_actions::OpenSettings.boxed_clone())
+                        .action(t!("Keymap"), Box::new(wu_actions::OpenKeymap))
                         .action(
-                            "Themes…",
+                            t!("Themes…"),
                             wu_actions::theme_selector::Toggle::default().boxed_clone(),
                         )
                         .action(
-                            "Icon Themes…",
+                            t!("Icon Themes…"),
                             wu_actions::icon_theme_selector::Toggle::default().boxed_clone(),
                         )
                         .action(
-                            "Extensions",
+                            t!("Extensions"),
                             wu_actions::Extensions::default().boxed_clone(),
                         )
                 })

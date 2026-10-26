@@ -1,0 +1,1149 @@
+{
+  "editor::AddSelectionAbove": {
+    "name": "在上方添加光标",
+    "description": "在当前选区上方添加一个光标。"
+  },
+  "editor::AddSelectionBelow": {
+    "name": "在下方添加光标",
+    "description": "在当前选区下方添加一个光标。"
+  },
+  "editor::AlignSelections": {
+    "name": "对齐选区",
+    "description": "将不同行的选区对齐到同一列。"
+  },
+  "editor::ApplyAllDiffHunks": {
+    "name": "应用所有差异块",
+    "description": "应用编辑器中的所有差异块。"
+  },
+  "editor::ApplyDiffHunk": {
+    "name": "应用差异块",
+    "description": "应用当前位置的差异块。"
+  },
+  "editor::AutoIndent": {
+    "name": "自动缩进",
+    "description": "根据上下文自动调整缩进。"
+  },
+  "editor::Backspace": {
+    "name": "退格",
+    "description": "删除光标前的字符。"
+  },
+  "editor::Backtab": {
+    "name": "减少缩进",
+    "description": "删除一个制表符或减少缩进。"
+  },
+  "editor::BlameHover": {
+    "name": "显示逐行追溯信息",
+    "description": "显示当前行的 Git 逐行追溯信息。"
+  },
+  "editor::BlamePreviousRevision": {
+    "name": "逐行追溯上一个版本",
+    "description": "打开光标处追溯条目的上一个版本的文件逐行追溯。"
+  },
+  "editor::BlameRevision": {
+    "name": "逐行追溯此版本",
+    "description": "打开光标处追溯条目所在版本的文件逐行追溯。"
+  },
+  "editor::Cancel": {
+    "name": "取消",
+    "description": "取消当前操作。"
+  },
+  "editor::CancelFlycheck": {
+    "name": "取消 Flycheck",
+    "description": "取消正在运行的 Flycheck。"
+  },
+  "editor::CancelLanguageServerWork": {
+    "name": "取消语言服务器任务",
+    "description": "取消语言服务器待处理的任务。"
+  },
+  "editor::ClearFlycheck": {
+    "name": "清除 Flycheck",
+    "description": "清除 Flycheck 的结果。"
+  },
+  "editor::CollapseAllDiffHunks": {
+    "name": "折叠所有差异块",
+    "description": "折叠编辑器中的所有差异块。"
+  },
+  "editor::ComposeCompletion": {
+    "name": "组合补全",
+    "description": "将多个补全建议组合成一个补全。"
+  },
+  "editor::ConfirmCodeAction": {
+    "name": "确认代码操作",
+    "description": "确认并应用当前选中的代码操作。"
+  },
+  "editor::ConfirmCompletion": {
+    "name": "确认补全",
+    "description": "确认并接受当前选中的补全建议。"
+  },
+  "editor::ConfirmCompletionInsert": {
+    "name": "确认补全并插入",
+    "description": "在光标处插入以确认补全。"
+  },
+  "editor::ConfirmCompletionReplace": {
+    "name": "确认补全并替换",
+    "description": "替换现有文本以确认补全。"
+  },
+  "editor::ConfirmRename": {
+    "name": "确认重命名",
+    "description": "确认重命名操作。"
+  },
+  "editor::ContextMenuFirst": {
+    "name": "上下文菜单第一项",
+    "description": "转到上下文菜单的第一项。"
+  },
+  "editor::ContextMenuLast": {
+    "name": "上下文菜单最后一项",
+    "description": "转到上下文菜单的最后一项。"
+  },
+  "editor::ContextMenuNext": {
+    "name": "上下文菜单下一项",
+    "description": "转到上下文菜单的下一项。"
+  },
+  "editor::ContextMenuPrevious": {
+    "name": "上下文菜单上一项",
+    "description": "转到上下文菜单的上一项。"
+  },
+  "editor::ConvertFromBase64": {
+    "name": "从 Base64 解码",
+    "description": "对所选文本或光标处的单词进行 Base64 解码。"
+  },
+  "editor::ConvertIndentationToSpaces": {
+    "name": "将缩进转换为空格",
+    "description": "将缩进从制表符转换为空格。"
+  },
+  "editor::ConvertIndentationToTabs": {
+    "name": "将缩进转换为制表符",
+    "description": "将缩进从空格转换为制表符。"
+  },
+  "editor::ConvertToBase64": {
+    "name": "转换为 Base64",
+    "description": "对所选文本或光标处的单词进行 Base64 编码。"
+  },
+  "editor::ConvertToKebabCase": {
+    "name": "转换为短横线命名",
+    "description": "将所选文本转换为 kebab-case。"
+  },
+  "editor::ConvertToLowerCamelCase": {
+    "name": "转换为小驼峰命名",
+    "description": "将所选文本转换为 lowerCamelCase。"
+  },
+  "editor::ConvertToLowerCase": {
+    "name": "转换为小写",
+    "description": "将所选文本转换为小写。"
+  },
+  "editor::ConvertToOppositeCase": {
+    "name": "反转大小写",
+    "description": "切换所选文本的大小写。"
+  },
+  "editor::ConvertToRot13": {
+    "name": "转换为 ROT13",
+    "description": "对所选文本应用 ROT13 加密。"
+  },
+  "editor::ConvertToRot47": {
+    "name": "转换为 ROT47",
+    "description": "对所选文本应用 ROT47 加密。"
+  },
+  "editor::ConvertToSentenceCase": {
+    "name": "转换为句首大写",
+    "description": "将所选文本转换为句首大写。"
+  },
+  "editor::ConvertToSnakeCase": {
+    "name": "转换为蛇形命名",
+    "description": "将所选文本转换为 snake_case。"
+  },
+  "editor::ConvertToTitleCase": {
+    "name": "转换为词首大写",
+    "description": "将所选文本转换为 Title Case。"
+  },
+  "editor::ConvertToUpperCamelCase": {
+    "name": "转换为大驼峰命名",
+    "description": "将所选文本转换为 UpperCamelCase。"
+  },
+  "editor::ConvertToUpperCase": {
+    "name": "转换为大写",
+    "description": "将所选文本转换为 UPPERCASE。"
+  },
+  "editor::Copy": {
+    "name": "复制",
+    "description": "将所选文本复制到剪贴板。"
+  },
+  "editor::CopyAndTrim": {
+    "name": "复制并去除缩进",
+    "description": "将所选文本复制到剪贴板，并去除多行选区共同的开头缩进。"
+  },
+  "editor::CopyFileLocation": {
+    "name": "复制文件位置",
+    "description": "将当前文件位置复制到剪贴板。"
+  },
+  "editor::CopyFileName": {
+    "name": "复制文件名",
+    "description": "将当前文件名复制到剪贴板。"
+  },
+  "editor::CopyFileNameWithoutExtension": {
+    "name": "复制不带扩展名的文件名",
+    "description": "将不带扩展名的文件名复制到剪贴板。"
+  },
+  "editor::CopyHighlightJson": {
+    "name": "复制高亮 JSON",
+    "description": "将高亮的文本复制为 JSON。"
+  },
+  "editor::CopyPermalinkToLine": {
+    "name": "复制行的永久链接",
+    "description": "复制当前行或选区的永久链接。"
+  },
+  "editor::Cut": {
+    "name": "剪切",
+    "description": "将所选文本剪切到剪贴板。"
+  },
+  "editor::CutToEndOfLine": {
+    "name": "剪切到行尾",
+    "description": "从光标处剪切到行尾。"
+  },
+  "editor::Delete": {
+    "name": "删除",
+    "description": "删除光标后的字符。"
+  },
+  "editor::DeleteLine": {
+    "name": "删除行",
+    "description": "删除当前行。"
+  },
+  "editor::DeleteToBeginningOfLine": {
+    "name": "删除到行首",
+    "description": "从光标处删除到当前行的开头。"
+  },
+  "editor::DeleteToEndOfLine": {
+    "name": "删除到行尾",
+    "description": "从光标处删除到行尾。"
+  },
+  "editor::DeleteToNextSubwordEnd": {
+    "name": "删除到下一个子词结尾",
+    "description": "从光标处删除到下一个子词的结尾。如果遇到 2 个或更多连续的空白字符，会在下一个子词结尾之前停下。"
+  },
+  "editor::DeleteToNextWordEnd": {
+    "name": "删除到下一个单词结尾",
+    "description": "从光标处删除到下一个单词的结尾。如果遇到 2 个或更多连续的空白字符，会在下一个单词结尾之前停下。"
+  },
+  "editor::DeleteToPreviousSubwordStart": {
+    "name": "删除到上一个子词开头",
+    "description": "从光标处删除到上一个子词的开头。如果遇到 2 个或更多连续的空白字符，会在上一个子词开头之前停下。"
+  },
+  "editor::DeleteToPreviousWordStart": {
+    "name": "删除到上一个单词开头",
+    "description": "从光标处删除到上一个单词的开头。如果遇到 2 个或更多连续的空白字符，会在上一个单词开头之前停下。"
+  },
+  "editor::DiffClipboardWithSelection": {
+    "name": "将剪贴板与选区比较",
+    "description": "比较剪贴板中的文本与当前选区的差异。"
+  },
+  "editor::DisableBreakpoint": {
+    "name": "停用断点",
+    "description": "停用当前行的断点。"
+  },
+  "editor::DuplicateLineDown": {
+    "name": "向下复制行",
+    "description": "在下方复制当前行。"
+  },
+  "editor::DuplicateLineUp": {
+    "name": "向上复制行",
+    "description": "在上方复制当前行。"
+  },
+  "editor::DuplicateSelection": {
+    "name": "重复选区",
+    "description": "在选区后再插入一份相同的内容。"
+  },
+  "editor::EditBookmark": {
+    "name": "编辑书签",
+    "description": "编辑当前行书签的标签。"
+  },
+  "editor::EditLogBreakpoint": {
+    "name": "编辑日志断点",
+    "description": "编辑断点的日志消息。"
+  },
+  "editor::EnableBreakpoint": {
+    "name": "启用断点",
+    "description": "启用当前行的断点。"
+  },
+  "editor::ExpandAllDiffHunks": {
+    "name": "展开所有差异块",
+    "description": "展开编辑器中的所有差异块。"
+  },
+  "editor::ExpandExcerpts": {
+    "name": "展开摘录",
+    "description": "展开所有包含选区的摘录。"
+  },
+  "editor::ExpandExcerptsDown": {
+    "name": "向下展开摘录",
+    "description": "向下展开当前位置的摘录。"
+  },
+  "editor::ExpandExcerptsUp": {
+    "name": "向上展开摘录",
+    "description": "向上展开当前位置的摘录。"
+  },
+  "editor::ExpandMacroRecursively": {
+    "name": "递归展开宏",
+    "description": "在光标处递归展开宏。"
+  },
+  "editor::FindAllReferences": {
+    "name": "查找所有引用",
+    "description": "查找光标处符号的所有引用。"
+  },
+  "editor::FindNextMatch": {
+    "name": "查找下一个匹配项",
+    "description": "在搜索中查找下一个匹配项。"
+  },
+  "editor::FindPreviousMatch": {
+    "name": "查找上一个匹配项",
+    "description": "在搜索中查找上一个匹配项。"
+  },
+  "editor::Fold": {
+    "name": "折叠",
+    "description": "折叠当前代码块。"
+  },
+  "editor::FoldAll": {
+    "name": "全部折叠",
+    "description": "折叠编辑器中所有可折叠的区域。"
+  },
+  "editor::FoldAtLevel": {
+    "name": "折叠指定级别",
+    "description": "折叠指定缩进级别的所有代码块。"
+  },
+  "editor::FoldAtLevel_1": {
+    "name": "折叠第 1 级",
+    "description": "折叠缩进级别为 1 的所有代码块。"
+  },
+  "editor::FoldAtLevel_2": {
+    "name": "折叠第 2 级",
+    "description": "折叠缩进级别为 2 的所有代码块。"
+  },
+  "editor::FoldAtLevel_3": {
+    "name": "折叠第 3 级",
+    "description": "折叠缩进级别为 3 的所有代码块。"
+  },
+  "editor::FoldAtLevel_4": {
+    "name": "折叠第 4 级",
+    "description": "折叠缩进级别为 4 的所有代码块。"
+  },
+  "editor::FoldAtLevel_5": {
+    "name": "折叠第 5 级",
+    "description": "折叠缩进级别为 5 的所有代码块。"
+  },
+  "editor::FoldAtLevel_6": {
+    "name": "折叠第 6 级",
+    "description": "折叠缩进级别为 6 的所有代码块。"
+  },
+  "editor::FoldAtLevel_7": {
+    "name": "折叠第 7 级",
+    "description": "折叠缩进级别为 7 的所有代码块。"
+  },
+  "editor::FoldAtLevel_8": {
+    "name": "折叠第 8 级",
+    "description": "折叠缩进级别为 8 的所有代码块。"
+  },
+  "editor::FoldAtLevel_9": {
+    "name": "折叠第 9 级",
+    "description": "折叠缩进级别为 9 的所有代码块。"
+  },
+  "editor::FoldFunctionBodies": {
+    "name": "折叠函数体",
+    "description": "折叠编辑器中的所有函数体。"
+  },
+  "editor::FoldRecursive": {
+    "name": "递归折叠",
+    "description": "折叠当前代码块及其所有子块。"
+  },
+  "editor::FoldSelectedRanges": {
+    "name": "折叠所选范围",
+    "description": "折叠所选的范围。"
+  },
+  "editor::Format": {
+    "name": "格式化文档",
+    "description": "格式化整个文档。"
+  },
+  "editor::FormatSelections": {
+    "name": "格式化选区",
+    "description": "只格式化所选文本。\n\n只有当前格式化程序支持格式化范围时，才能使用此命令。使用语言服务器时，会为每个选区发送一个 LSP 范围格式化请求；如果所选缓冲区配置的语言服务器不支持范围格式化，此命令会被隐藏。使用 Prettier 时，会用 Prettier 自带的范围格式化来格式化包含所有选区的范围，并丢弃所选范围之外的修改。外部命令格式化程序不支持范围格式化，会被跳过。"
+  },
+  "editor::GoToDeclaration": {
+    "name": "转到声明",
+    "description": "转到光标处符号的声明。"
+  },
+  "editor::GoToDeclarationSplit": {
+    "name": "在拆分窗格中转到声明",
+    "description": "在拆分窗格中转到声明。"
+  },
+  "editor::GoToDefinition": {
+    "name": "转到定义",
+    "description": "转到光标处符号的定义。"
+  },
+  "editor::GoToDefinitionSplit": {
+    "name": "在拆分窗格中转到定义",
+    "description": "在拆分窗格中转到定义。"
+  },
+  "editor::GoToDiagnostic": {
+    "name": "转到下一个诊断",
+    "description": "如果诊断尚未激活，展开光标处的诊断（如果有）。否则转到文件中的下一个诊断。"
+  },
+  "editor::GoToHunk": {
+    "name": "转到下一个差异块",
+    "description": "转到下一个差异块。"
+  },
+  "editor::GoToImplementation": {
+    "name": "转到实现",
+    "description": "转到光标处符号的实现。"
+  },
+  "editor::GoToImplementationSplit": {
+    "name": "在拆分窗格中转到实现",
+    "description": "在拆分窗格中转到实现。"
+  },
+  "editor::GoToNextBookmark": {
+    "name": "转到下一个书签",
+    "description": "转到文件中的下一个书签。"
+  },
+  "editor::GoToNextChange": {
+    "name": "转到下一个更改",
+    "description": "转到文件中的下一个更改。"
+  },
+  "editor::GoToNextDocumentHighlight": {
+    "name": "转到下一个文档高亮",
+    "description": "转到下一个文档高亮。"
+  },
+  "editor::GoToNextReference": {
+    "name": "转到下一个引用",
+    "description": "转到光标处符号的下一个引用。"
+  },
+  "editor::GoToNextSymbol": {
+    "name": "转到下一个符号",
+    "description": "转到下一个符号。"
+  },
+  "editor::GoToParentModule": {
+    "name": "转到父模块",
+    "description": "转到当前文件的父模块。"
+  },
+  "editor::GoToPreviousBookmark": {
+    "name": "转到上一个书签",
+    "description": "转到文件中的上一个书签。"
+  },
+  "editor::GoToPreviousChange": {
+    "name": "转到上一个更改",
+    "description": "转到文件中的上一个更改。"
+  },
+  "editor::GoToPreviousDiagnostic": {
+    "name": "转到上一个诊断",
+    "description": "如果诊断尚未激活，展开光标处的诊断（如果有）。否则转到文件中的上一个诊断。"
+  },
+  "editor::GoToPreviousDocumentHighlight": {
+    "name": "转到上一个文档高亮",
+    "description": "转到上一个文档高亮。"
+  },
+  "editor::GoToPreviousHunk": {
+    "name": "转到上一个差异块",
+    "description": "转到上一个差异块。"
+  },
+  "editor::GoToPreviousReference": {
+    "name": "转到上一个引用",
+    "description": "转到光标处符号的上一个引用。"
+  },
+  "editor::GoToPreviousSymbol": {
+    "name": "转到上一个符号",
+    "description": "转到上一个符号。"
+  },
+  "editor::GoToTypeDefinition": {
+    "name": "转到类型定义",
+    "description": "转到光标处符号的类型定义。"
+  },
+  "editor::GoToTypeDefinitionSplit": {
+    "name": "在拆分窗格中转到类型定义",
+    "description": "在拆分窗格中转到类型定义。"
+  },
+  "editor::HalfPageDown": {
+    "name": "向下滚动半页",
+    "description": "向下滚动半页。"
+  },
+  "editor::HalfPageUp": {
+    "name": "向上滚动半页",
+    "description": "向上滚动半页。"
+  },
+  "editor::HandleInput": {
+    "name": "处理输入",
+    "description": "处理编辑器中的文本输入。"
+  },
+  "editor::Hover": {
+    "name": "显示悬停信息",
+    "description": "显示光标处符号的悬停信息。"
+  },
+  "editor::Indent": {
+    "name": "增加缩进",
+    "description": "增加所选行的缩进。"
+  },
+  "editor::InsertSnippet": {
+    "name": "插入代码片段",
+    "description": "在光标处插入代码片段。"
+  },
+  "editor::InsertUuidV4": {
+    "name": "插入 UUID v4",
+    "description": "在光标处插入一个 UUID v4。"
+  },
+  "editor::InsertUuidV7": {
+    "name": "插入 UUID v7",
+    "description": "在光标处插入一个 UUID v7。"
+  },
+  "editor::JoinLines": {
+    "name": "合并行",
+    "description": "将当前行与下一行合并。"
+  },
+  "editor::KillRingCut": {
+    "name": "剪切到剪切环",
+    "description": "剪切到剪切环（Emacs 风格）。"
+  },
+  "editor::KillRingYank": {
+    "name": "从剪切环粘贴",
+    "description": "从剪切环粘贴（Emacs 风格）。"
+  },
+  "editor::LineDown": {
+    "name": "向下一行",
+    "description": "将光标向下移动一行。"
+  },
+  "editor::LineUp": {
+    "name": "向上一行",
+    "description": "将光标向上移动一行。"
+  },
+  "editor::MoveDown": {
+    "name": "向下移动",
+    "description": "将光标向下移动。"
+  },
+  "editor::MoveDownByLines": {
+    "name": "向下移动多行",
+    "description": "将光标向下移动指定的行数。"
+  },
+  "editor::MoveLeft": {
+    "name": "向左移动",
+    "description": "将光标向左移动。"
+  },
+  "editor::MoveLineDown": {
+    "name": "向下移动行",
+    "description": "将当前行向下移动。"
+  },
+  "editor::MoveLineUp": {
+    "name": "向上移动行",
+    "description": "将当前行向上移动。"
+  },
+  "editor::MovePageDown": {
+    "name": "向下移动一页",
+    "description": "将光标向下移动一页。"
+  },
+  "editor::MovePageUp": {
+    "name": "向上移动一页",
+    "description": "将光标向上移动一页。"
+  },
+  "editor::MoveRight": {
+    "name": "向右移动",
+    "description": "将光标向右移动。"
+  },
+  "editor::MoveToBeginning": {
+    "name": "移到文档开头",
+    "description": "将光标移到文档开头。"
+  },
+  "editor::MoveToBeginningOfLine": {
+    "name": "移到行首",
+    "description": "将光标移到当前行的开头。"
+  },
+  "editor::MoveToEnclosingBracket": {
+    "name": "移到匹配的括号",
+    "description": "将光标移到外层的括号。"
+  },
+  "editor::MoveToEnd": {
+    "name": "移到文档末尾",
+    "description": "将光标移到文档末尾。"
+  },
+  "editor::MoveToEndOfExcerpt": {
+    "name": "移到摘录末尾",
+    "description": "将光标移到当前摘录的末尾。"
+  },
+  "editor::MoveToEndOfLargerSyntaxNode": {
+    "name": "移到更大语法节点的末尾",
+    "description": "将光标移到下一个更大语法节点的末尾。"
+  },
+  "editor::MoveToEndOfLine": {
+    "name": "移到行尾",
+    "description": "将光标移到当前行的末尾。"
+  },
+  "editor::MoveToEndOfParagraph": {
+    "name": "移到段落末尾",
+    "description": "将光标移到段落末尾。"
+  },
+  "editor::MoveToEndOfPreviousExcerpt": {
+    "name": "移到上一个摘录的末尾",
+    "description": "将光标移到上一个摘录的末尾。"
+  },
+  "editor::MoveToNextCommentParagraph": {
+    "name": "移到下一个注释段落",
+    "description": "将光标移到下一个注释段落的开头。"
+  },
+  "editor::MoveToNextSubwordEnd": {
+    "name": "移到下一个子词结尾",
+    "description": "将光标移到下一个子词的结尾。"
+  },
+  "editor::MoveToNextWordEnd": {
+    "name": "移到下一个单词结尾",
+    "description": "将光标移到下一个单词的结尾。"
+  },
+  "editor::MoveToPreviousCommentParagraph": {
+    "name": "移到上一个注释段落",
+    "description": "将光标移到上一个注释段落的开头。"
+  },
+  "editor::MoveToPreviousSubwordStart": {
+    "name": "移到上一个子词开头",
+    "description": "将光标移到上一个子词的开头。"
+  },
+  "editor::MoveToPreviousWordStart": {
+    "name": "移到上一个单词开头",
+    "description": "将光标移到上一个单词的开头。"
+  },
+  "editor::MoveToStartOfExcerpt": {
+    "name": "移到摘录开头",
+    "description": "将光标移到当前摘录的开头。"
+  },
+  "editor::MoveToStartOfLargerSyntaxNode": {
+    "name": "移到更大语法节点的开头",
+    "description": "将光标移到下一个更大语法节点的开头。"
+  },
+  "editor::MoveToStartOfNextExcerpt": {
+    "name": "移到下一个摘录的开头",
+    "description": "将光标移到下一个摘录的开头。"
+  },
+  "editor::MoveToStartOfParagraph": {
+    "name": "移到段落开头",
+    "description": "将光标移到段落开头。"
+  },
+  "editor::MoveUp": {
+    "name": "向上移动",
+    "description": "将光标向上移动。"
+  },
+  "editor::MoveUpByLines": {
+    "name": "向上移动多行",
+    "description": "将光标向上移动指定的行数。"
+  },
+  "editor::Newline": {
+    "name": "换行",
+    "description": "插入新行并将光标移到新行。"
+  },
+  "editor::NewlineAbove": {
+    "name": "在上方插入新行",
+    "description": "在当前行上方插入新行。"
+  },
+  "editor::NewlineBelow": {
+    "name": "在下方插入新行",
+    "description": "在当前行下方插入新行。"
+  },
+  "editor::NextScreen": {
+    "name": "下一屏",
+    "description": "滚动到下一屏。"
+  },
+  "editor::NextSnippetTabstop": {
+    "name": "下一个代码片段制表位",
+    "description": "如果有下一个代码片段制表位，就转到那里。"
+  },
+  "editor::OpenContextMenu": {
+    "name": "打开上下文菜单",
+    "description": "在光标处打开上下文菜单。"
+  },
+  "editor::OpenDocs": {
+    "name": "打开文档",
+    "description": "打开光标处符号的文档。"
+  },
+  "editor::OpenExcerpts": {
+    "name": "打开摘录",
+    "description": "打开当前文件中的摘录。"
+  },
+  "editor::OpenExcerptsSplit": {
+    "name": "在拆分窗格中打开摘录",
+    "description": "在拆分窗格中打开摘录。"
+  },
+  "editor::OpenGitBlameCommit": {
+    "name": "打开逐行追溯的提交",
+    "description": "打开光标处逐行追溯对应的 Git 提交。"
+  },
+  "editor::OpenPermalinkToLine": {
+    "name": "打开行的永久链接",
+    "description": "打开当前行或选区的永久链接。"
+  },
+  "editor::OpenProposedChangesEditor": {
+    "name": "打开建议更改编辑器",
+    "description": "打开建议更改编辑器。"
+  },
+  "editor::OpenSelectedFilename": {
+    "name": "打开所选文件名",
+    "description": "打开编辑器中所选文件名对应的文件。"
+  },
+  "editor::OpenSelectionsInMultibuffer": {
+    "name": "在多缓冲区中打开选区",
+    "description": "在多缓冲区中打开所有选区。"
+  },
+  "editor::OpenUrl": {
+    "name": "打开链接",
+    "description": "打开光标处的 URL。"
+  },
+  "editor::OrganizeImports": {
+    "name": "整理导入",
+    "description": "整理 import 语句。"
+  },
+  "editor::Outdent": {
+    "name": "减少缩进",
+    "description": "减少所选行的缩进。"
+  },
+  "editor::PageDown": {
+    "name": "向下翻页",
+    "description": "向下滚动一页。"
+  },
+  "editor::PageUp": {
+    "name": "向上翻页",
+    "description": "向上滚动一页。"
+  },
+  "editor::Paste": {
+    "name": "粘贴",
+    "description": "从剪贴板粘贴。"
+  },
+  "editor::PreviousSnippetTabstop": {
+    "name": "上一个代码片段制表位",
+    "description": "如果有上一个代码片段制表位，就转到那里。"
+  },
+  "editor::Redo": {
+    "name": "重做",
+    "description": "重做上一次撤销的编辑。"
+  },
+  "editor::RedoSelection": {
+    "name": "重做选区更改",
+    "description": "重做上一次选区更改。"
+  },
+  "editor::ReloadFile": {
+    "name": "重新加载文件",
+    "description": "从磁盘重新加载文件。"
+  },
+  "editor::Rename": {
+    "name": "重命名符号",
+    "description": "重命名光标处的符号。"
+  },
+  "editor::RestartLanguageServer": {
+    "name": "重启语言服务器",
+    "description": "重启当前文件的语言服务器。"
+  },
+  "editor::RevealInFileManager": {
+    "name": "在文件管理器中显示",
+    "description": "在系统文件管理器中显示当前文件。"
+  },
+  "editor::ReverseLines": {
+    "name": "反转行顺序",
+    "description": "反转所选行的顺序。"
+  },
+  "editor::Rewrap": {
+    "name": "重新换行",
+    "description": "重新换行，使文本不超过首选行长度。"
+  },
+  "editor::RotateSelectionsBackward": {
+    "name": "向后轮换选区",
+    "description": "向后轮换选区或行。"
+  },
+  "editor::RotateSelectionsForward": {
+    "name": "向前轮换选区",
+    "description": "向前轮换选区或行。"
+  },
+  "editor::RunFlycheck": {
+    "name": "运行 Flycheck",
+    "description": "运行 Flycheck 诊断。"
+  },
+  "editor::SaveLocation": {
+    "name": "保存位置",
+    "description": "将当前位置保存到导航历史记录。"
+  },
+  "editor::ScrollCursorBottom": {
+    "name": "将光标滚动到底部",
+    "description": "滚动视图，使光标位于可见区域底部。"
+  },
+  "editor::ScrollCursorCenter": {
+    "name": "将光标滚动到中间",
+    "description": "滚动视图，使光标位于可见区域中间。"
+  },
+  "editor::ScrollCursorCenterTopBottom": {
+    "name": "将光标在中间、顶部、底部间轮换",
+    "description": "让光标位置在中间、顶部和底部之间轮换。"
+  },
+  "editor::ScrollCursorTop": {
+    "name": "将光标滚动到顶部",
+    "description": "滚动视图，使光标位于可见区域顶部。"
+  },
+  "editor::SelectAll": {
+    "name": "全选",
+    "description": "选中编辑器中的所有文本。"
+  },
+  "editor::SelectAllMatches": {
+    "name": "选择所有匹配项",
+    "description": "选中当前选区的所有匹配项。"
+  },
+  "editor::SelectAroundDelimiters": {
+    "name": "选择分隔符及其内容",
+    "description": "选中最近的外层分隔符（方括号、花括号、圆括号或引号）及其中的内容。重复执行会将选区扩展到外面一层的分隔符。"
+  },
+  "editor::SelectDown": {
+    "name": "向下选择",
+    "description": "向下扩展选区。"
+  },
+  "editor::SelectDownByLines": {
+    "name": "向下选择多行",
+    "description": "将选区向下扩展指定的行数。"
+  },
+  "editor::SelectEnclosingSymbol": {
+    "name": "选择外层符号",
+    "description": "选中外层的符号。"
+  },
+  "editor::SelectInsideDelimiters": {
+    "name": "选择分隔符内的内容",
+    "description": "选中最近的外层分隔符（方括号、花括号、圆括号或引号）中的内容，不包括分隔符。重复执行会将选区扩展到外面一层的分隔符。"
+  },
+  "editor::SelectLargerSyntaxNode": {
+    "name": "选择更大的语法节点",
+    "description": "选中下一个更大的语法节点。"
+  },
+  "editor::SelectLeft": {
+    "name": "向左选择",
+    "description": "向左扩展选区。"
+  },
+  "editor::SelectLine": {
+    "name": "选择行",
+    "description": "选中当前行。"
+  },
+  "editor::SelectNext": {
+    "name": "选择下一个匹配项",
+    "description": "选中当前选区的下一个匹配项。"
+  },
+  "editor::SelectNextSyntaxNode": {
+    "name": "选择下一个语法节点",
+    "description": "选中下一个同级语法节点。"
+  },
+  "editor::SelectPageDown": {
+    "name": "向下选择一页",
+    "description": "将选区向下扩展一页。"
+  },
+  "editor::SelectPageUp": {
+    "name": "向上选择一页",
+    "description": "将选区向上扩展一页。"
+  },
+  "editor::SelectPrevious": {
+    "name": "选择上一个匹配项",
+    "description": "选中当前选区的上一个匹配项。"
+  },
+  "editor::SelectPreviousSyntaxNode": {
+    "name": "选择上一个语法节点",
+    "description": "选中上一个同级语法节点。"
+  },
+  "editor::SelectRight": {
+    "name": "向右选择",
+    "description": "向右扩展选区。"
+  },
+  "editor::SelectSmallerSyntaxNode": {
+    "name": "选择更小的语法节点",
+    "description": "选中下一个更小的语法节点。"
+  },
+  "editor::SelectToBeginning": {
+    "name": "选择到文档开头",
+    "description": "选择到文档开头。"
+  },
+  "editor::SelectToBeginningOfLine": {
+    "name": "选择到行首",
+    "description": "从光标处选择到当前行的开头。"
+  },
+  "editor::SelectToEnd": {
+    "name": "选择到文档末尾",
+    "description": "选择到文档末尾。"
+  },
+  "editor::SelectToEndOfExcerpt": {
+    "name": "选择到摘录末尾",
+    "description": "选择到当前摘录的末尾。"
+  },
+  "editor::SelectToEndOfLargerSyntaxNode": {
+    "name": "选择到更大语法节点的末尾",
+    "description": "选择到下一个更大语法节点的末尾。"
+  },
+  "editor::SelectToEndOfLine": {
+    "name": "选择到行尾",
+    "description": "从光标处选择到当前行的末尾。"
+  },
+  "editor::SelectToEndOfParagraph": {
+    "name": "选择到段落末尾",
+    "description": "选择到段落末尾。"
+  },
+  "editor::SelectToEndOfPreviousExcerpt": {
+    "name": "选择到上一个摘录的末尾",
+    "description": "选择到上一个摘录的末尾。"
+  },
+  "editor::SelectToNextSubwordEnd": {
+    "name": "选择到下一个子词结尾",
+    "description": "选择到下一个子词的结尾。"
+  },
+  "editor::SelectToNextWordEnd": {
+    "name": "选择到下一个单词结尾",
+    "description": "选择到下一个单词的结尾。"
+  },
+  "editor::SelectToPreviousSubwordStart": {
+    "name": "选择到上一个子词开头",
+    "description": "选择到上一个子词的开头。"
+  },
+  "editor::SelectToPreviousWordStart": {
+    "name": "选择到上一个单词开头",
+    "description": "选择到上一个单词的开头。"
+  },
+  "editor::SelectToStartOfExcerpt": {
+    "name": "选择到摘录开头",
+    "description": "选择到当前摘录的开头。"
+  },
+  "editor::SelectToStartOfLargerSyntaxNode": {
+    "name": "选择到更大语法节点的开头",
+    "description": "选择到下一个更大语法节点的开头。"
+  },
+  "editor::SelectToStartOfNextExcerpt": {
+    "name": "选择到下一个摘录的开头",
+    "description": "选择到下一个摘录的开头。"
+  },
+  "editor::SelectToStartOfParagraph": {
+    "name": "选择到段落开头",
+    "description": "选择到段落开头。"
+  },
+  "editor::SelectUp": {
+    "name": "向上选择",
+    "description": "向上扩展选区。"
+  },
+  "editor::SelectUpByLines": {
+    "name": "向上选择多行",
+    "description": "将选区向上扩展指定的行数。"
+  },
+  "editor::SetMark": {
+    "name": "设置标记",
+    "description": "在当前位置设置标记。"
+  },
+  "editor::ShowCharacterPalette": {
+    "name": "显示字符面板",
+    "description": "显示系统的字符面板。"
+  },
+  "editor::ShowCompletions": {
+    "name": "显示补全",
+    "description": "在光标处显示代码补全建议。"
+  },
+  "editor::ShowSignatureHelp": {
+    "name": "显示签名帮助",
+    "description": "显示当前函数的签名帮助。"
+  },
+  "editor::ShowWordCompletions": {
+    "name": "显示单词补全",
+    "description": "显示单词补全。"
+  },
+  "editor::ShuffleLines": {
+    "name": "随机打乱行",
+    "description": "随机打乱所选行的顺序。"
+  },
+  "editor::SignatureHelpNext": {
+    "name": "下一个签名",
+    "description": "在签名帮助弹窗中转到下一个签名。"
+  },
+  "editor::SignatureHelpPrevious": {
+    "name": "上一个签名",
+    "description": "在签名帮助弹窗中转到上一个签名。"
+  },
+  "editor::SortLinesByLength": {
+    "name": "按长度排序行",
+    "description": "按长度对所选行排序。"
+  },
+  "editor::SortLinesCaseInsensitive": {
+    "name": "排序行（不区分大小写）",
+    "description": "对所选行排序，不区分大小写。"
+  },
+  "editor::SortLinesCaseSensitive": {
+    "name": "排序行（区分大小写）",
+    "description": "对所选行排序，区分大小写。"
+  },
+  "editor::SpawnNearestTask": {
+    "name": "运行最近的任务",
+    "description": "运行离当前光标位置最近的可用任务。"
+  },
+  "editor::SplitSelectionIntoLines": {
+    "name": "将选区拆分为行",
+    "description": "将选区拆分为单独的行。"
+  },
+  "editor::StopLanguageServer": {
+    "name": "停止语言服务器",
+    "description": "停止当前文件的语言服务器。"
+  },
+  "editor::SwapSelectionEnds": {
+    "name": "交换选区两端",
+    "description": "交换当前选区的开头和结尾。"
+  },
+  "editor::SwitchSourceHeader": {
+    "name": "切换源文件和头文件",
+    "description": "在源文件和头文件之间切换。"
+  },
+  "editor::Tab": {
+    "name": "插入制表符",
+    "description": "插入一个制表符或增加缩进。"
+  },
+  "editor::ToggleAllDiffHunks": {
+    "name": "切换所有差异块",
+    "description": "切换编辑器中的所有差异块。如果有任何差异块是展开的，就全部折叠，否则全部展开。"
+  },
+  "editor::ToggleAutoSignatureHelp": {
+    "name": "切换自动签名帮助",
+    "description": "开启或关闭自动显示签名帮助。"
+  },
+  "editor::ToggleBlockComments": {
+    "name": "切换块注释",
+    "description": "为所选文本添加或删除块注释标记。"
+  },
+  "editor::ToggleBookmark": {
+    "name": "切换书签",
+    "description": "在当前行添加或删除书签。"
+  },
+  "editor::ToggleBookmarkWithLabel": {
+    "name": "切换带标签的书签",
+    "description": "在当前行添加或删除书签，添加时会提示输入标签。"
+  },
+  "editor::ToggleBreadcrumb": {
+    "name": "切换痕迹导航",
+    "description": "显示或隐藏痕迹导航。"
+  },
+  "editor::ToggleBreakpoint": {
+    "name": "切换断点",
+    "description": "在当前行添加或删除断点。"
+  },
+  "editor::ToggleCase": {
+    "name": "切换大小写",
+    "description": "切换所选文本的大小写。"
+  },
+  "editor::ToggleCodeActions": {
+    "name": "切换代码操作",
+    "description": "显示或隐藏光标处可用的代码操作。"
+  },
+  "editor::ToggleCodeLens": {
+    "name": "切换 CodeLens",
+    "description": "显示或隐藏 CodeLens。"
+  },
+  "editor::ToggleComments": {
+    "name": "切换注释",
+    "description": "为所选行添加或删除注释标记。"
+  },
+  "editor::ToggleDiagnostics": {
+    "name": "切换诊断",
+    "description": "显示或隐藏诊断面板。"
+  },
+  "editor::ToggleFocus": {
+    "name": "切换焦点",
+    "description": "将焦点切回上一个活动的缓冲区。"
+  },
+  "editor::ToggleFold": {
+    "name": "切换折叠",
+    "description": "折叠或展开当前位置。"
+  },
+  "editor::ToggleFoldAll": {
+    "name": "切换全部折叠",
+    "description": "折叠或展开缓冲区中的所有折叠区域，或多缓冲区中的所有摘录。"
+  },
+  "editor::ToggleFoldRecursive": {
+    "name": "切换递归折叠",
+    "description": "递归折叠或展开当前位置。"
+  },
+  "editor::ToggleGitBlameInline": {
+    "name": "切换行内逐行追溯",
+    "description": "显示或隐藏行内的 Git 逐行追溯信息。"
+  },
+  "editor::ToggleIndentGuides": {
+    "name": "切换缩进参考线",
+    "description": "显示或隐藏缩进参考线。"
+  },
+  "editor::ToggleInlayHints": {
+    "name": "切换内嵌提示",
+    "description": "显示或隐藏内嵌提示。"
+  },
+  "editor::ToggleInlineDiagnostics": {
+    "name": "切换行内诊断",
+    "description": "显示或隐藏行内诊断。"
+  },
+  "editor::ToggleInlineValues": {
+    "name": "切换行内值",
+    "description": "显示或隐藏行内值。"
+  },
+  "editor::ToggleLineNumbers": {
+    "name": "切换行号",
+    "description": "显示或隐藏行号。"
+  },
+  "editor::ToggleMinimap": {
+    "name": "切换缩略图",
+    "description": "显示或隐藏缩略图。"
+  },
+  "editor::ToggleRelativeLineNumbers": {
+    "name": "切换相对行号",
+    "description": "显示或隐藏相对行号。"
+  },
+  "editor::ToggleSelectedDiffHunks": {
+    "name": "切换所选差异块",
+    "description": "显示或隐藏所选差异块的差异。"
+  },
+  "editor::ToggleSelectionMenu": {
+    "name": "切换选区菜单",
+    "description": "显示或隐藏选区菜单。"
+  },
+  "editor::ToggleSemanticHighlights": {
+    "name": "切换语义高亮",
+    "description": "显示或隐藏语义高亮。"
+  },
+  "editor::ToggleSoftWrap": {
+    "name": "切换自动换行",
+    "description": "开启或关闭自动换行。"
+  },
+  "editor::ToggleSplitDiff": {
+    "name": "切换拆分差异视图"
+  },
+  "editor::ToggleTabBar": {
+    "name": "切换标签栏",
+    "description": "显示或隐藏标签栏。"
+  },
+  "editor::Transpose": {
+    "name": "调换字符",
+    "description": "调换光标两侧的字符。"
+  },
+  "editor::Undo": {
+    "name": "撤销",
+    "description": "撤销上一次编辑。"
+  },
+  "editor::UndoSelection": {
+    "name": "撤销选区更改",
+    "description": "撤销上一次选区更改。"
+  },
+  "editor::UnfoldAll": {
+    "name": "全部展开",
+    "description": "展开所有折叠的区域。"
+  },
+  "editor::UnfoldLines": {
+    "name": "展开行",
+    "description": "展开光标处的行。"
+  },
+  "editor::UnfoldRecursive": {
+    "name": "递归展开",
+    "description": "在光标处递归展开。"
+  },
+  "editor::UniqueLinesCaseInsensitive": {
+    "name": "删除重复行（不区分大小写）",
+    "description": "删除重复的行（不区分大小写）。"
+  },
+  "editor::UniqueLinesCaseSensitive": {
+    "name": "删除重复行（区分大小写）",
+    "description": "删除重复的行（区分大小写）。"
+  },
+  "editor::UnwrapSyntaxNode": {
+    "name": "移除外层语法节点",
+    "description": "从当前选区中移除外层的语法节点（例如括号或闭包）。"
+  },
+  "editor::ViewBookmarks": {
+    "name": "查看书签",
+    "description": "打开一个视图，列出项目中的所有书签。"
+  },
+  "editor::WrapSelectionsInTag": {
+    "name": "用标签包裹选区",
+    "description": "用当前语言指定的标签包裹选区。"
+  }
+}

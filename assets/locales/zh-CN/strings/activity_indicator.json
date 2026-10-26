@@ -1,0 +1,17 @@
+{
+  "({server_name}) Error: {message}": "（{server_name}）错误：{message}",
+  "({server_name}) Warning: {message}": "（{server_name}）警告：{message}",
+  "Cancel {title}": "取消 {title}",
+  "Checking for updates to {servers}...": "正在检查 {servers} 的更新…",
+  "Debug: {adapter}": "调试：{adapter}",
+  "Directories outside of git repositories and deeper than the `file_scan_depth` setting will be indexed on demand.": "Git 仓库之外以及层级深于 `file_scan_depth` 设置的目录会在需要时再建立索引。",
+  "Downloading {servers}...": "正在下载 {servers}…",
+  "Failed to run {servers}. Click to show error.": "无法运行 {servers}。点击查看错误。",
+  "Formatting failed: {failure}. Click to see logs.": "格式化失败：{failure}。点击查看日志。",
+  "Installing {extension_id} extension…": "正在安装 {extension_id} 扩展…",
+  "Language server {server_name}:\n\n{status}": "语言服务器 {server_name}：\n\n{status}",
+  "Partial file index": "文件索引不完整",
+  "Removing {extension_id} extension…": "正在卸载 {extension_id} 扩展…",
+  "Updating {extension_id} extension…": "正在更新 {extension_id} 扩展…",
+  "{message} + {count} more": "{message}，另有 {count} 项"
+}

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use fs::Fs;
 use gpui::{Action, App, IntoElement};
+use i18n::t;
 use project::project_settings::ProjectSettings;
 use settings::{BaseKeymap, Settings, update_settings_file};
 use theme::{Appearance, SystemAppearance, ThemeRegistry};
@@ -47,34 +48,34 @@ fn render_theme_section(tab_index: &mut isize, cx: &mut App) -> impl IntoElement
     return v_flex()
         .gap_2()
         .child(
-            h_flex().justify_between().child(Label::new("Theme")).child(
-                ToggleButtonGroup::single_row(
-                    "theme-selector-onboarding-dark-light",
-                    [
-                        ThemeAppearanceMode::Light,
-                        ThemeAppearanceMode::Dark,
-                        ThemeAppearanceMode::System,
-                    ]
-                    .map(|mode| {
-                        const MODE_NAMES: [SharedString; 3] = [
-                            SharedString::new_static("Light"),
-                            SharedString::new_static("Dark"),
-                            SharedString::new_static("System"),
-                        ];
-                        ToggleButtonSimple::new(
-                            MODE_NAMES[mode as usize].clone(),
-                            move |_, _, cx| {
+            h_flex()
+                .justify_between()
+                .child(Label::new(t!("Theme")))
+                .child(
+                    ToggleButtonGroup::single_row(
+                        "theme-selector-onboarding-dark-light",
+                        [
+                            ThemeAppearanceMode::Light,
+                            ThemeAppearanceMode::Dark,
+                            ThemeAppearanceMode::System,
+                        ]
+                        .map(|mode| {
+                            let mode_name = match mode {
+                                ThemeAppearanceMode::Light => t!("Light"),
+                                ThemeAppearanceMode::Dark => t!("Dark"),
+                                ThemeAppearanceMode::System => t!("System"),
+                            };
+                            ToggleButtonSimple::new(mode_name, move |_, _, cx| {
                                 write_mode_change(mode, cx);
-                            },
-                        )
-                    }),
-                )
-                .size(ToggleButtonGroupSize::Medium)
-                .tab_index(tab_index)
-                .selected_index(theme_mode as usize)
-                .style(ui::ToggleButtonGroupStyle::Outlined)
-                .width(rems_from_px(3.0_f32 * 64.0_f32)),
-            ),
+                            })
+                        }),
+                    )
+                    .size(ToggleButtonGroupSize::Medium)
+                    .tab_index(tab_index)
+                    .selected_index(theme_mode as usize)
+                    .style(ui::ToggleButtonGroupStyle::Outlined)
+                    .width(rems_from_px(3.0_f32 * 64.0_f32)),
+                ),
         )
         .child(
             h_flex()
@@ -232,7 +233,7 @@ fn render_base_keymap_section(tab_index: &mut isize, cx: &mut App) -> impl IntoE
         BaseKeymap::None => None,
     };
 
-    return v_flex().gap_2().child(Label::new("Base Keymap")).child(
+    return v_flex().gap_2().child(Label::new(t!("Base Keymap"))).child(
         ToggleButtonGroup::two_rows(
             "base_keymap_selection",
             [
@@ -289,12 +290,16 @@ fn render_worktree_auto_trust_switch(tab_index: &mut isize, cx: &mut App) -> imp
         ui::ToggleState::Unselected
     };
 
-    let tooltip_description = "Wu can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted.";
+    let tooltip_description = t!(
+        "Wu can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted."
+    );
 
     SwitchField::new(
         "onboarding-auto-trust-worktrees",
-        Some("Trust All Projects By Default"),
-        Some("Automatically mark all new projects as trusted to unlock all Wu's features".into()),
+        Some(t!("Trust All Projects By Default")),
+        Some(t!(
+            "Automatically mark all new projects as trusted to unlock all Wu's features"
+        )),
         toggle_state,
         {
             let fs = <dyn Fs>::global(cx);
@@ -371,9 +376,9 @@ fn render_import_settings_section(tab_index: &mut isize, cx: &mut App) -> impl I
             v_flex()
                 .gap_0p5()
                 .max_w_5_6()
-                .child(Label::new("Import Settings"))
+                .child(Label::new(t!("Import Settings")))
                 .child(
-                    Label::new("Automatically pull your settings from other editors")
+                    Label::new(t!("Automatically pull your settings from other editors"))
                         .color(Color::Muted),
                 ),
         )
@@ -392,14 +397,16 @@ fn render_install_cli_section(tab_index: &mut isize) -> impl IntoElement {
             v_flex()
                 .gap_0p5()
                 .max_w_5_6()
-                .child(Label::new("Terminal Command"))
+                .child(Label::new(t!("Terminal Command")))
                 .child(
-                    Label::new("Open files and folders from the terminal with the wu command")
-                        .color(Color::Muted),
+                    Label::new(t!(
+                        "Open files and folders from the terminal with the wu command"
+                    ))
+                    .color(Color::Muted),
                 ),
         )
         .child(
-            Button::new("install-cli", "Install CLI")
+            Button::new("install-cli", t!("Install CLI"))
                 .style(ButtonStyle::OutlinedGhost)
                 .size(ButtonSize::Medium)
                 .label_size(LabelSize::Small)

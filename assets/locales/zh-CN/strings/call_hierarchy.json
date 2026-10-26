@@ -1,0 +1,16 @@
+{
+  "Back": "返回",
+  "Fetching call hierarchy…": "正在获取调用层次结构…",
+  "No callable symbol under the cursor": "光标处没有可调用的符号",
+  "No incoming calls found": "未找到传入调用",
+  "No matches": "无匹配项",
+  "No outgoing calls found": "未找到传出调用",
+  "Search calls from `{name}`...": "搜索 `{name}` 发出的调用…",
+  "Search calls to `{name}`...": "搜索对 `{name}` 的调用…",
+  "Search incoming calls...": "搜索传入调用…",
+  "Search outgoing calls...": "搜索传出调用…",
+  "Show Callees": "显示被调用方",
+  "Show Callers": "显示调用方",
+  "Switch Direction": "切换方向",
+  "{path}:{line} ({count} calls)": "{path}:{line}（{count} 处调用）"
+}

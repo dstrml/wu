@@ -1,0 +1,6 @@
+{
+  "line_ending_selector::Toggle": {
+    "name": "切换换行符选择器",
+    "description": "切换换行符选择器弹窗。"
+  }
+}
