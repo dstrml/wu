@@ -212,6 +212,10 @@ pub fn init(languages: Arc<LanguageRegistry>, fs: Arc<dyn Fs>, node: NodeRuntime
             ..Default::default()
         },
         LanguageInfo {
+            name: "xml",
+            ..Default::default()
+        },
+        LanguageInfo {
             name: "gitcommit",
             ..Default::default()
         },
@@ -394,4 +398,38 @@ pub fn language(name: &str, grammar: tree_sitter::Language) -> Arc<Language> {
 fn load_config(name: &str) -> LanguageConfig {
     let grammars_loaded = cfg!(any(feature = "load-grammars", test));
     grammars::load_config_for_feature(name, grammars_loaded)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::Hsla;
+    use language::Rope;
+    use theme::SyntaxTheme;
+
+    #[test]
+    fn svg_files_are_highlighted_as_xml() {
+        let language = crate::language("xml", tree_sitter_xml::LANGUAGE_XML.into());
+        assert!(language.path_suffixes().contains(&"svg".to_string()));
+        language.set_theme(&SyntaxTheme::new_test([
+            ("tag", Hsla::default()),
+            ("attribute", Hsla::default()),
+            ("string", Hsla::default()),
+            ("comment", Hsla::default()),
+        ]));
+        let grammar = language.grammar().expect("xml grammar");
+        let text = r#"<svg width="24"><!-- icon --></svg>"#;
+        let highlighted = |name: &str| {
+            let id = grammar.highlight_id_for_name(name).expect(name);
+            language
+                .highlight_text(&Rope::from(text), 0..text.len())
+                .into_iter()
+                .filter(|(_, highlight)| *highlight == id)
+                .map(|(range, _)| &text[range])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(highlighted("tag"), ["svg", "svg"]);
+        assert_eq!(highlighted("attribute"), ["width"]);
+        assert_eq!(highlighted("string"), [r#""24""#]);
+        assert_eq!(highlighted("comment"), ["<!-- icon -->"]);
+    }
 }

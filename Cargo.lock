@@ -4961,6 +4961,7 @@ dependencies = [
  "tree-sitter-regex",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "tree-sitter-xml",
  "tree-sitter-yaml",
  "util",
 ]
@@ -6333,6 +6334,7 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "tree-sitter-xml",
  "unindent",
  "url",
  "util",
@@ -13062,6 +13064,16 @@ dependencies = [
 name = "tree-sitter-typescript"
 version = "0.23.2"
 source = "git+https://github.com/zed-industries/tree-sitter-typescript?rev=e2c53597d6a5d9cf7bbe8dccde576fe1e46c5899#e2c53597d6a5d9cf7bbe8dccde576fe1e46c5899"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-xml"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e670041f591d994f54d597ddcd8f4ebc930e282c4c76a42268743b71f0c8b6b3"
 dependencies = [
  "cc",
  "tree-sitter-language",

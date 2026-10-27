@@ -10,6 +10,7 @@ release body.
 - Subagents running in the background can now be expanded and observed via the background task indicator.
 - On WSL2, Wu can now use the GPU when started with `WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1`.
 - In agent chat, SVG, BMP and TIFF files are now added as file references instead of being turned into PNG attachments.
+- Added syntax highlighting for XML and SVG files.
 
 ## 1.1.12 - 2026-10-26
 

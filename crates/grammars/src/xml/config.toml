@@ -1,0 +1,11 @@
+name = "XML"
+grammar = "xml"
+path_suffixes = ["xml", "svg", "plist", "xsd", "xsl", "xslt"]
+autoclose_before = ";:.,=}])>"
+brackets = [
+    { start = "<", end = ">", close = false, newline = true },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+    { start = "'", end = "'", close = true, newline = false, not_in = ["string", "comment"] },
+]
+block_comment = { start = "<!--", prefix = "", end = "-->", tab_size = 0 }
+word_characters = ["-", ":"]
