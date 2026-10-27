@@ -19,7 +19,7 @@ export function GithubIcon({ className = 'size-[18px]' }: { className?: string }
 export function AppIcon({ className, alt = '' }: { className: string; alt?: string }) {
   return (
     <span className={`app-icon ${className}`}>
-      <img src="/app-icon.png" alt={alt} />
+      <img src="/app-icon.svg" alt={alt} />
     </span>
   );
 }

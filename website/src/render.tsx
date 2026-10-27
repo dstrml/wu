@@ -35,7 +35,7 @@ export function renderPage(route: Route, { css, js }: Assets): string {
     <title>${title}</title>
     <meta name="description" content="${description}" />
     <link rel="canonical" href="${url}" />
-${alternates}    <link rel="icon" href="/app-icon.png" />
+${alternates}    <link rel="icon" href="/app-icon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="${SITE_TITLE}" />
     <meta property="og:url" content="${url}" />
