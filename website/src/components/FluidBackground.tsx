@@ -13,6 +13,7 @@ const CYCLE_PER_STAMP = 0.006;
 const CYCLE_PER_SECOND = 0.06;
 const IDLE_AFTER_MS = 10_000;
 const AUTO_PATH_SPEED = 0.65;
+const RIPPLE_SECONDS = 1.6;
 const MAX_PIXEL_RATIO = 1.5;
 const COLORS = ['#1f4bff', '#55bdff', '#16c6e8'];
 
@@ -38,13 +39,19 @@ uniform sampler2D velocity;
 uniform sampler2D dye;
 uniform vec2 point;
 uniform vec2 impulse;
+uniform float ringRadius;
+uniform float radialImpulse;
+uniform float strength;
 uniform vec3 color;
 uniform int splatTarget;
 void main() {
   vec2 offset = gl_FragCoord.xy - point;
-  float influence = exp(-dot(offset, offset) / ${(BRUSH_RADIUS * BRUSH_RADIUS).toFixed(4)});
+  float distance = length(offset);
+  float fromBrush = distance - ringRadius;
+  float influence = exp(-fromBrush * fromBrush / ${(BRUSH_RADIUS * BRUSH_RADIUS).toFixed(4)}) * strength;
   if (splatTarget == 0) {
-    outColor = vec4(fetch(velocity, cell()).xy + impulse * influence, 0.0, 1.0);
+    vec2 push = impulse + offset / max(distance, 1.0) * radialImpulse;
+    outColor = vec4(fetch(velocity, cell()).xy + push * influence, 0.0, 1.0);
   } else {
     outColor = vec4(mix(fetch(dye, cell()).rgb, color, clamp(influence, 0.0, 1.0)), 1.0);
   }
@@ -372,7 +379,7 @@ export function FluidBackground({ auto, onUnavailable }: { auto: boolean; onUnav
     let pointer: { x: number; y: number; time: number } | null = null;
     let smoothedVelocity = { x: 0, y: 0 };
 
-    const stamp = (x: number, y: number, impulseX: number, impulseY: number) => {
+    const stamp = (x: number, y: number, impulseX: number, impulseY: number, ring = { radius: 0, impulse: 0, strength: 1 }) => {
       if (!velocity || !dye) return;
       colorCycle += CYCLE_PER_STAMP;
       const color = cycleColor(colorCycle);
@@ -383,6 +390,9 @@ export function FluidBackground({ auto, onUnavailable }: { auto: boolean; onUnav
         const uniforms = use(splat, { velocity: velocity.read.texture, dye: dye.read.texture });
         gl.uniform2f(uniforms.get('point') ?? null, x, y);
         gl.uniform2f(uniforms.get('impulse') ?? null, impulseX, impulseY);
+        gl.uniform1f(uniforms.get('ringRadius') ?? null, ring.radius);
+        gl.uniform1f(uniforms.get('radialImpulse') ?? null, ring.impulse);
+        gl.uniform1f(uniforms.get('strength') ?? null, ring.strength);
         gl.uniform3f(uniforms.get('color') ?? null, ...color);
         gl.uniform1i(uniforms.get('splatTarget') ?? null, target);
         drawInto(field.write);
@@ -434,6 +444,21 @@ export function FluidBackground({ auto, onUnavailable }: { auto: boolean; onUnav
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
 
+    let rippleSeconds = 0;
+    const rippleStep = (dt: number) => {
+      if (rippleSeconds >= RIPPLE_SECONDS) return;
+      const progress = rippleSeconds / RIPPLE_SECONDS;
+      const remaining = 1 - progress;
+      const maxRadius = Math.hypot(gridWidth, gridHeight) / 2;
+      const speed = (maxRadius * 3 * remaining * remaining) / RIPPLE_SECONDS;
+      stamp(gridWidth / 2, gridHeight / 2, 0, 0, {
+        radius: maxRadius * (1 - remaining ** 3),
+        impulse: speed * IMPULSE,
+        strength: remaining
+      });
+      rippleSeconds += dt;
+    };
+
     let animationFrame = 0;
     let lastFrame: number | null = null;
     let lastActivity = -Infinity;
@@ -448,6 +473,7 @@ export function FluidBackground({ auto, onUnavailable }: { auto: boolean; onUnav
         autoSeconds += dt;
         addStroke(from, autoPathPoint(autoSeconds, gridWidth, gridHeight), dt);
       }
+      rippleStep(dt);
       step(dt);
       render();
       if ((auto || now - lastActivity < IDLE_AFTER_MS) && onScreen && !document.hidden) {
@@ -535,9 +561,8 @@ export function FluidBackground({ auto, onUnavailable }: { auto: boolean; onUnav
     resize();
     resizeObserver.observe(canvas);
     intersectionObserver.observe(canvas);
-    if (auto) {
-      wake();
-    } else {
+    wake();
+    if (!auto) {
       window.addEventListener('mousemove', onMouseMove, { passive: true });
       window.addEventListener('touchmove', onTouchMove, { passive: true });
     }
