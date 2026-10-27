@@ -32,6 +32,17 @@ pub(crate) fn is_image_path(path: &Path) -> bool {
         })
 }
 
+pub(crate) fn is_attachable_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp"
+            )
+        })
+}
+
 fn uploads_dir() -> PathBuf {
     paths::data_dir().join("agent_sessions").join("uploads")
 }
@@ -185,13 +196,6 @@ impl ChatView {
         cx.notify();
     }
 
-    pub(super) fn attach_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
-        let images: Vec<PathBuf> = paths.into_iter().filter(|path| is_image_path(path)).collect();
-        if !images.is_empty() {
-            self.stage(Pending::Files(images), cx);
-        }
-    }
-
     pub(super) fn pick_images(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -204,7 +208,7 @@ impl ChatView {
             else {
                 return;
             };
-            this.update(cx, |this, cx| this.attach_paths(paths, cx))
+            this.update_in(cx, |this, window, cx| this.drop_paths(paths, window, cx))
                 .log_err();
         })
         .detach();
@@ -231,7 +235,7 @@ impl ChatView {
                 _ => None,
             })
             .flatten()
-            .filter(|path| is_image_path(path))
+            .filter(|path| is_attachable_image(path))
             .collect();
         if images.is_empty() && files.is_empty() {
             return false;
@@ -260,9 +264,12 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (images, others): (Vec<PathBuf>, Vec<PathBuf>) =
-            paths.into_iter().partition(|path| is_image_path(path));
-        self.attach_paths(images, cx);
+        let (images, others): (Vec<PathBuf>, Vec<PathBuf>) = paths
+            .into_iter()
+            .partition(|path| is_attachable_image(path));
+        if !images.is_empty() {
+            self.stage(Pending::Files(images), cx);
+        }
         self.insert_mentions(others, window, cx);
         cx.notify();
     }
@@ -410,6 +417,8 @@ mod tests {
         image::RgbImage::new(2, 2).save(&image).expect("write png");
         let notes = directory.path().join("notes.txt");
         std::fs::write(&notes, "hello").expect("write text");
+        let diagram = directory.path().join("diagram.svg");
+        std::fs::write(&diagram, "<svg/>").expect("write svg");
         let store = new_store(directory.path(), cx);
         store.update(cx, |store, _| store.skip_plan_usage());
         let project = project::Project::test(project::FakeFs::new(cx.executor()), [], cx).await;
@@ -429,7 +438,11 @@ mod tests {
             chat
         });
         let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
-        let dropped = ExternalPaths([image.clone(), notes.clone()].into_iter().collect());
+        let dropped = ExternalPaths(
+            [image.clone(), notes.clone(), diagram]
+                .into_iter()
+                .collect(),
+        );
         let text_only = ExternalPaths([notes].into_iter().collect());
         let drop = |paths: &ExternalPaths, cx: &mut gpui::VisualTestContext| {
             pane.update_in(cx, |pane, window, cx| {
@@ -451,7 +464,12 @@ mod tests {
         cx.run_until_parked();
         chat.read_with(cx, |chat, cx| {
             assert_eq!(chat.attachments, vec![image.clone()]);
-            assert!(chat.composer.read(cx).text(cx).contains("notes.txt"));
+            let text = chat.composer.read(cx).text(cx);
+            assert!(text.contains("notes.txt"));
+            assert!(
+                text.contains("diagram.svg"),
+                "unsupported images become file references"
+            );
         });
 
         pane.update(cx, |pane, _| {
@@ -495,5 +513,7 @@ mod tests {
 
         assert!(is_image_path(Path::new("a/B.JPEG")));
         assert!(!is_image_path(Path::new("notes.txt")));
+        assert!(is_attachable_image(Path::new("a/B.JPEG")));
+        assert!(!is_attachable_image(Path::new("diagram.svg")));
     }
 }

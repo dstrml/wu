@@ -3439,7 +3439,9 @@ impl Item for ChatView {
             return false;
         }
         let paths = self.dropped_paths(dropped, cx);
-        let has_image = paths.iter().any(|path| attachments::is_image_path(path));
+        let has_image = paths
+            .iter()
+            .any(|path| attachments::is_attachable_image(path));
         // Drops on a pane edge split the pane, unless they carry an image to attach.
         if paths.is_empty() || (active_pane.drag_split_direction().is_some() && !has_image) {
             return false;
@@ -3458,7 +3460,7 @@ impl Item for ChatView {
             && self
                 .dropped_paths(dragged, cx)
                 .iter()
-                .any(|path| attachments::is_image_path(path))
+                .any(|path| attachments::is_attachable_image(path))
     }
 
     fn as_searchable(
