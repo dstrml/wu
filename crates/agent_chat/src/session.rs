@@ -2168,6 +2168,21 @@ fn saved_messages_path(directory: &Path) -> PathBuf {
     directory.join("saved_messages.json")
 }
 
+fn fork_title(parent_title: &str, sessions: &[SessionMetadata]) -> String {
+    if parent_title.is_empty() {
+        return String::new();
+    }
+    let base = parent_title
+        .strip_suffix(')')
+        .and_then(|rest| rest.rsplit_once(" ("))
+        .filter(|(_, number)| number.parse::<u32>().is_ok_and(|number| number >= 2))
+        .map_or(parent_title, |(base, _)| base);
+    (2..)
+        .map(|number| format!("{base} ({number})"))
+        .find(|title| !sessions.iter().any(|session| session.title == *title))
+        .unwrap_or_default()
+}
+
 fn fork_context(entries: &[SerializedEntry]) -> Option<String> {
     let history: Vec<serde_json::Value> = entries
         .iter()
@@ -3218,7 +3233,7 @@ impl AgentStore {
                     entries.clear();
                     SIDE_CHAT_NOTICE
                 } else {
-                    metadata.title = parent_metadata.title;
+                    metadata.title = fork_title(&parent_metadata.title, &this.sessions);
                     FORKED_NOTICE
                 };
                 let notice = i18n::format(
@@ -5423,6 +5438,40 @@ done
             assert!(context.contains("Fix the bug") && context.contains("Fixed."));
             assert!(!session.is_working());
         });
+    }
+
+    #[gpui::test]
+    async fn forks_get_the_next_free_number(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let parent = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let parent_id = session_id(&parent, cx);
+        store.update(cx, |store, cx| {
+            store.rename_session(&parent_id, "Chat".to_string(), cx)
+        });
+
+        let mut titles = Vec::new();
+        for _ in 0..2 {
+            let fork = store
+                .update(cx, |store, cx| store.fork_session(&parent_id, false, cx))
+                .await
+                .expect("fork");
+            titles.push(fork.read_with(cx, |fork, _| fork.metadata().title.clone()));
+        }
+        let fork_of_fork_id = store
+            .update(cx, |store, cx| store.fork_session(&parent_id, false, cx))
+            .await
+            .map(|fork| session_id(&fork, cx))
+            .expect("fork");
+        let fork_of_fork = store
+            .update(cx, |store, cx| store.fork_session(&fork_of_fork_id, false, cx))
+            .await
+            .expect("fork of fork");
+        titles.push(fork_of_fork.read_with(cx, |fork, _| fork.metadata().title.clone()));
+
+        assert_eq!(titles, ["Chat (2)", "Chat (3)", "Chat (5)"]);
     }
 
     #[gpui::test]

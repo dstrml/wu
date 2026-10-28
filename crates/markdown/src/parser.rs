@@ -721,17 +721,89 @@ fn build_footnote_definitions(
 
 pub fn parse_links_only(text: &str) -> Vec<(Range<usize>, MarkdownEvent)> {
     let mut events = Vec::new();
+    push_text_with_links(text, 0..text.len(), &mut events);
+    events
+}
+
+pub fn parse_links_and_block_quotes(text: &str) -> Vec<(Range<usize>, MarkdownEvent)> {
+    let mut lines = Vec::new();
+    let mut line_start = 0;
+    for line in text.split_inclusive('\n') {
+        let line_end = line_start + line.trim_end_matches('\n').len();
+        lines.push((
+            line_start..line_end,
+            block_quote_content_start(text, line_start..line_end),
+        ));
+        line_start += line.len();
+    }
+
+    let mut events = Vec::new();
+    let mut index = 0;
+    while let Some((first_line, first_content)) = lines.get(index) {
+        let is_quote = first_content.is_some();
+        let group_end = lines[index..]
+            .iter()
+            .position(|(_, content)| content.is_some() != is_quote)
+            .map_or(lines.len(), |offset| index + offset);
+        let group = &lines[index..group_end];
+        let last_line_end = group.last().map_or(first_line.end, |(range, _)| range.end);
+
+        if is_quote {
+            let block_range = first_line.start..last_line_end;
+            events.push((
+                block_range.clone(),
+                MarkdownEvent::Start(MarkdownTag::BlockQuote(None)),
+            ));
+            for (position, (line, content_start)) in group.iter().enumerate() {
+                let content_start = content_start.unwrap_or(line.start);
+                let content_end = if position + 1 < group.len() {
+                    line.end + 1
+                } else {
+                    line.end
+                };
+                push_text_with_links(text, content_start..content_end, &mut events);
+            }
+            events.push((
+                block_range,
+                MarkdownEvent::End(MarkdownTagEnd::BlockQuote(None)),
+            ));
+        } else {
+            let text_end = if group_end == lines.len() {
+                text.len()
+            } else {
+                last_line_end
+            };
+            push_text_with_links(text, first_line.start..text_end, &mut events);
+        }
+        index = group_end;
+    }
+    events
+}
+
+fn block_quote_content_start(text: &str, line: Range<usize>) -> Option<usize> {
+    let line_text = &text[line.clone()];
+    let indent = line_text.len() - line_text.trim_start_matches(' ').len();
+    if indent > 3 || !line_text[indent..].starts_with('>') {
+        return None;
+    }
+    let marker_end = line.start + indent + 1;
+    let has_space = matches!(text[marker_end..line.end].chars().next(), Some(' ' | '\t'));
+    Some(marker_end + usize::from(has_space))
+}
+
+fn push_text_with_links(
+    text: &str,
+    range: Range<usize>,
+    events: &mut Vec<(Range<usize>, MarkdownEvent)>,
+) {
     let mut finder = LinkFinder::new();
     finder.kinds(&[linkify::LinkKind::Url]);
-    let mut text_range = Range {
-        start: 0,
-        end: text.len(),
-    };
-    for link in finder.links(text) {
-        let link_range = link.start()..link.end();
+    let mut text_start = range.start;
+    for link in finder.links(&text[range.clone()]) {
+        let link_range = range.start + link.start()..range.start + link.end();
 
-        if link_range.start > text_range.start {
-            events.push((text_range.start..link_range.start, MarkdownEvent::Text));
+        if link_range.start > text_start {
+            events.push((text_start..link_range.start, MarkdownEvent::Text));
         }
 
         events.push((
@@ -746,14 +818,12 @@ pub fn parse_links_only(text: &str) -> Vec<(Range<usize>, MarkdownEvent)> {
         events.push((link_range.clone(), MarkdownEvent::Text));
         events.push((link_range.clone(), MarkdownEvent::End(MarkdownTagEnd::Link)));
 
-        text_range.start = link_range.end;
+        text_start = link_range.end;
     }
 
-    if text_range.end > text_range.start {
-        events.push((text_range, MarkdownEvent::Text));
+    if range.end > text_start {
+        events.push((text_start..range.end, MarkdownEvent::Text));
     }
-
-    events
 }
 
 /// A static-lifetime equivalent of pulldown_cmark::Event so we can cache the
@@ -996,6 +1066,34 @@ mod tests {
                 .union(UNWANTED_OPTIONS),
             Options::all()
         );
+    }
+
+    #[test]
+    fn links_and_block_quotes() {
+        let text = "Intro\n> first\n>second https://a.dev\nAfter\n";
+        assert_eq!(
+            parse_links_and_block_quotes(text),
+            vec![
+                (0..5, Text),
+                (6..35, Start(BlockQuote(None))),
+                (8..14, Text),
+                (15..22, Text),
+                (
+                    22..35,
+                    Start(Link {
+                        link_type: LinkType::Autolink,
+                        dest_url: "https://a.dev".into(),
+                        title: SharedString::default(),
+                        id: SharedString::default(),
+                    })
+                ),
+                (22..35, Text),
+                (22..35, End(MarkdownTagEnd::Link)),
+                (6..35, End(MarkdownTagEnd::BlockQuote(None))),
+                (36..42, Text),
+            ]
+        );
+        assert_eq!(parse_links_and_block_quotes("    > code"), vec![(0..10, Text)]);
     }
 
     #[test]

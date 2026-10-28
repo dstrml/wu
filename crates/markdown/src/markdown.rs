@@ -40,8 +40,8 @@ use i18n::t;
 use language::{CharClassifier, Language, LanguageRegistry, Rope};
 use parser::CodeBlockMetadata;
 use parser::{
-    MarkdownEvent, MarkdownTag, MarkdownTagEnd, ParsedMetadataBlock, parse_links_only,
-    parse_markdown_with_options,
+    MarkdownEvent, MarkdownTag, MarkdownTagEnd, ParsedMetadataBlock, parse_links_and_block_quotes,
+    parse_links_only, parse_markdown_with_options,
 };
 use pulldown_cmark::{Alignment, BlockQuoteKind};
 use sum_tree::TreeMap;
@@ -403,6 +403,7 @@ pub struct Markdown {
 #[derive(Clone, Copy, Default)]
 pub struct MarkdownOptions {
     pub parse_links_only: bool,
+    pub parse_block_quotes: bool,
     pub parse_html: bool,
     pub parse_heading_slugs: bool,
     pub render_metadata_blocks: bool,
@@ -958,6 +959,7 @@ impl Markdown {
     fn start_background_parse(&self, cx: &Context<Self>) -> Task<()> {
         let source = self.source.clone();
         let should_parse_links_only = self.options.parse_links_only;
+        let should_parse_block_quotes = self.options.parse_block_quotes;
         let should_parse_html = self.options.parse_html;
         let should_parse_heading_slugs = self.options.parse_heading_slugs;
         let should_parse_metadata_blocks = self.options.render_metadata_blocks;
@@ -966,9 +968,14 @@ impl Markdown {
 
         let parsed = cx.background_spawn(async move {
             if should_parse_links_only {
+                let events = if should_parse_block_quotes {
+                    parse_links_and_block_quotes(source.as_ref())
+                } else {
+                    parse_links_only(source.as_ref())
+                };
                 return (
                     ParsedMarkdown {
-                        events: Arc::from(parse_links_only(source.as_ref())),
+                        events: Arc::from(events),
                         source,
                         languages_by_name: TreeMap::default(),
                         languages_by_path: TreeMap::default(),

@@ -41,8 +41,8 @@ use gpui::{
     UnderlineStyle, WeakEntity, Window, canvas, div, img, point, px, radians, size, svg,
 };
 use markdown::{
-    CodeBlockRenderer, HeadingLevelStyles, Markdown, MarkdownElement, MarkdownFont, MarkdownStyle,
-    TABLE_GROUP, TableActionsFn, parser::CodeBlockKind,
+    CodeBlockRenderer, HeadingLevelStyles, Markdown, MarkdownElement, MarkdownFont, MarkdownOptions,
+    MarkdownStyle, TABLE_GROUP, TableActionsFn, parser::CodeBlockKind,
 };
 use project::Project;
 use gpui::{FollowMode, ListAlignment, ListState, list};
@@ -1430,7 +1430,19 @@ impl ChatView {
         {
             return Some(markdown.clone());
         }
-        let markdown = cx.new(|cx| Markdown::new_text(text, cx));
+        let markdown = cx.new(|cx| {
+            Markdown::new_with_options(
+                text,
+                None,
+                None,
+                MarkdownOptions {
+                    parse_links_only: true,
+                    parse_block_quotes: true,
+                    ..Default::default()
+                },
+                cx,
+            )
+        });
         self.highlight_new_message(index, &markdown, cx);
         self.user_markdown.insert(index, markdown.clone());
         Some(markdown)
