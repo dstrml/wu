@@ -1,11 +1,10 @@
 # Changelog
 
-All notable user-facing changes to Wu are listed here, newest first. Add a
-bullet under Unreleased with your change; the version bump commit turns that
-section into the release, and the release workflow copies it into the GitHub
-release body.
+All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
+
+- Fixed the agent chat box jumping between one and two lines.
 
 ## 1.1.13 - 2026-10-28
 

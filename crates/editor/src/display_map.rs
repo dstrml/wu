@@ -1243,6 +1243,10 @@ impl DisplayMap {
             .update(cx, |map, cx| map.set_font_with_size(font, font_size, cx))
     }
 
+    pub fn wrap_width(&self, cx: &App) -> Option<Pixels> {
+        self.wrap_map.read(cx).wrap_width()
+    }
+
     pub fn set_wrap_width(&self, width: Option<Pixels>, cx: &mut Context<Self>) -> bool {
         self.wrap_map
             .update(cx, |map, cx| map.set_wrap_width(width, cx))

@@ -252,6 +252,10 @@ impl WrapMap {
         }
     }
 
+    pub fn wrap_width(&self) -> Option<Pixels> {
+        self.wrap_width
+    }
+
     #[ztracing::instrument(skip_all)]
     pub fn set_wrap_width(&mut self, wrap_width: Option<Pixels>, cx: &mut Context<Self>) -> bool {
         if wrap_width == self.wrap_width {

@@ -44,11 +44,11 @@ fn composer_flip(expanded: bool, wraps: bool, text_width: f32, capacity: Option<
     }
 }
 
-fn single_line_width(text: &str, window: &Window) -> f32 {
+fn single_line_width(text: &str, font: Font, window: &Window) -> f32 {
     let font_size = ui(14.).to_pixels(window.rem_size());
     let run = TextRun {
         len: text.len(),
-        font: window.text_style().font(),
+        font,
         ..Default::default()
     };
     let line = window
@@ -210,7 +210,7 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> bool {
         let text = self.composer.read(cx).text(cx);
-        let (wraps, width) = self.composer.update(cx, |editor, cx| {
+        let (wraps, width, font) = self.composer.update(cx, |editor, cx| {
             let wraps = editor
                 .snapshot(window, cx)
                 .display_snapshot
@@ -218,7 +218,8 @@ impl ChatView {
                 .row()
                 .0
                 > 0;
-            (wraps, editor.last_bounds().map(|bounds| f32::from(bounds.size.width)))
+            let width = editor.display_map.read(cx).wrap_width(cx).map(f32::from);
+            (wraps, width, editor.style(cx).text.font())
         });
         let layout = &mut self.composer_layout;
         let fresh_width = width.filter(|width| Some(*width) != layout.width_before_flip);
@@ -240,7 +241,7 @@ impl ChatView {
             true
         } else {
             let text_width = match capacity {
-                Some(_) if layout.expanded => single_line_width(&text, window),
+                Some(_) if layout.expanded => single_line_width(&text, font, window),
                 _ => 0.,
             };
             composer_flip(layout.expanded, wraps, text_width, capacity)
