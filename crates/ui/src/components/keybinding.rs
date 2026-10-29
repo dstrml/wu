@@ -46,12 +46,39 @@ impl Clone for Source {
 pub struct KeyBinding {
     source: Source,
     size: Option<AbsoluteLength>,
+    style: KeyBindingStyle,
+    color: Option<Color>,
     /// The [`PlatformStyle`] to use when displaying this keybinding.
     platform_style: PlatformStyle,
     /// Indicates whether the keybinding is currently disabled.
     disabled: bool,
 }
 
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
+=======
+/// Controls how a [`KeyBinding`] is presented.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KeyBindingStyle {
+    /// Render each key using compact key dimensions and muted colors.
+    #[default]
+    Default,
+    /// Render keys and modifier symbols using the same metrics and colors as a [`Label`].
+    Label,
+}
+
+struct VimStyle(bool);
+impl Global for VimStyle {}
+
+struct KeyBindingVisibility(bool);
+impl Global for KeyBindingVisibility {}
+
+impl Default for KeyBindingVisibility {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
 impl KeyBinding {
     /// Returns the highest precedence keybinding for an action. This is the last binding added to
     /// the keymap. User bindings are added after built-in bindings so that they take precedence.
@@ -76,13 +103,43 @@ impl KeyBinding {
         }
     }
 
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
     pub fn new(action: &dyn Action, focus_handle: Option<FocusHandle>, _cx: &App) -> Self {
+=======
+    pub fn set_vim_mode(cx: &mut App, enabled: bool) {
+        cx.set_global(VimStyle(enabled));
+    }
+
+    /// Returns whether keybindings use Vim-style notation.
+    pub fn is_vim_mode(cx: &App) -> bool {
+        cx.try_global::<VimStyle>().is_some_and(|g| g.0)
+    }
+
+    /// Sets the application-wide visibility of keybindings.
+    pub fn set_default_visibility(cx: &mut App, visible: bool) {
+        cx.set_global(KeyBindingVisibility(visible));
+        cx.refresh_windows();
+    }
+
+    /// Returns whether keybindings are visible application-wide.
+    pub fn default_visibility(cx: &mut App) -> bool {
+        cx.default_global::<KeyBindingVisibility>().0
+    }
+
+    pub fn new(action: &dyn Action, focus_handle: Option<FocusHandle>, cx: &App) -> Self {
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
         Self {
             source: Source::Action {
                 action: action.boxed_clone(),
                 focus_handle,
             },
             size: None,
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
+=======
+            style: KeyBindingStyle::Default,
+            color: None,
+            vim_mode: KeyBinding::is_vim_mode(cx),
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
             platform_style: PlatformStyle::platform(),
             disabled: false,
         }
@@ -92,6 +149,12 @@ impl KeyBinding {
         Self {
             source: Source::Keystrokes { keystrokes },
             size: None,
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
+=======
+            style: KeyBindingStyle::Default,
+            color: None,
+            vim_mode,
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
             platform_style: PlatformStyle::platform(),
             disabled: false,
         }
@@ -106,6 +169,18 @@ impl KeyBinding {
     /// Sets the size for this [`KeyBinding`].
     pub fn size(mut self, size: impl Into<AbsoluteLength>) -> Self {
         self.size = Some(size.into());
+        self
+    }
+
+    /// Sets how this keybinding is presented.
+    pub fn style(mut self, style: KeyBindingStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets the color used to render the keybinding.
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
         self
     }
 
@@ -165,21 +240,36 @@ fn render_key(
     color: Option<Color>,
     platform_style: PlatformStyle,
     size: impl Into<Option<AbsoluteLength>>,
+    style: KeyBindingStyle,
 ) -> AnyElement {
     let key_icon = icon_for_key(key, platform_style);
     match key_icon {
         Some(icon) => KeyIcon::new(icon, color).size(size).into_any_element(),
         None => {
             let key = capitalize(key);
-            Key::new(&key, color).size(size).into_any_element()
+            match style {
+                KeyBindingStyle::Default => Key::new(&key, color).size(size).into_any_element(),
+                KeyBindingStyle::Label => LabelKey::new(&key, color).size(size).into_any_element(),
+            }
         }
     }
 }
 
 impl RenderOnce for KeyBinding {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if !Self::default_visibility(cx) {
+            return gpui::Empty.into_any_element();
+        }
+
         let render_keybinding = |keystrokes: &[KeybindingKeystroke]| {
-            let color = self.disabled.then_some(Color::Disabled);
+            let color = if self.disabled {
+                Some(Color::Disabled)
+            } else {
+                self.color.or(match self.style {
+                    KeyBindingStyle::Default => None,
+                    KeyBindingStyle::Label => Some(Color::Default),
+                })
+            };
 
             h_flex()
                 .debug_selector(|| {
@@ -197,14 +287,19 @@ impl RenderOnce for KeyBinding {
                 .children(keystrokes.iter().map(|keystroke| {
                     h_flex()
                         .flex_none()
-                        .py_0p5()
+                        .when(self.style == KeyBindingStyle::Default, |this| this.py_0p5())
                         .rounded_xs()
-                        .text_color(cx.theme().colors().text_muted)
-                        .children(render_keybinding_keystroke(
+                        .text_color(color.unwrap_or(Color::Muted).color(cx))
+                        .children(render_keybinding_keystroke_with_style(
                             keystroke,
                             color,
                             self.size,
                             PlatformStyle::platform(),
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
+=======
+                            self.vim_mode,
+                            self.style,
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
                         ))
                 }))
                 .into_any_element()
@@ -233,6 +328,7 @@ pub fn render_keybinding_keystroke(
     size: impl Into<Option<AbsoluteLength>>,
     platform_style: PlatformStyle,
 ) -> Vec<AnyElement> {
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
     let use_text = matches!(
         platform_style,
         PlatformStyle::Linux | PlatformStyle::Windows
@@ -250,17 +346,68 @@ pub fn render_keybinding_keystroke(
         )
         .size(size)
         .into_any_element();
+=======
+    render_keybinding_keystroke_with_style(
+        keystroke,
+        color,
+        size,
+        platform_style,
+        vim_mode,
+        KeyBindingStyle::Default,
+    )
+}
+
+fn render_keybinding_keystroke_with_style(
+    keystroke: &KeybindingKeystroke,
+    color: Option<Color>,
+    size: impl Into<Option<AbsoluteLength>>,
+    platform_style: PlatformStyle,
+    vim_mode: bool,
+    style: KeyBindingStyle,
+) -> Vec<AnyElement> {
+    let use_text = vim_mode
+        || matches!(
+            platform_style,
+            PlatformStyle::Linux | PlatformStyle::Windows
+        );
+    let size = size.into();
+
+    if use_text {
+        let text = keystroke_text(
+            keystroke.modifiers(),
+            keystroke.key(),
+            platform_style,
+            vim_mode,
+        );
+        let element = match style {
+            KeyBindingStyle::Default => Key::new(text, color).size(size).into_any_element(),
+            KeyBindingStyle::Label => LabelKey::new(text, color).size(size).into_any_element(),
+        };
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
         vec![element]
     } else {
         let mut elements = Vec::new();
-        elements.extend(render_modifiers(
+        let modifiers = render_modifiers_with_style(
             keystroke.modifiers(),
             platform_style,
             color,
             size,
             true,
+            style,
+        )
+        .collect::<Vec<_>>();
+        if style == KeyBindingStyle::Label && !modifiers.is_empty() {
+            elements.push(h_flex().children(modifiers).mr_0p5().into_any_element());
+        } else {
+            elements.extend(modifiers);
+        }
+        elements.push(render_key(
+            keystroke.key(),
+            color,
+            platform_style,
+            size,
+            style,
         ));
-        elements.push(render_key(keystroke.key(), color, platform_style, size));
         elements
     }
 }
@@ -272,7 +419,7 @@ fn icon_for_key(key: &str, platform_style: PlatformStyle) -> Option<IconName> {
         "up" => Some(IconName::ArrowUp),
         "down" => Some(IconName::ArrowDown),
         "backspace" => Some(IconName::Backspace),
-        "delete" => Some(IconName::Backspace),
+        "delete" => Some(IconName::Delete),
         "return" => Some(IconName::Return),
         "enter" => Some(IconName::Return),
         "tab" => Some(IconName::Tab),
@@ -296,6 +443,24 @@ pub fn render_modifiers(
     size: Option<AbsoluteLength>,
     trailing_separator: bool,
 ) -> impl Iterator<Item = AnyElement> {
+    render_modifiers_with_style(
+        modifiers,
+        platform_style,
+        color,
+        size,
+        trailing_separator,
+        KeyBindingStyle::Default,
+    )
+}
+
+fn render_modifiers_with_style(
+    modifiers: &Modifiers,
+    platform_style: PlatformStyle,
+    color: Option<Color>,
+    size: Option<AbsoluteLength>,
+    trailing_separator: bool,
+    style: KeyBindingStyle,
+) -> impl Iterator<Item = AnyElement> {
     #[derive(Clone)]
     enum KeyOrIcon {
         Key(&'static str),
@@ -310,37 +475,42 @@ pub fn render_modifiers(
         windows: KeyOrIcon,
     }
 
+    let mac_modifier = |icon, label| match style {
+        KeyBindingStyle::Default => KeyOrIcon::Icon(icon),
+        KeyBindingStyle::Label => KeyOrIcon::Key(label),
+    };
+
     let table = {
         use KeyOrIcon::*;
 
         [
             Modifier {
                 enabled: modifiers.function,
-                mac: Icon(IconName::Control),
+                mac: mac_modifier(IconName::Control, "Fn"),
                 linux: Key("Fn"),
                 windows: Key("Fn"),
             },
             Modifier {
                 enabled: modifiers.control,
-                mac: Icon(IconName::Control),
+                mac: mac_modifier(IconName::Control, "⌃"),
                 linux: Key("Ctrl"),
                 windows: Key("Ctrl"),
             },
             Modifier {
                 enabled: modifiers.alt,
-                mac: Icon(IconName::Option),
+                mac: mac_modifier(IconName::Option, "⌥"),
                 linux: Key("Alt"),
                 windows: Key("Alt"),
             },
             Modifier {
                 enabled: modifiers.platform,
-                mac: Icon(IconName::Command),
+                mac: mac_modifier(IconName::Command, "⌘"),
                 linux: Key("Super"),
                 windows: Key("Win"),
             },
             Modifier {
                 enabled: modifiers.shift,
-                mac: Icon(IconName::Shift),
+                mac: mac_modifier(IconName::Shift, "⇧"),
                 linux: Key("Shift"),
                 windows: Key("Shift"),
             },
@@ -376,9 +546,15 @@ pub fn render_modifiers(
         })
         .flatten()
         .map(move |key_or_icon| match key_or_icon {
-            KeyOrIcon::Key(key) => Key::new(key, color).size(size).into_any_element(),
+            KeyOrIcon::Key(key) => match style {
+                KeyBindingStyle::Default => Key::new(key, color).size(size).into_any_element(),
+                KeyBindingStyle::Label => LabelKey::new(key, color).size(size).into_any_element(),
+            },
             KeyOrIcon::Icon(icon) => KeyIcon::new(icon, color).size(size).into_any_element(),
-            KeyOrIcon::Plus => "+".into_any_element(),
+            KeyOrIcon::Plus => match style {
+                KeyBindingStyle::Default => "+".into_any_element(),
+                KeyBindingStyle::Label => LabelKey::new("+", color).size(size).into_any_element(),
+            },
         })
 }
 
@@ -423,6 +599,41 @@ impl Key {
     }
 
     pub fn size(mut self, size: impl Into<Option<AbsoluteLength>>) -> Self {
+        self.size = size.into();
+        self
+    }
+}
+
+#[derive(IntoElement)]
+struct LabelKey {
+    key: SharedString,
+    color: Option<Color>,
+    size: Option<AbsoluteLength>,
+}
+
+impl RenderOnce for LabelKey {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let size = self
+            .size
+            .map(|size| LabelSize::Custom(size.to_rems(window.rem_size())))
+            .unwrap_or_default();
+
+        Label::new(self.key)
+            .size(size)
+            .color(self.color.unwrap_or(Color::Default))
+    }
+}
+
+impl LabelKey {
+    fn new(key: impl Into<SharedString>, color: Option<Color>) -> Self {
+        Self {
+            key: key.into(),
+            color,
+            size: None,
+        }
+    }
+
+    fn size(mut self, size: impl Into<Option<AbsoluteLength>>) -> Self {
         self.size = size.into();
         self
     }
@@ -603,6 +814,21 @@ impl Component for KeyBinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_backspace_and_delete_have_distinct_icons() {
+        for platform_style in [
+            PlatformStyle::Mac,
+            PlatformStyle::Linux,
+            PlatformStyle::Windows,
+        ] {
+            let backspace = icon_for_key("backspace", platform_style);
+            let delete = icon_for_key("delete", platform_style);
+            assert!(backspace.is_some());
+            assert!(delete.is_some());
+            assert_ne!(backspace, delete);
+        }
+    }
 
     #[test]
     fn test_text_for_keystroke() {

@@ -283,6 +283,7 @@ impl TrustedWorktreesStore {
         let mut new_trusted_single_file_worktrees = HashSet::default();
         let mut new_trusted_other_worktrees = HashSet::default();
         let mut new_trusted_abs_paths = HashSet::default();
+        let path_style = worktree_store.read(cx).path_style();
         for trusted_path in trusted_paths.iter().chain(
             self.trusted_paths
                 .remove(&weak_worktree_store)
@@ -313,10 +314,7 @@ impl TrustedWorktreesStore {
                 }
                 PathTrust::AbsPath(abs_path) => {
                     debug_assert!(
-                        util::paths::is_absolute(
-                            &abs_path.to_string_lossy(),
-                            worktree_store.read(cx).path_style()
-                        ),
+                        worktree_store.read(cx).path_style().is_absolute(&abs_path),
                         "Cannot trust non-absolute path {abs_path:?} on path style {style:?}",
                         style = worktree_store.read(cx).path_style()
                     );
@@ -336,9 +334,9 @@ impl TrustedWorktreesStore {
         }
 
         new_trusted_other_worktrees.retain(|(worktree_abs_path, _)| {
-            new_trusted_abs_paths
-                .iter()
-                .all(|new_trusted_path| !worktree_abs_path.starts_with(new_trusted_path))
+            new_trusted_abs_paths.iter().all(|new_trusted_path| {
+                !path_style.starts_with(worktree_abs_path, new_trusted_path)
+            })
         });
         if !new_trusted_other_worktrees.is_empty() {
             new_trusted_single_file_worktrees.clear();
@@ -365,7 +363,7 @@ impl TrustedWorktreesStore {
                     let restricted_worktree_path = worktree.read(cx).abs_path();
                     let retain = (!is_file || new_trusted_other_worktrees.is_empty())
                         && new_trusted_abs_paths.iter().all(|new_trusted_path| {
-                            !restricted_worktree_path.starts_with(new_trusted_path)
+                            !path_style.starts_with(&restricted_worktree_path, new_trusted_path)
                         });
                     if !retain {
                         trusted_paths.insert(PathTrust::Worktree(*restricted_worktree));
@@ -471,6 +469,7 @@ impl TrustedWorktreesStore {
             return false;
         };
         let worktree_path = worktree.read(cx).abs_path();
+        let path_style = worktree.read(cx).path_style();
         // Zed opened an "internal" directory: e.g. a tmp dir for `keymap_editor.rs` needs.
         if !worktree.read(cx).is_visible() {
             log::debug!("Skipping worktree trust checks for not visible {worktree_path:?}");
@@ -495,7 +494,7 @@ impl TrustedWorktreesStore {
         }
 
         // * Single files are auto-approved when something else (not a single file) was approved on this host already.
-        // * If parent path is trusted already, this worktree is stusted also.
+        // * If parent path is trusted already, this worktree is trusted also.
         //
         // See module documentation for details on trust level.
         if let Some(trusted_paths) = self.trusted_paths.get(&weak_worktree_store) {
@@ -505,11 +504,11 @@ impl TrustedWorktreesStore {
                         .worktree_for_id(*worktree_id, cx)
                         .is_some_and(|worktree| {
                             let worktree = worktree.read(cx);
-                            worktree_path.starts_with(&worktree.abs_path())
+                            path_style.starts_with(&worktree_path, &worktree.abs_path())
                                 || (is_file && !worktree.is_single_file())
                         }),
                     PathTrust::AbsPath(trusted_path) => {
-                        is_file || worktree_path.starts_with(trusted_path)
+                        is_file || path_style.starts_with(&worktree_path, trusted_path)
                     }
                 })
             });

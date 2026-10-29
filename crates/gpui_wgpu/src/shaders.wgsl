@@ -1261,10 +1261,10 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
 struct MonochromeSprite {
     order: u32,
     pad: u32,
+    tile: AtlasTile,
     bounds: Bounds,
     content_mask: Bounds,
     color: Hsla,
-    tile: AtlasTile,
     transformation: TransformationMatrix,
     fade: EdgeFadeParams,
 }
@@ -1340,14 +1340,18 @@ fn image_mask_alpha(position: vec2<f32>, mask: ImageAlphaMaskParams) -> f32 {
 struct PolychromeSprite {
     order: u32,
     pad: u32,
+    tile: AtlasTile,
     grayscale: u32,
     opacity: f32,
     bounds: Bounds,
     content_mask: Bounds,
     corner_radii: Corners,
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
     fade: EdgeFadeParams,
     alpha_mask: ImageAlphaMaskParams,
     tile: AtlasTile,
+=======
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
 }
 
 

@@ -1,5 +1,9 @@
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
 [build]
 jobs = 4
+=======
+[target.'cfg(all())']
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
 # v0 mangling scheme provides more detailed backtraces around closures
 rustflags = ["-C", "symbol-mangling-version=v0", "--cfg", "tokio_unstable"]
 

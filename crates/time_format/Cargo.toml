@@ -13,13 +13,19 @@ path = "src/time_format.rs"
 doctest = false
 
 [dependencies]
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
 i18n.workspace = true
 sys-locale.workspace = true
+=======
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
 time.workspace = true
+
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
+sys-locale.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation.workspace = true
 core-foundation-sys.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows.workspace = true
+windows = { workspace = true, features = ["Globalization_DateTimeFormatting"] }

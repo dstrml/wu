@@ -419,7 +419,11 @@ impl Render for DeleteWorktreeTooltip {
             Tooltip::with_meta_in(
                 t!("Delete Worktree"),
                 Some(&DeleteWorktree),
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
                 t!("Hold alt to force delete"),
+=======
+                concat!("Hold ", ui::alt_key_name!(), " to force delete"),
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
                 &self.focus_handle,
                 cx,
             )
