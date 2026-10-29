@@ -1,39 +1,31 @@
 use crate::types::TableCell;
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
 use gpui::{AnyElement, Entity};
 use i18n::t;
+=======
+use gpui::{AnyElement, Entity, Hsla};
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
 use std::ops::Range;
 use ui::{ColumnWidthConfig, ResizableColumnsState, Table, UncheckedTableRow, div, prelude::*};
 
 use crate::{
-    TabularDataPreviewPane,
+    TableView,
     settings::RowRenderMechanism,
-    types::{AnyColumn, DisplayCellId, DisplayRow},
+    types::{AnyColumn, DataCellId, DisplayCellId, DisplayRow},
 };
 
-impl TabularDataPreviewPane {
-    /// Creates a new table.
-    /// Column number is derived from the `ResizableColumnsState` entity.
+impl TableView {
     pub(crate) fn create_table(
         &self,
         current_widths: &Entity<ResizableColumnsState>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.create_table_inner(self.engine.contents.rows.len(), current_widths, cx)
-    }
-
-    fn create_table_inner(
-        &self,
-        row_count: usize,
-        current_widths: &Entity<ResizableColumnsState>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+        let row_count = self.engine.d2d_mapping().visible_row_count();
         let cols = current_widths.read(cx).cols();
-        // Create headers array with interactive elements
         let mut headers = Vec::with_capacity(cols);
 
         headers.push(self.create_row_identifier_header(cx));
 
-        // Add the actual data headers with sort buttons
         for i in 0..(cols - 1) {
             let header_text = self
                 .engine
@@ -63,24 +55,22 @@ impl TabularDataPreviewPane {
                         table.variable_row_height_list(row_count, self.list_state.clone(), {
                             cx.processor(move |this, display_row: usize, _window, cx| {
                                 this.performance_metrics.rendered_indices.push(display_row);
-
-                                let display_row = DisplayRow(display_row);
+                                // The mapping may be transiently stale while a filter/sort task is in-flight. Return an empty row rather than panicking
                                 Self::render_single_table_row(
                                     this,
                                     cols,
-                                    display_row,
+                                    DisplayRow(display_row),
                                     row_identifier_text_color,
                                     this.row_height,
                                     cx,
                                 )
-                                .unwrap_or_else(|| panic!("Expected to render a table row"))
+                                .unwrap_or_default()
                             })
                         })
                     }
                     RowRenderMechanism::UniformList => {
                         table.uniform_list("tabular-data-table", row_count, {
                             cx.processor(move |this, range: Range<usize>, _window, cx| {
-                                // Record all display indices in the range for performance metrics
                                 this.performance_metrics
                                     .rendered_indices
                                     .extend(range.clone());
@@ -110,12 +100,12 @@ impl TabularDataPreviewPane {
     ///
     /// Used both by UniformList and VariableRowHeightList
     fn render_single_table_row(
-        this: &TabularDataPreviewPane,
+        this: &TableView,
         cols: usize,
         display_row: DisplayRow,
-        row_identifier_text_color: gpui::Hsla,
+        row_identifier_text_color: Hsla,
         row_height: Pixels,
-        cx: &Context<TabularDataPreviewPane>,
+        cx: &Context<TableView>,
     ) -> Option<UncheckedTableRow<AnyElement>> {
         // Get the actual row index from our sorted indices
         let data_row = this.engine.d2d_mapping().get_data_row(display_row)?;
@@ -132,6 +122,18 @@ impl TabularDataPreviewPane {
             let cell_content = table_cell.display_value().cloned().unwrap_or_default();
 
             let display_cell_id = DisplayCellId::new(display_row, col);
+            let data_cell_id = DataCellId::new(data_row, col);
+
+            let is_focus_cell = this
+                .selection
+                .as_ref()
+                .is_some_and(|selection| selection.focus == data_cell_id);
+
+            let cell_bg = if is_focus_cell {
+                Some(cx.theme().colors().element_selected)
+            } else {
+                None
+            };
 
             let cell = div()
                 .size_full()
@@ -144,7 +146,7 @@ impl TabularDataPreviewPane {
                             .overflow_hidden()
                     },
                 )
-                .child(TabularDataPreviewPane::create_selectable_cell(
+                .child(TableView::create_selectable_cell(
                     display_cell_id,
                     cell_content,
                     this.settings.vertical_alignment,
@@ -154,6 +156,7 @@ impl TabularDataPreviewPane {
             elements.push(
                 div()
                     .size_full()
+                    .when_some(cell_bg, |div, color| div.bg(color))
                     .when(this.settings.show_debug_info, |parent| {
                         parent.child(div().text_color(row_identifier_text_color).child(
                             match table_cell {
@@ -165,6 +168,7 @@ impl TabularDataPreviewPane {
                                     format!("Pos {so}(L{slv})-{eo}(L{elv})")
                                 }
                                 TableCell::Virtual => "Virtual cell".into(),
+                                TableCell::Generated(_) => "Generated cell".into(),
                             },
                         ))
                     })

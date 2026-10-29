@@ -140,7 +140,7 @@ pub struct ConfirmCodeAction {
 }
 
 /// Toggles comment markers for the selected lines.
-#[derive(PartialEq, Clone, Deserialize, Default, JsonSchema, Action)]
+#[derive(PartialEq, Clone, Deserialize, JsonSchema, Action)]
 #[action(namespace = editor)]
 #[serde(deny_unknown_fields)]
 pub struct ToggleComments {
@@ -148,6 +148,22 @@ pub struct ToggleComments {
     pub advance_downwards: bool,
     #[serde(default)]
     pub ignore_indent: bool,
+    /// Whether to add comment markers to blank lines inside a multi-line
+    /// selection. A line of only whitespace counts as blank. Defaults to true.
+    #[serde(default = "default_true")]
+    pub comment_empty_lines: bool,
+}
+
+// `Default` is written out rather than derived because `comment_empty_lines`
+// defaults to true.
+impl Default for ToggleComments {
+    fn default() -> Self {
+        Self {
+            advance_downwards: false,
+            ignore_indent: false,
+            comment_empty_lines: true,
+        }
+    }
 }
 
 /// Toggles block comment markers for the selected text.
@@ -409,6 +425,17 @@ actions!(
 actions!(
     editor,
     [
+<<<<<<< 735a5c6ada13e0ddcb283a5c77447e25df51e89b
+=======
+        /// Accepts the full edit prediction.
+        AcceptEditPrediction,
+        /// Amends the editor text with hint's edit (if sent).
+        AcceptInlayHint,
+        /// Accepts a partial edit prediction.
+        #[action(deprecated_aliases = ["editor::AcceptPartialCopilotSuggestion"])]
+        AcceptNextWordEditPrediction,
+        AcceptNextLineEditPrediction,
+>>>>>>> c836b6c0a5d23ac217d36f8897dc78c4325ba5f4
         /// Applies all diff hunks in the editor.
         ApplyAllDiffHunks,
         /// Applies the diff hunk at the current position.
@@ -610,6 +637,14 @@ actions!(
         HalfPageUp,
         /// Shows hover information for the symbol at cursor.
         Hover,
+        /// Expands the selected debugger hover entry.
+        DebuggerHoverExpandSelected,
+        /// Collapses the selected debugger hover entry.
+        DebuggerHoverCollapseSelected,
+        /// Selects the next debugger hover entry.
+        DebuggerHoverSelectNext,
+        /// Selects the previous debugger hover entry.
+        DebuggerHoverSelectPrevious,
         /// Increases indentation of selected lines.
         Indent,
         /// Inserts a UUID v4 at cursor position.
@@ -916,6 +951,8 @@ actions!(
         UnwrapSyntaxNode,
         /// Wraps selections in tag specified by language.
         WrapSelectionsInTag,
+        /// Wraps selections in an expanded Emmet abbreviation.
+        WrapWithAbbreviation,
         /// Aligns selections from different rows into the same column
         AlignSelections,
         /// Saves the current location to navigation history.
