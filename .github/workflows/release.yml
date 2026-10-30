@@ -30,7 +30,7 @@ jobs:
       matrix:
         arch: [aarch64, x86_64]
     # Intel builds are cross-compiled on the Apple Silicon runner.
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
