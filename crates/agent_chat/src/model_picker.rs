@@ -504,6 +504,13 @@ impl ModelPicker {
     }
 
     fn pick_model(&mut self, model: Model, window: &mut Window, cx: &mut Context<Self>) {
+        let session = self.session.read(cx);
+        if let Some(previous) = session.settings().model.clone() {
+            let kind = session.kind();
+            self.store.update(cx, |store, _| {
+                store.remember_unlisted_model(kind, &previous)
+            });
+        }
         self.update_settings(cx, |settings| {
             settings.reasoning = view::clamp_reasoning(settings.reasoning, &model.reasoning_levels);
             settings.options = view::offered_options(&model, std::mem::take(&mut settings.options));
@@ -1593,7 +1600,10 @@ impl Render for ModelPicker {
         let session = self.session.read(cx);
         let kind = session.kind();
         let settings = session.settings().clone();
-        let models = self.store.read(cx).models(kind).to_vec();
+        let models = self
+            .store
+            .read(cx)
+            .picker_models(kind, settings.model.as_deref());
         let selection = Selection::resolve(&models, &settings);
         let full = AgentChatSettings::get_global(cx).model_picker == AgentChatModelPickerLayout::Full;
         let card = popover_card(cx)

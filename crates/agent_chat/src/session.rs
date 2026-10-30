@@ -2257,6 +2257,7 @@ pub struct AgentStore {
     languages: Arc<LanguageRegistry>,
     harnesses: HashMap<AgentKind, Arc<dyn Harness>>,
     catalogs: HashMap<AgentKind, ModelCatalog>,
+    unlisted_models: HashMap<AgentKind, Vec<String>>,
     defaults: HashMap<AgentKind, RunSettings>,
     plan_usage: HashMap<AgentKind, PlanUsageState>,
     commands: HashMap<(AgentKind, PathBuf), CommandCatalog>,
@@ -2477,6 +2478,7 @@ impl AgentStore {
             languages,
             harnesses: HashMap::default(),
             catalogs: HashMap::default(),
+            unlisted_models: HashMap::default(),
             defaults: HashMap::default(),
             plan_usage: HashMap::default(),
             commands: HashMap::default(),
@@ -2592,6 +2594,34 @@ impl AgentStore {
         }
     }
 
+    /// The catalog plus models chats used that it doesn't list, so a switch away can be undone.
+    pub fn picker_models(&self, kind: AgentKind, selected: Option<&str>) -> Vec<Model> {
+        let mut models = self.models(kind).to_vec();
+        let remembered = self.unlisted_models.get(&kind).into_iter().flatten();
+        for id in selected.into_iter().chain(remembered.map(String::as_str)) {
+            if agent_harness::view::selected_catalog_model(&models, Some(id)).is_none() {
+                models.push(Model {
+                    id: id.to_owned(),
+                    label: id.to_owned(),
+                    description: None,
+                    reasoning_levels: Vec::new(),
+                    options: Vec::new(),
+                });
+            }
+        }
+        models
+    }
+
+    pub fn remember_unlisted_model(&mut self, kind: AgentKind, id: &str) {
+        if agent_harness::view::selected_catalog_model(self.models(kind), Some(id)).is_some() {
+            return;
+        }
+        let remembered = self.unlisted_models.entry(kind).or_default();
+        if !remembered.iter().any(|remembered| remembered == id) {
+            remembered.push(id.to_owned());
+        }
+    }
+
     pub fn ensure_models(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
         let harness = self.harness(kind);
         let env_loaded = shell_env_is_loaded(cx);
@@ -2605,7 +2635,15 @@ impl AgentStore {
         let discovery = spawn_agent_work(cx, async move { harness.models().await });
         let task = cx.spawn(async move |this, cx| {
             let models = match discovery.await {
-                Ok(Ok(models)) => models,
+                Ok(Ok(models)) => {
+                    log::info!(
+                        "{} model discovery found {} models, starting with {:?}",
+                        kind.label(),
+                        models.len(),
+                        models.first().map(|model| &model.id)
+                    );
+                    models
+                }
                 Ok(Err(error)) => {
                     log::info!("{} model discovery failed: {error}", kind.label());
                     Vec::new()
@@ -5472,6 +5510,28 @@ done
         titles.push(fork_of_fork.read_with(cx, |fork, _| fork.metadata().title.clone()));
 
         assert_eq!(titles, ["Chat (2)", "Chat (3)", "Chat (5)"]);
+    }
+
+    #[gpui::test]
+    async fn unlisted_models_stay_pickable_after_switching_away(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let ids = |selected: &str, cx: &mut TestAppContext| {
+            store.read_with(cx, |store, _| {
+                store
+                    .picker_models(AgentKind::Codex, Some(selected))
+                    .into_iter()
+                    .map(|model| model.id)
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(ids("gpt-6.1-sol", cx), ["gpt-6.1-sol"]);
+
+        store.update(cx, |store, _| {
+            store.remember_unlisted_model(AgentKind::Codex, "gpt-6.1-sol")
+        });
+        assert_eq!(ids("gpt-6-astra", cx), ["gpt-6-astra", "gpt-6.1-sol"]);
+        assert_eq!(ids("gpt-6.1-sol", cx), ["gpt-6.1-sol"]);
     }
 
     #[gpui::test]

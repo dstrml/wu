@@ -1350,8 +1350,8 @@ async fn models_discovers_visible_catalog_with_pagination() {
         .models()
         .await
         .expect("fallback models");
-    assert_eq!(fallback.len(), 9);
-    assert_eq!(fallback[0].id, "gpt-6-astra");
+    assert_eq!(fallback.len(), 13);
+    assert_eq!(fallback[0].id, "gpt-6.1-sol");
 
     let missing = CodexHarness::new().with_executable("/nonexistent/codex-nowhere");
     assert_eq!(missing.id(), HarnessId::Codex);

@@ -8,6 +8,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Lines starting with `>` in agent chat messages now render as quotes on send.
 - Forked chats are now numbered for distinction.
 - Fixed projects opened from Raycast inheriting the launcher's env in their terminals.
+- Fixed GPT-6.1-Sol missing from the Codex model list.
 
 ## 1.1.13 - 2026-10-28
 

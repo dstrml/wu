@@ -108,10 +108,38 @@ fn model(
 pub(crate) fn static_models() -> Vec<Model> {
     vec![
         model(
+            "gpt-6.1-sol",
+            "GPT-6.1-Sol",
+            "Latest workhorse model for coding and everyday work",
+            ULTRA_LADDER,
+            vec![service_tier()],
+        ),
+        model(
             "gpt-6-astra",
             "GPT-6-Astra",
             "Our most capable model for complex, demanding work.",
             ULTRA_LADDER,
+            vec![service_tier()],
+        ),
+        model(
+            "gpt-6.1-terra",
+            "GPT-6.1 Terra",
+            "GPT-6.1 Terra Codex model",
+            ULTRA_LADDER,
+            vec![service_tier()],
+        ),
+        model(
+            "gpt-6-sol",
+            "GPT-6-Sol",
+            "Previous generation workhorse model",
+            ULTRA_LADDER,
+            vec![service_tier()],
+        ),
+        model(
+            "gpt-6-luna",
+            "GPT-6-Luna",
+            "Fast and affordable model for easier tasks",
+            MAX_LADDER,
             vec![service_tier()],
         ),
         model(
@@ -191,10 +219,10 @@ mod tests {
     #[test]
     fn catalog_is_newest_first_with_service_tiers() {
         let models = static_models();
-        assert_eq!(models.len(), 9);
-        assert_eq!(models[0].id, "gpt-6-astra");
+        assert_eq!(models.len(), 13);
+        assert_eq!(models[0].id, "gpt-6.1-sol");
         assert!(models[0].reasoning_levels.contains(&ReasoningLevel::Ultra));
-        assert!(!models[5].reasoning_levels.contains(&ReasoningLevel::Max));
+        assert!(!models[9].reasoning_levels.contains(&ReasoningLevel::Max));
         for m in &models {
             let tier = m.options.iter().find(|o| o.id == "serviceTier");
             if m.id == "gpt-daybreak-blue-latest" {
