@@ -594,7 +594,7 @@ fn run() -> Result<()> {
     };
 
     let env = {
-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        #[cfg(not(target_os = "windows"))]
         {
             use collections::HashMap;
 
@@ -603,6 +603,7 @@ fn run() -> Result<()> {
             // project-specific vars (e.g. those set by direnv).
             // By setting env to None here, the LSP will use worktree env vars instead,
             // which is what we want.
+            // On macOS, launchers like Raycast would otherwise leak their own environment.
             if !std::io::stdout().is_terminal() {
                 None
             } else {
@@ -615,13 +616,6 @@ fn run() -> Result<()> {
             // On Windows, by default, a child process inherits a copy of the environment block of the parent process.
             // So we don't need to pass env vars explicitly.
             None
-        }
-
-        #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "windows")))]
-        {
-            use collections::HashMap;
-
-            Some(std::env::vars().collect::<HashMap<_, _>>())
         }
     };
 

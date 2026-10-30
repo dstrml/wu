@@ -7,6 +7,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Fixed the agent chat box jumping between one and two lines.
 - Lines starting with `>` in agent chat messages now render as quotes on send.
 - Forked chats are now numbered for distinction.
+- Fixed projects opened from Raycast inheriting the launcher's env in their terminals.
 
 ## 1.1.13 - 2026-10-28
 
