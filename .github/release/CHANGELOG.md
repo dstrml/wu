@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.1.14 - 2026-10-31
+
 - Fixed the agent chat box jumping between one and two lines.
 - Lines starting with `>` in agent chat messages now render as quotes on send.
 - Forked chats are now numbered for distinction.
