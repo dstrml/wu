@@ -1307,7 +1307,8 @@ mod mac_os {
     use serde::Deserialize;
     use std::{
         ffi::OsStr,
-        fs, io,
+        fs,
+        io::{self, IsTerminal as _},
         path::{Path, PathBuf},
         process::{Command, ExitStatus},
         ptr,
@@ -1316,6 +1317,17 @@ mod mac_os {
     use cli::FORCE_CLI_MODE_ENV_VAR_NAME;
 
     use crate::{Detect, InstalledApp};
+
+    const LAUNCHD_ENV_VARS: [&str; 8] = [
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "LANG",
+        "SSH_AUTH_SOCK",
+        "__CF_USER_TEXT_ENCODING",
+    ];
 
     #[derive(Debug, Deserialize)]
     struct InfoPlist {
@@ -1381,6 +1393,27 @@ mod mac_os {
 
         fn launch(&self, url: String, user_data_dir: Option<&str>) -> anyhow::Result<()> {
             match self {
+                Self::App { app_bundle, .. } if !io::stdout().is_terminal() => {
+                    // LaunchServices hands our environment to the app, so a launcher's would leak into Wu.
+                    let status = Command::new("/usr/bin/open")
+                        .env_clear()
+                        .envs(std::env::vars_os().filter(|(name, _)| {
+                            LAUNCHD_ENV_VARS.iter().any(|kept| name == OsStr::new(kept))
+                        }))
+                        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+                        .arg("-g")
+                        .arg("-a")
+                        .arg(app_bundle)
+                        .arg(&url)
+                        .status()
+                        .context("running open")?;
+                    anyhow::ensure!(
+                        status.success(),
+                        "cannot start app bundle {}",
+                        self.zed_version_string()
+                    );
+                }
+
                 Self::App { app_bundle, .. } => {
                     let app_path = app_bundle;
 
