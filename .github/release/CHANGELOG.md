@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.1.15 - 2026-10-31
+
 - Fixed Wu started from Raycast still getting Raycast's env in its shell.
 
 ## 1.1.14 - 2026-10-31
