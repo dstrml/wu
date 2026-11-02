@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.1.16 - 2026-11-02
+
 - Fix debug session picker overlapping the panel's tabs.
 - Switching projects from the top-left menu keeps the previous projects open in the background.
 - Easy switching between multiple open projects in a window.
