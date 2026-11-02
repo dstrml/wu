@@ -39,13 +39,18 @@ use ui::{
 };
 use update_version::UpdateVersion;
 use util::ResultExt;
-use workspace::{AccessibleMode, MultiWorkspace, ToggleWorktreeSecurity, Workspace};
+use workspace::{
+    AccessibleMode, AgentActivity, MultiWorkspace, ProjectGroupKey, ToggleWorktreeSecurity,
+    Workspace,
+};
 
 use wu_actions::OpenRemote;
 
 pub use onboarding_banner::restore_banner;
 
 const MAX_PROJECT_NAME_LENGTH: usize = 40;
+const MAX_PROJECT_TABS: usize = 6;
+const MAX_PROJECT_TAB_NAME_LENGTH: usize = 24;
 const MAX_BRANCH_NAME_LENGTH: usize = 40;
 const MAX_SHORT_SHA_LENGTH: usize = 8;
 
@@ -144,6 +149,56 @@ pub fn init(cx: &mut App) {
     .detach();
 }
 
+fn project_group_name(key: &ProjectGroupKey) -> String {
+    let name = key
+        .path_list()
+        .ordered_paths()
+        .filter_map(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(", ");
+    util::truncate_and_trailoff(&name, MAX_PROJECT_TAB_NAME_LENGTH)
+}
+
+fn render_project_tab(
+    index: usize,
+    key: ProjectGroupKey,
+    activity: Option<AgentActivity>,
+) -> impl IntoElement {
+    let mut tooltip_lines: Vec<String> = key
+        .path_list()
+        .ordered_paths()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    if let Some(activity) = activity {
+        tooltip_lines.push(match activity {
+            AgentActivity::Working => t!("Agent working").to_string(),
+            AgentActivity::NeedsInput => t!("Agent needs you").to_string(),
+        });
+    }
+    let tooltip: SharedString = tooltip_lines.join("\n").into();
+    ButtonLike::new(("project_tab", index))
+        .child(
+            h_flex()
+                .gap_1()
+                .child(
+                    Label::new(project_group_name(&key))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .when_some(activity, |this, activity| {
+                    this.child(Indicator::dot().color(match activity {
+                        AgentActivity::Working => Color::Accent,
+                        AgentActivity::NeedsInput => Color::Warning,
+                    }))
+                }),
+        )
+        .tooltip(Tooltip::text(tooltip))
+        .on_click(move |_, window, cx| {
+            recent_projects::switch_to_project_group(key.clone(), window, cx)
+        })
+}
+
 pub struct TitleBar {
     platform_titlebar: Entity<PlatformTitleBar>,
     project: Entity<Project>,
@@ -164,6 +219,7 @@ impl Render for TitleBar {
                 .and_then(|ws| ws.read(cx).multi_workspace().cloned())
             {
                 self.multi_workspace = Some(mw.clone());
+                self.observe_multi_workspace(&mw, cx);
                 self.platform_titlebar.update(cx, |titlebar, _cx| {
                     titlebar.set_multi_workspace(mw);
                 });
@@ -266,7 +322,7 @@ impl Render for TitleBar {
                                 .when(title_bar_settings.show_project_items, |title_bar| {
                                     title_bar
                                         .children(self.render_project_host(cx))
-                                        .child(self.render_project_name(project_name, window, cx))
+                                        .child(self.render_project_tabs(project_name, window, cx))
                                 })
                                 .when_some(
                                     repository.filter(|_| is_git_enabled),
@@ -403,17 +459,36 @@ impl TitleBar {
             titlebar
         });
 
+        if let Some(changes) = workspace::agent_activity_changes(cx) {
+            subscriptions.push(cx.observe(&changes, |_, _, cx| cx.notify()));
+        }
+
         let banner = None;
 
-        Self {
+        let mut this = Self {
             platform_titlebar,
             application_menu,
             workspace: workspace.weak_handle(),
-            multi_workspace,
+            multi_workspace: multi_workspace.clone(),
             project,
             _subscriptions: subscriptions,
             banner,
             update_version,
+        };
+        if let Some(multi_workspace) = multi_workspace {
+            this.observe_multi_workspace(&multi_workspace, cx);
+        }
+        this
+    }
+
+    fn observe_multi_workspace(
+        &mut self,
+        multi_workspace: &WeakEntity<MultiWorkspace>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(multi_workspace) = multi_workspace.upgrade() {
+            self._subscriptions
+                .push(cx.observe(&multi_workspace, |_, _, cx| cx.notify()));
         }
     }
 
@@ -632,6 +707,77 @@ impl TitleBar {
         }
 
         None
+    }
+
+    fn render_project_tabs(
+        &self,
+        active_name: Option<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let multi_workspace = self.multi_workspace.as_ref().and_then(|mw| mw.upgrade());
+        let keys = multi_workspace
+            .as_ref()
+            .map(|mw| mw.read(cx).project_group_keys())
+            .unwrap_or_default();
+        let active_key = self.project.read(cx).project_group_key(cx);
+        let Some(multi_workspace) =
+            multi_workspace.filter(|_| keys.len() > 1 && keys.contains(&active_key))
+        else {
+            return self
+                .render_project_name(active_name, window, cx)
+                .into_any_element();
+        };
+
+        let colors = cx.theme().colors();
+        let box_background = colors.element_background.opacity(0.5);
+        let current_background = colors.text.opacity(0.12);
+        let current_border = colors.border;
+        let mut other_tabs_left = MAX_PROJECT_TABS - 1;
+        let mut hidden_count = 0;
+        let mut tabs = h_flex()
+            .p_0p5()
+            .mr_1()
+            .gap_1()
+            .rounded_md()
+            .bg(box_background);
+        for (index, key) in keys.into_iter().enumerate() {
+            if key == active_key {
+                tabs = tabs.child(
+                    div()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(current_border)
+                        .bg(current_background)
+                        .child(self.render_project_name(active_name.clone(), window, cx)),
+                );
+            } else if other_tabs_left == 0 {
+                hidden_count += 1;
+            } else {
+                other_tabs_left -= 1;
+                let roots = multi_workspace.read(cx).project_group_roots(&key, cx);
+                let activity = workspace::project_agent_activity(&roots, cx);
+                tabs = tabs.child(render_project_tab(index, key, activity));
+            }
+        }
+        tabs.when(hidden_count > 0, |tabs| {
+            tabs.child(
+                Button::new("more_projects", format!("+{hidden_count}"))
+                    .label_size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(wu_actions::OpenRecent::default()), cx)
+                    })
+                    .tooltip(|_window, cx| {
+                        Tooltip::for_action(
+                            t!("More Open Projects"),
+                            &wu_actions::OpenRecent::default(),
+                            cx,
+                        )
+                    }),
+            )
+        })
+        .into_any_element()
     }
 
     fn render_project_name(
@@ -892,7 +1038,21 @@ impl TitleBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use util::paths::PathStyle;
+    use util::{path_list::PathList, paths::PathStyle};
+
+    #[test]
+    fn project_tab_names_use_folder_names() {
+        let key = |paths: &[&str]| ProjectGroupKey::new(None, PathList::new(paths));
+        assert_eq!(project_group_name(&key(&["/code/wu"])), "wu");
+        assert_eq!(
+            project_group_name(&key(&["/code/api", "/code/web"])),
+            "api, web"
+        );
+        assert_eq!(
+            project_group_name(&key(&["/code/a-very-long-project-folder-name"])),
+            "a-very-long-project-fold…"
+        );
+    }
 
     #[test]
     fn test_foreign_path_style_does_not_use_repository_identity_as_name_anchor() {

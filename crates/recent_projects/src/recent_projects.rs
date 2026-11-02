@@ -1091,56 +1091,7 @@ impl PickerDelegate for RecentProjectsDelegate {
                     return;
                 }
 
-                let key = key.clone();
-                if let Some(handle) = window.window_handle().downcast::<MultiWorkspace>() {
-                    cx.defer(move |cx| {
-                        // Try to activate an existing workspace for this project group
-                        // first, so we preserve the actual worktree paths (which may
-                        // differ from the main git worktree paths stored in the key).
-                        if let Some(workspace) = handle
-                            .update(cx, |multi_workspace, _window, cx| {
-                                multi_workspace.last_active_workspace_for_group(&key, cx)
-                            })
-                            .log_err()
-                            .flatten()
-                        {
-                            handle
-                                .update(cx, |multi_workspace, window, cx| {
-                                    multi_workspace.activate(workspace, None, window, cx);
-                                })
-                                .log_err();
-                        } else {
-                            let path_list = key.path_list().clone();
-                            let host = key.host();
-                            if let Some(task) = handle
-                                .update(cx, |multi_workspace, window, cx| {
-                                    let modal_workspace = multi_workspace.workspace().clone();
-                                    multi_workspace.find_or_create_workspace(
-                                        path_list,
-                                        host,
-                                        Some(key.clone()),
-                                        move |options, window, cx| {
-                                            connect_with_modal(
-                                                &modal_workspace,
-                                                options,
-                                                window,
-                                                cx,
-                                            )
-                                        },
-                                        None,
-                                        OpenMode::Activate,
-                                        None,
-                                        window,
-                                        cx,
-                                    )
-                                })
-                                .log_err()
-                            {
-                                task.detach_and_log_err(cx);
-                            }
-                        }
-                    });
-                }
+                switch_to_project_group(key.clone(), window, cx);
                 cx.emit(DismissEvent);
             }
             Some(ProjectPickerEntry::RecentProject(selected_match)) => {
@@ -2005,6 +1956,53 @@ pub(crate) fn highlights_for_path(
     )
 }
 
+pub fn switch_to_project_group(key: ProjectGroupKey, window: &mut Window, cx: &mut App) {
+    let Some(handle) = window.window_handle().downcast::<MultiWorkspace>() else {
+        return;
+    };
+    cx.defer(move |cx| {
+        // Prefer an already loaded workspace, since its worktree paths may differ from the
+        // main git worktree paths stored in the key.
+        if let Some(workspace) = handle
+            .update(cx, |multi_workspace, _window, cx| {
+                multi_workspace.last_active_workspace_for_group(&key, cx)
+            })
+            .log_err()
+            .flatten()
+        {
+            handle
+                .update(cx, |multi_workspace, window, cx| {
+                    multi_workspace.activate(workspace, None, window, cx);
+                })
+                .log_err();
+            return;
+        }
+        let path_list = key.path_list().clone();
+        let host = key.host();
+        if let Some(task) = handle
+            .update(cx, |multi_workspace, window, cx| {
+                let modal_workspace = multi_workspace.workspace().clone();
+                multi_workspace.find_or_create_workspace(
+                    path_list,
+                    host,
+                    Some(key.clone()),
+                    move |options, window, cx| {
+                        connect_with_modal(&modal_workspace, options, window, cx)
+                    },
+                    None,
+                    OpenMode::Activate,
+                    None,
+                    window,
+                    cx,
+                )
+            })
+            .log_err()
+        {
+            task.detach_and_log_err(cx);
+        }
+    });
+}
+
 fn move_project_group_to_new_window(key: &ProjectGroupKey, window: &mut Window, cx: &mut App) {
     if let Some(handle) = window.window_handle().downcast::<MultiWorkspace>() {
         let key = key.clone();
@@ -2390,26 +2388,11 @@ impl RecentProjectsDelegate {
     }
 
     fn project_group_roots(&self, key: &ProjectGroupKey, cx: &App) -> Vec<PathBuf> {
-        let mut roots = key.path_list().paths().to_vec();
-        let multi_workspace = self
-            .workspace
+        self.workspace
             .upgrade()
-            .and_then(|workspace| workspace.read(cx).multi_workspace()?.upgrade());
-        if let Some(multi_workspace) = multi_workspace {
-            for workspace in multi_workspace
-                .read(cx)
-                .workspaces_for_project_group(key, cx)
-            {
-                roots.extend(
-                    workspace
-                        .read(cx)
-                        .root_paths(cx)
-                        .into_iter()
-                        .map(|path| path.to_path_buf()),
-                );
-            }
-        }
-        roots
+            .and_then(|workspace| workspace.read(cx).multi_workspace()?.upgrade())
+            .map(|multi_workspace| multi_workspace.read(cx).project_group_roots(key, cx))
+            .unwrap_or_else(|| key.path_list().paths().to_vec())
     }
 
     fn is_active_project_group(&self, key: &ProjectGroupKey, cx: &App) -> bool {
@@ -2945,6 +2928,78 @@ mod tests {
             editor::init(cx);
             state
         })
+    }
+
+    #[gpui::test]
+    async fn test_switch_to_project_group_reuses_open_project_and_loads_closed_one(
+        cx: &mut TestAppContext,
+    ) {
+        let app_state = init_test(cx);
+        let fs = app_state.fs.as_fake();
+        fs.insert_tree(path!("/a"), json!({ "a.txt": "" })).await;
+        fs.insert_tree(path!("/b"), json!({ "b.txt": "" })).await;
+        fs.insert_tree(path!("/c"), json!({ "c.txt": "" })).await;
+
+        cx.update(|cx| {
+            open_paths(
+                &[PathBuf::from(path!("/a"))],
+                app_state,
+                workspace::OpenOptions::default(),
+                cx,
+            )
+        })
+        .await
+        .unwrap();
+        cx.run_until_parked();
+
+        let window = cx.update(|cx| cx.windows()[0].downcast::<MultiWorkspace>().unwrap());
+        let workspace_a = window
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let open_b = window
+            .update(cx, |mw, window, cx| {
+                mw.open_project(
+                    vec![PathBuf::from(path!("/b"))],
+                    OpenMode::Activate,
+                    window,
+                    cx,
+                )
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let workspace_b = open_b.await.unwrap();
+        assert_ne!(workspace_a, workspace_b);
+
+        let key_a = workspace_a.read_with(cx, |workspace, cx| workspace.project_group_key(cx));
+        window
+            .update(cx, |_, window, cx| {
+                switch_to_project_group(key_a, window, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .read_with(cx, |mw, _| {
+                assert_eq!(mw.workspace(), &workspace_a);
+                assert_eq!(mw.workspaces().count(), 2);
+            })
+            .unwrap();
+
+        let key_c = ProjectGroupKey::new(None, PathList::new(&[path!("/c")]));
+        window
+            .update(cx, |_, window, cx| {
+                switch_to_project_group(key_c, window, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .read_with(cx, |mw, cx| {
+                assert_eq!(
+                    PathList::new(&mw.workspace().read(cx).root_paths(cx)),
+                    PathList::new(&[path!("/c")])
+                );
+                assert_eq!(mw.workspaces().count(), 3);
+            })
+            .unwrap();
     }
 
     #[gpui::test]

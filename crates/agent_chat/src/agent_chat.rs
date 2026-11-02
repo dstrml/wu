@@ -15,7 +15,9 @@ pub use chat_view::ChatView;
 
 use command_palette_hooks::CommandPaletteFilter;
 use futures::FutureExt as _;
-use gpui::{App, EntityId, PromptButton, PromptLevel, TaskExt as _, WindowHandle, actions};
+use gpui::{
+    App, AppContext as _, EntityId, PromptButton, PromptLevel, TaskExt as _, WindowHandle, actions,
+};
 use i18n::t;
 use serde::{Deserialize, Serialize};
 use settings::{Settings as _, SettingsStore};
@@ -87,7 +89,11 @@ pub fn init(shell_env_loaded: Option<futures::channel::oneshot::Receiver<()>>, c
         cx.set_global(session::ShellEnvLoaded(loaded.shared()));
     }
     cx.set_global(workspace::QuitWarning(session::quit_warning));
-    cx.set_global(workspace::ProjectAgentActivity(session::project_agent_activity));
+    let changes = cx.new(|_| workspace::AgentActivityChanges);
+    cx.set_global(workspace::ProjectAgentActivity {
+        activity: session::project_agent_activity,
+        changes,
+    });
     agent_panel::init(cx);
     watch_enabled(cx);
 }
@@ -217,7 +223,7 @@ fn close_agent_chats(cx: &mut App) {
 mod tests {
     use super::*;
     use crate::session::tests::new_store;
-    use gpui::{AppContext as _, TestAppContext, UpdateGlobal as _};
+    use gpui::{TestAppContext, UpdateGlobal as _};
     use project::FakeFs;
 
     fn set_enabled(enabled: bool, cx: &mut gpui::VisualTestContext) {

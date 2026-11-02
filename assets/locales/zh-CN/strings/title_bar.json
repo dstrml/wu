@@ -1,4 +1,6 @@
 {
+  "Agent needs you": "智能体需要你处理",
+  "Agent working": "智能体正在工作",
   "Application menu": "应用菜单",
   "Branch & Stash": "分支和储藏",
   "Close Announcement Banner": "关闭公告横幅",
@@ -16,6 +18,7 @@
   "Loading {name}…": "正在加载 {name}…",
   "Lost connection to {host}. Reconnecting...": "与 {host} 的连接已断开。正在重新连接…",
   "Mark this project as trusted and unlock all features": "将此项目标记为受信任，以使用所有功能",
+  "More Open Projects": "更多已打开的项目",
   "Open Application Menu": "打开应用菜单",
   "Open Recent Project": "打开最近的项目",
   "Recent Projects": "最近的项目",

@@ -957,6 +957,18 @@ impl AgentSession {
         self.working
     }
 
+    fn agent_activity(&self) -> Option<workspace::AgentActivity> {
+        if self.deleted {
+            None
+        } else if !self.pending_questions.is_empty() {
+            Some(workspace::AgentActivity::NeedsInput)
+        } else if self.working {
+            Some(workspace::AgentActivity::Working)
+        } else {
+            None
+        }
+    }
+
     fn auto_compact_tokens(&self, cx: &App) -> Option<u64> {
         let limit = AgentChatSettings::get_global(cx).auto_compact_tokens?;
         let window = self.metadata.context.and_then(|context| context.window);
@@ -2440,6 +2452,21 @@ pub(crate) fn stop_all_agents(cx: &mut App) {
     }
 }
 
+fn announce_activity_changes(store: &Entity<AgentStore>, cx: &mut App) {
+    let Some(changes) = workspace::agent_activity_changes(cx) else {
+        return;
+    };
+    let mut last_seen = Vec::new();
+    cx.observe(store, move |store, cx| {
+        let activities = store.read(cx).agent_activities(cx);
+        if activities != last_seen {
+            last_seen = activities;
+            changes.update(cx, |_, cx| cx.notify());
+        }
+    })
+    .detach();
+}
+
 pub(crate) fn project_agent_activity(
     roots: &[PathBuf],
     cx: &App,
@@ -2464,20 +2491,22 @@ pub(crate) fn quit_warning(cx: &App) -> Option<String> {
 
 impl AgentStore {
     fn agent_activity_in(&self, roots: &[PathBuf], cx: &App) -> Option<workspace::AgentActivity> {
-        let mut activity = None;
-        for session in self.live.values() {
-            let session = session.read(cx);
-            if session.is_deleted() || !session.metadata.is_in(roots) {
-                continue;
-            }
-            if !session.pending_questions.is_empty() {
-                return Some(workspace::AgentActivity::NeedsInput);
-            }
-            if session.is_working() {
-                activity = Some(workspace::AgentActivity::Working);
-            }
-        }
-        activity
+        self.live
+            .values()
+            .map(|session| session.read(cx))
+            .filter(|session| session.metadata.is_in(roots))
+            .filter_map(|session| session.agent_activity())
+            .max_by_key(|activity| *activity == workspace::AgentActivity::NeedsInput)
+    }
+
+    fn agent_activities(&self, cx: &App) -> Vec<(String, workspace::AgentActivity)> {
+        let mut activities: Vec<_> = self
+            .live
+            .iter()
+            .filter_map(|(id, session)| Some((id.clone(), session.read(cx).agent_activity()?)))
+            .collect();
+        activities.sort_by(|a, b| a.0.cmp(&b.0));
+        activities
     }
 
     fn working_count(&self, cx: &App) -> usize {
@@ -2498,6 +2527,7 @@ impl AgentStore {
         let store = cx.new(|cx| Self::new(directory.into(), languages, cx));
         cx.set_global(GlobalAgentStore(store.clone()));
         crate::notifications::watch(&store, cx);
+        announce_activity_changes(&store, cx);
         store
     }
 
@@ -4020,6 +4050,60 @@ pub(crate) mod tests {
             assert_eq!(activity(std::slice::from_ref(&idle_root)), None);
             assert_eq!(activity(&[directory.path().to_path_buf()]), None);
         });
+    }
+
+    #[gpui::test]
+    async fn agent_activity_changes_are_announced_only_when_they_change(cx: &mut TestAppContext) {
+        use std::{cell::Cell, rc::Rc};
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let changes = cx.update(|cx| {
+            let changes = cx.new(|_| workspace::AgentActivityChanges);
+            cx.set_global(workspace::ProjectAgentActivity {
+                activity: project_agent_activity,
+                changes: changes.clone(),
+            });
+            announce_activity_changes(&store, cx);
+            changes
+        });
+        let announcements = Rc::new(Cell::new(0));
+        let _subscription = cx.update(|cx| {
+            let announcements = announcements.clone();
+            cx.observe(&changes, move |_, _| {
+                announcements.set(announcements.get() + 1)
+            })
+        });
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(announcements.get(), 0, "a new idle chat changes nothing");
+
+        session.update(cx, |session, cx| {
+            session.working = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(announcements.get(), 1);
+
+        session.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        assert_eq!(
+            announcements.get(),
+            1,
+            "streaming updates alone are not announced"
+        );
+
+        session.update(cx, |session, cx| {
+            session.pending_questions.push(PendingQuestion {
+                questions: Vec::new(),
+                responder: None,
+            });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(announcements.get(), 2);
     }
 
     #[gpui::test]

@@ -420,6 +420,20 @@ impl MultiWorkspace {
             .collect()
     }
 
+    pub fn project_group_roots(&self, key: &ProjectGroupKey, cx: &App) -> Vec<PathBuf> {
+        let mut roots = key.path_list().paths().to_vec();
+        for workspace in self.workspaces_for_project_group(key, cx) {
+            roots.extend(
+                workspace
+                    .read(cx)
+                    .root_paths(cx)
+                    .into_iter()
+                    .map(|path| path.to_path_buf()),
+            );
+        }
+        roots
+    }
+
     pub fn project_groups(&self, cx: &App) -> Vec<ProjectGroup> {
         self.project_groups
             .iter()

@@ -9505,13 +9505,23 @@ pub enum AgentActivity {
     NeedsInput,
 }
 
-pub struct ProjectAgentActivity(pub fn(&[PathBuf], &App) -> Option<AgentActivity>);
+pub struct AgentActivityChanges;
+
+pub struct ProjectAgentActivity {
+    pub activity: fn(&[PathBuf], &App) -> Option<AgentActivity>,
+    pub changes: Entity<AgentActivityChanges>,
+}
 
 impl Global for ProjectAgentActivity {}
 
 pub fn project_agent_activity(roots: &[PathBuf], cx: &App) -> Option<AgentActivity> {
     cx.try_global::<ProjectAgentActivity>()
-        .and_then(|activity| (activity.0)(roots, cx))
+        .and_then(|activity| (activity.activity)(roots, cx))
+}
+
+pub fn agent_activity_changes(cx: &App) -> Option<Entity<AgentActivityChanges>> {
+    cx.try_global::<ProjectAgentActivity>()
+        .map(|activity| activity.changes.clone())
 }
 
 static SHOWING_QUIT_WARNING: AtomicBool = AtomicBool::new(false);
