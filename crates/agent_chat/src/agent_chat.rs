@@ -87,6 +87,7 @@ pub fn init(shell_env_loaded: Option<futures::channel::oneshot::Receiver<()>>, c
         cx.set_global(session::ShellEnvLoaded(loaded.shared()));
     }
     cx.set_global(workspace::QuitWarning(session::quit_warning));
+    cx.set_global(workspace::ProjectAgentActivity(session::project_agent_activity));
     agent_panel::init(cx);
     watch_enabled(cx);
 }

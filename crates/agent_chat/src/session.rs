@@ -270,6 +270,10 @@ impl SessionMetadata {
     pub fn project_root(&self) -> &Path {
         self.project_root.as_deref().unwrap_or(&self.cwd)
     }
+
+    fn is_in(&self, roots: &[PathBuf]) -> bool {
+        roots.iter().any(|root| root == self.project_root())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2436,6 +2440,16 @@ pub(crate) fn stop_all_agents(cx: &mut App) {
     }
 }
 
+pub(crate) fn project_agent_activity(
+    roots: &[PathBuf],
+    cx: &App,
+) -> Option<workspace::AgentActivity> {
+    cx.try_global::<GlobalAgentStore>()?
+        .0
+        .read(cx)
+        .agent_activity_in(roots, cx)
+}
+
 pub(crate) fn quit_warning(cx: &App) -> Option<String> {
     let settings = AgentChatSettings::get_global(cx);
     if !settings.enabled || !settings.confirm_quit_while_working {
@@ -2449,6 +2463,23 @@ pub(crate) fn quit_warning(cx: &App) -> Option<String> {
 }
 
 impl AgentStore {
+    fn agent_activity_in(&self, roots: &[PathBuf], cx: &App) -> Option<workspace::AgentActivity> {
+        let mut activity = None;
+        for session in self.live.values() {
+            let session = session.read(cx);
+            if session.is_deleted() || !session.metadata.is_in(roots) {
+                continue;
+            }
+            if !session.pending_questions.is_empty() {
+                return Some(workspace::AgentActivity::NeedsInput);
+            }
+            if session.is_working() {
+                activity = Some(workspace::AgentActivity::Working);
+            }
+        }
+        activity
+    }
+
     fn working_count(&self, cx: &App) -> usize {
         self.live
             .values()
@@ -3072,9 +3103,7 @@ impl AgentStore {
         let mut summaries: Vec<SessionSummary> = self
             .sessions
             .iter()
-            .filter(|metadata| {
-                all_projects || roots.iter().any(|root| root == metadata.project_root())
-            })
+            .filter(|metadata| all_projects || metadata.is_in(roots))
             .map(|metadata| {
                 let live = self.live.get(&metadata.id).map(|session| session.read(cx));
                 SessionSummary {
@@ -3947,6 +3976,50 @@ pub(crate) mod tests {
         };
         assert!(question(&["Allow", "Deny"]).is_tool_permission());
         assert!(!question(&["Yes", "No"]).is_tool_permission());
+    }
+
+    #[gpui::test]
+    async fn agent_activity_is_reported_per_project(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let working_root = directory.path().join("working");
+        let waiting_root = directory.path().join("waiting");
+        let idle_root = directory.path().join("idle");
+        let working = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, working_root.clone(), cx)
+        });
+        let waiting = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, waiting_root.clone(), cx)
+        });
+        store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, idle_root.clone(), cx)
+        });
+        working.update(cx, |session, _| session.working = true);
+        waiting.update(cx, |session, _| {
+            session.working = true;
+            session.pending_questions.push(PendingQuestion {
+                questions: Vec::new(),
+                responder: None,
+            });
+        });
+
+        store.read_with(cx, |store, cx| {
+            let activity = |roots: &[PathBuf]| store.agent_activity_in(roots, cx);
+            assert_eq!(
+                activity(std::slice::from_ref(&working_root)),
+                Some(workspace::AgentActivity::Working)
+            );
+            assert_eq!(
+                activity(std::slice::from_ref(&waiting_root)),
+                Some(workspace::AgentActivity::NeedsInput)
+            );
+            assert_eq!(
+                activity(&[working_root.clone(), waiting_root.clone()]),
+                Some(workspace::AgentActivity::NeedsInput)
+            );
+            assert_eq!(activity(std::slice::from_ref(&idle_root)), None);
+            assert_eq!(activity(&[directory.path().to_path_buf()]), None);
+        });
     }
 
     #[gpui::test]

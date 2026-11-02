@@ -99,7 +99,7 @@ impl MultiWorkspace {
         workspace.update(cx, |workspace, cx| {
             workspace.set_multi_workspace(weak_self, active_workspace_id.clone(), cx);
         });
-        Self {
+        let mut this = Self {
             window_id: window.window_handle().window_id(),
             held: vec![HeldWorkspace {
                 workspace,
@@ -111,7 +111,9 @@ impl MultiWorkspace {
             pending_removal_tasks: Vec::new(),
             _serialize_task: None,
             _subscriptions: vec![release_subscription],
-        }
+        };
+        this.keep_if_it_has_folders(0, cx);
+        this
     }
 
     pub fn close_window(&mut self, _: &CloseWindow, window: &mut Window, cx: &mut Context<Self>) {
@@ -181,6 +183,11 @@ impl MultiWorkspace {
         cx: &mut Context<Self>,
     ) {
         if !self.is_workspace_retained(workspace) {
+            if self.workspace() == workspace {
+                self.keep_if_it_has_folders(self.displayed_index(), cx);
+                self.serialize(cx);
+                cx.notify();
+            }
             return;
         }
 
@@ -321,6 +328,23 @@ impl MultiWorkspace {
     /// Pins the row so the workspace survives navigating away, recording
     /// `group` as the project group it was pinned under. No-op if already
     /// pinned.
+    fn keep_if_it_has_folders(&mut self, index: usize, cx: &mut Context<Self>) {
+        let key = self.held[index].workspace.read(cx).project_group_key(cx);
+        if !key.path_list().is_empty() {
+            self.pin(index, key, cx);
+        }
+    }
+
+    fn active_workspace_survives_switch(&self, cx: &App) -> bool {
+        self.active_workspace_is_retained()
+            || !self
+                .workspace()
+                .read(cx)
+                .project_group_key(cx)
+                .path_list()
+                .is_empty()
+    }
+
     fn pin(&mut self, index: usize, group: ProjectGroupKey, cx: &mut Context<Self>) {
         if self.held[index].pinned {
             return;
@@ -860,15 +884,30 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.activate_inner(workspace, source_workspace, true, window, cx);
+    }
+
+    fn activate_inner(
+        &mut self,
+        workspace: Entity<Workspace>,
+        source_workspace: Option<WeakEntity<Workspace>>,
+        keep_previous: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.workspace() == &workspace {
             self.focus_active_workspace(window, cx);
             return;
         }
 
         let old_active_workspace = self.workspace().clone();
+        if keep_previous {
+            self.keep_if_it_has_folders(self.displayed_index(), cx);
+        }
         let old_active_was_retained = self.active_workspace_is_retained();
 
         let displayed = self.hold(workspace.clone(), window, cx);
+        self.keep_if_it_has_folders(displayed, cx);
         // Publish the new active workspace before anyone reads the shared cell
         // to decide who owns the window chrome.
         self.active_workspace_id.set(workspace.entity_id());
@@ -1376,7 +1415,7 @@ impl MultiWorkspace {
                             cx.new(|cx| Workspace::new(None, project, app_state, window, cx))
                         });
 
-                    this.activate(replacement, None, window, cx);
+                    this.activate_inner(replacement, None, false, window, cx);
                     this.detach_workspace(&displayed_workspace, cx);
                     removed_any = true;
                 } else if *this.workspace() != original_active
@@ -1421,13 +1460,21 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<Entity<Workspace>>> {
+        if open_mode == OpenMode::Activate
+            && let Some(existing) = self.workspace_for_paths(&PathList::new(&paths), None, cx)
+        {
+            self.activate(existing.clone(), None, window, cx);
+            return Task::ready(Ok(existing));
+        }
         let workspace = self.workspace().clone();
+        let will_be_kept = self.active_workspace_survives_switch(cx);
         cx.spawn_in(window, async move |_this, cx| {
-            let should_continue = workspace
-                .update_in(cx, |workspace, window, cx| {
-                    workspace.prepare_to_close(crate::CloseIntent::ReplaceWindow, window, cx)
-                })?
-                .await?;
+            let should_continue = will_be_kept
+                || workspace
+                    .update_in(cx, |workspace, window, cx| {
+                        workspace.prepare_to_close(crate::CloseIntent::ReplaceWindow, window, cx)
+                    })?
+                    .await?;
             if should_continue {
                 workspace
                     .update_in(cx, |workspace, window, cx| {

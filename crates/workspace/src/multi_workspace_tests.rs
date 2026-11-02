@@ -198,9 +198,7 @@ async fn test_adding_worktree_updates_project_group_key(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-async fn test_find_or_create_local_workspace_reuses_active_workspace_when_not_retained(
-    cx: &mut TestAppContext,
-) {
+async fn test_find_or_create_local_workspace_reuses_active_workspace(cx: &mut TestAppContext) {
     init_test(cx);
     let fs = FakeFs::new(cx.executor());
     fs.insert_tree("/root_a", json!({ "file.txt": "" })).await;
@@ -210,9 +208,10 @@ async fn test_find_or_create_local_workspace_reuses_active_workspace_when_not_re
         cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
 
     let active_workspace = multi_workspace.read_with(cx, |mw, cx| {
-        assert!(
-            mw.project_groups(cx).is_empty(),
-            "sidebar-closed setup should start with no retained project groups"
+        assert_eq!(
+            mw.project_groups(cx).len(),
+            1,
+            "a workspace with folders is kept as soon as it opens"
         );
         mw.workspace().clone()
     });
@@ -236,7 +235,7 @@ async fn test_find_or_create_local_workspace_reuses_active_workspace_when_not_re
     assert_eq!(
         workspace.entity_id(),
         active_workspace_id,
-        "should reuse the current active workspace when the sidebar is closed"
+        "should reuse the current active workspace"
     );
 
     multi_workspace.read_with(cx, |mw, _cx| {
@@ -724,7 +723,7 @@ async fn test_remove_project_group_opens_unloaded_local_neighbor(cx: &mut TestAp
 }
 
 #[gpui::test]
-async fn test_remove_project_group_replaces_unretained_active_workspace(cx: &mut TestAppContext) {
+async fn test_remove_project_group_replaces_active_workspace(cx: &mut TestAppContext) {
     init_test(cx);
     let fs = FakeFs::new(cx.executor());
     fs.insert_tree("/project-a", json!({})).await;
@@ -759,8 +758,8 @@ async fn test_remove_project_group_replaces_unretained_active_workspace(cx: &mut
         );
 
         assert!(
-            !multi_workspace.active_workspace_is_retained(),
-            "the active workspace should remain provisional"
+            multi_workspace.active_workspace_is_retained(),
+            "a workspace with folders is kept as soon as it opens"
         );
         assert_eq!(
             multi_workspace.project_group_keys(),
@@ -780,7 +779,7 @@ async fn test_remove_project_group_replaces_unretained_active_workspace(cx: &mut
         assert_ne!(
             multi_workspace.workspace(),
             &workspace_a,
-            "removing the active project group should replace its provisional workspace"
+            "removing the active project group should replace its workspace"
         );
         assert!(
             multi_workspace
@@ -1252,5 +1251,210 @@ async fn test_nearest_retained_workspace(cx: &mut TestAppContext) {
             None,
             "no workspace should be returned when every candidate is excluded"
         );
+    });
+}
+
+#[gpui::test]
+async fn test_open_project_keeps_previous_project_open(cx: &mut TestAppContext) {
+    init_test(cx);
+    let app_state = cx.update(AppState::test);
+    let fs = app_state.fs.as_fake();
+    fs.insert_tree(path!("/project_a"), json!({ "file_a.txt": "" }))
+        .await;
+    fs.insert_tree(path!("/project_b"), json!({ "file_b.txt": "" }))
+        .await;
+
+    let project = Project::test(app_state.fs.clone(), [path!("/project_a").as_ref()], cx).await;
+    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project, window, cx));
+    cx.run_until_parked();
+    let workspace_a = window
+        .read_with(cx, |mw, _| mw.workspace().clone())
+        .unwrap();
+    let key_a = workspace_a.read_with(cx, |workspace, cx| workspace.project_group_key(cx));
+    let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+    window
+        .read_with(cx, |mw, cx| {
+            assert_eq!(mw.project_group_keys(), vec![key_a.clone()]);
+            assert_eq!(
+                mw.workspaces_for_project_group(&key_a, cx),
+                vec![workspace_a.clone()],
+                "the active project belongs to its group, so moving it to a new window saves it first"
+            );
+        })
+        .unwrap();
+
+    let dirty_item = cx.new(|cx| TestItem::new(cx).with_dirty(true));
+    workspace_a.update_in(cx, |workspace, window, cx| {
+        workspace.add_item_to_active_pane(Box::new(dirty_item.clone()), None, true, window, cx);
+    });
+
+    let open_b = window
+        .update(cx, |mw, window, cx| {
+            mw.open_project(
+                vec![PathBuf::from(path!("/project_b"))],
+                OpenMode::Activate,
+                window,
+                cx,
+            )
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert!(
+        !cx.has_pending_prompt(),
+        "switching away from a project keeps it open, so there is nothing to save"
+    );
+    let workspace_b = open_b.await.unwrap();
+    assert_ne!(workspace_b, workspace_a);
+    let key_b = workspace_b.read_with(cx, |workspace, cx| workspace.project_group_key(cx));
+
+    window
+        .read_with(cx, |mw, _cx| {
+            assert_eq!(mw.workspace(), &workspace_b);
+            assert_eq!(mw.workspaces().count(), 2);
+            assert!(mw.is_workspace_retained(&workspace_a));
+            assert_eq!(mw.project_group_keys(), vec![key_b.clone(), key_a.clone()]);
+        })
+        .unwrap();
+    assert!(
+        workspace_a.read_with(cx, |workspace, cx| workspace.items(cx).count()) == 1,
+        "the background project keeps its open items"
+    );
+
+    let reopen_a = window
+        .update(cx, |mw, window, cx| {
+            mw.open_project(
+                vec![PathBuf::from(path!("/project_a"))],
+                OpenMode::Activate,
+                window,
+                cx,
+            )
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(reopen_a.await.unwrap(), workspace_a);
+
+    window
+        .read_with(cx, |mw, cx| {
+            assert_eq!(mw.workspace(), &workspace_a);
+            assert_eq!(mw.workspaces().count(), 2);
+            assert!(mw.is_workspace_retained(&workspace_b));
+            mw.assert_project_group_key_integrity(cx).unwrap();
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+async fn test_switching_away_from_empty_workspace_drops_it(cx: &mut TestAppContext) {
+    init_test(cx);
+    let app_state = cx.update(AppState::test);
+    let fs = app_state.fs.as_fake();
+    fs.insert_tree(path!("/project_a"), json!({ "file_a.txt": "" }))
+        .await;
+
+    let project = Project::test(app_state.fs.clone(), [], cx).await;
+    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project, window, cx));
+    cx.run_until_parked();
+    let empty_workspace = window
+        .read_with(cx, |mw, _| mw.workspace().clone())
+        .unwrap();
+    let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+    window
+        .read_with(cx, |mw, _cx| {
+            assert!(mw.project_group_keys().is_empty());
+        })
+        .unwrap();
+
+    let open_a = window
+        .update(cx, |mw, window, cx| {
+            mw.open_project(
+                vec![PathBuf::from(path!("/project_a"))],
+                OpenMode::Activate,
+                window,
+                cx,
+            )
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let workspace_a = open_a.await.unwrap();
+
+    window
+        .read_with(cx, |mw, _cx| {
+            assert_eq!(mw.workspace(), &workspace_a);
+            assert_eq!(mw.workspaces().count(), 1);
+            assert!(
+                !mw.workspaces()
+                    .any(|workspace| *workspace == empty_workspace)
+            );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+async fn test_closing_active_project_switches_to_kept_project(cx: &mut TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree("/root_a", json!({ "file.txt": "" })).await;
+    fs.insert_tree("/root_b", json!({ "file.txt": "" })).await;
+    let project_a = Project::test(fs.clone(), ["/root_a".as_ref()], cx).await;
+    let project_b = Project::test(fs.clone(), ["/root_b".as_ref()], cx).await;
+
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project_a, window, cx));
+    let workspace_a = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+    let workspace_b = multi_workspace.update_in(cx, |mw, window, cx| {
+        let workspace_b = cx.new(|cx| Workspace::test_new(project_b, window, cx));
+        mw.activate(workspace_b.clone(), None, window, cx);
+        workspace_b
+    });
+    let key_b = workspace_b.read_with(cx, |workspace, cx| workspace.project_group_key(cx));
+    multi_workspace.read_with(cx, |mw, _| {
+        assert!(mw.is_workspace_retained(&workspace_a));
+        assert!(mw.is_workspace_retained(&workspace_b));
+    });
+
+    let removed = multi_workspace.update_in(cx, |mw, window, cx| {
+        mw.remove_project_group(&key_b, window, cx)
+    });
+    cx.run_until_parked();
+    assert!(removed.await.unwrap());
+
+    multi_workspace.read_with(cx, |mw, cx| {
+        assert_eq!(mw.workspace(), &workspace_a);
+        assert_eq!(mw.workspaces().count(), 1);
+        assert!(!mw.project_group_keys().contains(&key_b));
+        mw.assert_project_group_key_integrity(cx).unwrap();
+    });
+}
+
+#[gpui::test]
+async fn test_empty_workspace_is_kept_once_it_gets_a_folder(cx: &mut TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree("/root_a", json!({ "file.txt": "" })).await;
+    let project = Project::test(fs, [], cx).await;
+
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    multi_workspace.read_with(cx, |mw, _| {
+        assert!(!mw.active_workspace_is_retained());
+        assert!(mw.project_group_keys().is_empty());
+    });
+
+    project
+        .update(cx, |project, cx| {
+            project.find_or_create_worktree("/root_a", true, cx)
+        })
+        .await
+        .expect("adding worktree should succeed");
+    cx.run_until_parked();
+
+    let key = project.read_with(cx, |project, cx| project.project_group_key(cx));
+    multi_workspace.read_with(cx, |mw, cx| {
+        assert!(mw.active_workspace_is_retained());
+        assert_eq!(mw.project_group_keys(), vec![key]);
+        mw.assert_project_group_key_integrity(cx).unwrap();
     });
 }

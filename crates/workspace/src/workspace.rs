@@ -9499,6 +9499,21 @@ pub fn quit_warning(cx: &App) -> Option<String> {
         .and_then(|warning| (warning.0)(cx))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentActivity {
+    Working,
+    NeedsInput,
+}
+
+pub struct ProjectAgentActivity(pub fn(&[PathBuf], &App) -> Option<AgentActivity>);
+
+impl Global for ProjectAgentActivity {}
+
+pub fn project_agent_activity(roots: &[PathBuf], cx: &App) -> Option<AgentActivity> {
+    cx.try_global::<ProjectAgentActivity>()
+        .and_then(|activity| (activity.0)(roots, cx))
+}
+
 static SHOWING_QUIT_WARNING: AtomicBool = AtomicBool::new(false);
 
 async fn confirm_quit_warning(

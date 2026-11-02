@@ -7,7 +7,7 @@ use gpui::{App, AppContext as _, Entity, SystemNotification, TaskExt as _, Windo
 use i18n::t;
 use settings::Settings as _;
 use util::ResultExt as _;
-use workspace::MultiWorkspace;
+use workspace::{MultiWorkspace, Workspace};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Sound {
@@ -157,25 +157,30 @@ fn open_chat_from_notification(store: &Entity<AgentStore>, chat_id: &str, cx: &m
     else {
         return;
     };
-    let target = cx
+    let has_root = |workspace: &Entity<Workspace>, cx: &App| {
+        workspace
+            .read(cx)
+            .project()
+            .read(cx)
+            .visible_worktrees(cx)
+            .any(|worktree| worktree.read(cx).abs_path().as_ref() == project_root)
+    };
+    let windows: Vec<WindowHandle<MultiWorkspace>> = cx
         .windows()
         .into_iter()
         .filter_map(|window| window.downcast::<MultiWorkspace>())
-        .max_by_key(|handle: &WindowHandle<MultiWorkspace>| {
-            handle
-                .read(cx)
-                .map(|multi| {
-                    multi
-                        .workspace()
-                        .read(cx)
-                        .project()
-                        .read(cx)
-                        .visible_worktrees(cx)
-                        .any(|worktree| worktree.read(cx).abs_path().as_ref() == project_root)
-                })
-                .unwrap_or(false)
-        });
-    let Some(target) = target else {
+        .collect();
+    let target = windows
+        .iter()
+        .find_map(|handle| {
+            let multi = handle.read(cx).ok()?;
+            let workspace = multi
+                .workspaces()
+                .find(|workspace| has_root(workspace, cx))?;
+            Some((*handle, Some(workspace.clone())))
+        })
+        .or_else(|| windows.first().map(|handle| (*handle, None)));
+    let Some((target, workspace)) = target else {
         return;
     };
     let opening = store.update(cx, |store, cx| store.open_session(chat_id, cx));
@@ -183,9 +188,14 @@ fn open_chat_from_notification(store: &Entity<AgentStore>, chat_id: &str, cx: &m
         let session = opening.await?;
         target.update(cx, |multi, window, cx| {
             window.activate_window();
-            multi
-                .workspace()
-                .update(cx, |workspace, cx| open_chat(workspace, session, window, cx));
+            if let Some(workspace) = workspace
+                && multi.workspaces().any(|held| *held == workspace)
+            {
+                multi.activate(workspace, None, window, cx);
+            }
+            multi.workspace().update(cx, |workspace, cx| {
+                open_chat(workspace, session, window, cx)
+            });
         })
     })
     .detach_and_log_err(cx);

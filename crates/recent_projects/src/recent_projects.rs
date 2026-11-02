@@ -39,13 +39,13 @@ use settings::{DefaultOpenBehavior, Settings, WorktreeId};
 use workspace::ProjectGroupKey;
 
 use ui::{
-    ButtonLike, ContextMenu, Divider, HighlightedLabel, KeyBinding, ListItem, ListItemSpacing,
-    ListSubHeader, PopoverMenu, PopoverMenuHandle, TintColor, Tooltip, prelude::*,
+    ButtonLike, ContextMenu, Divider, HighlightedLabel, Indicator, KeyBinding, ListItem,
+    ListItemSpacing, ListSubHeader, PopoverMenu, PopoverMenuHandle, TintColor, Tooltip, prelude::*,
 };
 use util::{ResultExt, paths::PathExt};
 use workspace::{
-    HistoryManager, ModalView, MultiWorkspace, OpenMode, OpenOptions, OpenVisible, RecentWorkspace,
-    SerializedWorkspaceLocation, Workspace, WorkspaceDb, WorkspaceId,
+    AgentActivity, HistoryManager, ModalView, MultiWorkspace, OpenMode, OpenOptions, OpenVisible,
+    RecentWorkspace, SerializedWorkspaceLocation, Workspace, WorkspaceDb, WorkspaceId,
     notifications::DetachAndPromptErr, with_active_or_new_workspace,
 };
 use wu_actions::{OpenRecent, OpenRemote};
@@ -187,6 +187,20 @@ pub async fn get_recent_projects(
 
 pub async fn delete_recent_project(workspace_id: WorkspaceId, db: &WorkspaceDb) {
     let _ = db.delete_workspace_by_id(workspace_id).await;
+}
+
+fn activity_color(activity: AgentActivity) -> Color {
+    match activity {
+        AgentActivity::Working => Color::Accent,
+        AgentActivity::NeedsInput => Color::Warning,
+    }
+}
+
+fn activity_label(activity: AgentActivity) -> SharedString {
+    match activity {
+        AgentActivity::Working => t!("Agent working"),
+        AgentActivity::NeedsInput => t!("Agent needs you"),
+    }
 }
 
 fn get_open_folders(workspace: &Workspace, cx: &App) -> Vec<OpenFolderEntry> {
@@ -1282,7 +1296,13 @@ impl PickerDelegate for RecentProjectsDelegate {
                     .ordered_paths()
                     .map(|p| p.compact().to_string_lossy().to_string())
                     .collect();
-                let tooltip_path: SharedString = ordered_paths.join("\n").into();
+                let agent_activity =
+                    workspace::project_agent_activity(&self.project_group_roots(key, cx), cx);
+                let mut tooltip_lines = ordered_paths;
+                if let Some(activity) = agent_activity {
+                    tooltip_lines.push(activity_label(activity).to_string());
+                }
+                let tooltip_path: SharedString = tooltip_lines.join("\n").into();
                 let icon = icon_for_project_group(key);
                 let show_icon = self.filtered_entries_include_remote_project();
 
@@ -1390,6 +1410,13 @@ impl PickerDelegate for RecentProjectsDelegate {
                                         highlighted.paths.clear();
                                     }
                                     highlighted.render(window, cx)
+                                })
+                                .when_some(agent_activity, |this, activity| {
+                                    this.child(
+                                        div().flex_none().child(
+                                            Indicator::dot().color(activity_color(activity)),
+                                        ),
+                                    )
                                 })
                                 .tooltip(Tooltip::text(tooltip_path)),
                         )
@@ -2360,6 +2387,29 @@ impl RecentProjectsDelegate {
         }
 
         false
+    }
+
+    fn project_group_roots(&self, key: &ProjectGroupKey, cx: &App) -> Vec<PathBuf> {
+        let mut roots = key.path_list().paths().to_vec();
+        let multi_workspace = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).multi_workspace()?.upgrade());
+        if let Some(multi_workspace) = multi_workspace {
+            for workspace in multi_workspace
+                .read(cx)
+                .workspaces_for_project_group(key, cx)
+            {
+                roots.extend(
+                    workspace
+                        .read(cx)
+                        .root_paths(cx)
+                        .into_iter()
+                        .map(|path| path.to_path_buf()),
+                );
+            }
+        }
+        roots
     }
 
     fn is_active_project_group(&self, key: &ProjectGroupKey, cx: &App) -> bool {
