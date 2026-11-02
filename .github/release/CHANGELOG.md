@@ -4,6 +4,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Fix debug session picker overlapping the panel's tabs.
 - Switching projects from the top-left menu keeps the previous projects open in the background.
 - Open projects in the project menu show a dot while an agent is working or needs you.
 - Clicking an agent notification switches to that chat's project.

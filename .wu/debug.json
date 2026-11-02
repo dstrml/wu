@@ -1,0 +1,11 @@
+[
+  {
+    "label": "Debug Wu (CodeLLDB)",
+    "adapter": "CodeLLDB",
+    "build": {
+      "label": "Build Wu",
+      "command": "cargo",
+      "args": ["build", "-p", "wu", "--bin", "wu"],
+    },
+  },
+]
