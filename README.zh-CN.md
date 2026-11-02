@@ -35,6 +35,7 @@ Windows 用户请下载[安装程序](https://github.com/dstrml/wu/releases/late
 
 - [macOS（Apple 芯片）](https://github.com/dstrml/wu/releases/latest/download/Wu-aarch64.dmg)
 - [macOS（Intel 芯片）](https://github.com/dstrml/wu/releases/latest/download/Wu-x86_64.dmg)
+- [Windows x86-64](https://github.com/dstrml/wu/releases/latest/download/Wu-x86_64.exe)
 - [Linux x86-64](https://github.com/dstrml/wu/releases/latest/download/wu-linux-x86_64.tar.gz)
 - [Linux AArch64](https://github.com/dstrml/wu/releases/latest/download/wu-linux-aarch64.tar.gz)
 
