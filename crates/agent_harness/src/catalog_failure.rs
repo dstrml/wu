@@ -35,7 +35,9 @@ impl CatalogFailure {
     pub fn classify(error: &HarnessError) -> CatalogFailureCode {
         match error {
             HarnessError::Discovery(error) => return error.code,
-            HarnessError::NotInstalled(_) => return CatalogFailureCode::MissingExecutable,
+            HarnessError::NotInstalled(_) | HarnessError::AgentMissing(_) => {
+                return CatalogFailureCode::MissingExecutable;
+            }
             HarnessError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return CatalogFailureCode::MissingExecutable;
             }
@@ -50,6 +52,7 @@ impl CatalogFailure {
         };
         if text.contains("enoent")
             || text.contains("harness binary not found")
+            || text.contains("isn't installed")
             || text.contains("no such file or directory")
         {
             return CatalogFailureCode::MissingExecutable;

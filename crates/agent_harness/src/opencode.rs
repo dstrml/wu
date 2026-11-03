@@ -48,10 +48,9 @@ fn stall_hint() -> i18n::SharedString {
     )
 }
 
-const INSTALL_HINT: &str = "opencode (searched PATH, ~/.opencode/bin, ~/.local/bin, ~/.bun/bin, \
+const SEARCHED_PATHS: &str = "searched PATH, ~/.opencode/bin, ~/.local/bin, ~/.bun/bin, \
      ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin, and fnm/nvm/volta/pnpm/bun install \
-     dirs; install with `curl -fsSL https://opencode.ai/install | bash`, then \
-     `opencode auth login`; set OPENCODE_EXECUTABLE to override)";
+     dirs; set OPENCODE_EXECUTABLE to override";
 
 fn startup_timeout() -> Duration {
     std::env::var(server::STARTUP_TIMEOUT_ENV)
@@ -397,7 +396,8 @@ impl OpencodeHarness {
         if let Some(path) = &self.executable {
             return crate::executable::validate_native_override(path);
         }
-        resolve_opencode_executable().ok_or_else(|| HarnessError::NotInstalled(INSTALL_HINT.into()))
+        resolve_opencode_executable()
+            .ok_or_else(|| HarnessError::agent_missing(HarnessId::Opencode, SEARCHED_PATHS))
     }
 
     fn discovery_context(&self) -> Result<crate::ModelContext, HarnessError> {

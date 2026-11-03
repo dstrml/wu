@@ -11,12 +11,33 @@ pub use proto::*;
 pub enum HarnessError {
     #[error("{}", i18n::t!("harness binary not found: {detail}", detail = .0))]
     NotInstalled(String),
+    #[error("{}", missing_agent_message(*.0))]
+    AgentMissing(HarnessId),
     #[error("{}", i18n::t!("harness protocol error: {detail}", detail = translated_detail(.0)))]
     Protocol(String),
     #[error(transparent)]
     Discovery(#[from] CatalogFailure),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+}
+
+fn missing_agent_message(agent: HarnessId) -> i18n::SharedString {
+    match agent {
+        HarnessId::ClaudeCode => i18n::t!(
+            "Claude Code isn't installed. Install it, or use OpenCode to connect your own API or a local model."
+        ),
+        HarnessId::Codex => i18n::t!(
+            "Codex isn't installed. Install it, or use OpenCode to connect your own API or a local model."
+        ),
+        HarnessId::Opencode => i18n::t!("OpenCode isn't installed. Install it and try again."),
+    }
+}
+
+impl HarnessError {
+    pub(crate) fn agent_missing(agent: HarnessId, searched: &str) -> Self {
+        log::info!("{agent:?} executable not found: {searched}");
+        Self::AgentMissing(agent)
+    }
 }
 
 fn translated_detail(detail: &str) -> i18n::SharedString {

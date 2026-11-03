@@ -142,13 +142,13 @@ impl ClaudeHarness {
             return crate::executable::validate_native_override(&PathBuf::from(p));
         }
         resolve_claude_executable().ok_or_else(|| {
-            HarnessError::NotInstalled(
-                "claude (searched PATH, ~/.claude/local, \
+            HarnessError::agent_missing(
+                HarnessId::ClaudeCode,
+                "searched PATH, ~/.claude/local, \
                  ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, and \
                  fnm/nvm/volta/pnpm/bun install dirs; Windows also checks USERPROFILE \
                  and explicit NVM_SYMLINK/VOLTA_HOME/PNPM_HOME; set \
-                 CLAUDE_CODE_EXECUTABLE to override)"
-                    .into(),
+                 CLAUDE_CODE_EXECUTABLE to override",
             )
         })
     }

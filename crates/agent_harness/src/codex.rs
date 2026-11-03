@@ -111,13 +111,13 @@ impl CodexHarness {
             return crate::executable::validate_native_override(&PathBuf::from(p));
         }
         resolve_codex_executable().ok_or_else(|| {
-            HarnessError::NotInstalled(
-                "codex (searched PATH, ~/.local/bin, \
+            HarnessError::agent_missing(
+                HarnessId::Codex,
+                "searched PATH, ~/.local/bin, \
                  ~/.codex/bin, ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin, \
                  and fnm/nvm/volta/pnpm/bun install dirs; Windows also checks USERPROFILE \
                  and explicit NVM_SYMLINK/VOLTA_HOME/PNPM_HOME, then the ChatGPT desktop \
-                 app's bundled copy; set CODEX_EXECUTABLE to override)"
-                    .into(),
+                 app's bundled copy; set CODEX_EXECUTABLE to override",
             )
         })
     }
