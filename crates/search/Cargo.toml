@@ -48,7 +48,6 @@ theme.workspace = true
 theme_settings.workspace = true
 ui.workspace = true
 util.workspace = true
-util_macros.workspace = true
 workspace.workspace = true
 wu_actions.workspace = true
 itertools.workspace = true
@@ -63,4 +62,5 @@ lsp.workspace = true
 pretty_assertions.workspace = true
 proto.workspace = true
 unindent.workspace = true
+util_macros.workspace = true
 workspace = { workspace = true, features = ["test-support"] }

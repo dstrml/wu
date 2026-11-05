@@ -2,7 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod reliability;
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9:crates/wu/src/main.rs
 mod wu;
+=======
+mod watcher_debug;
+mod zed;
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52:crates/zed/src/main.rs
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
@@ -308,6 +313,9 @@ fn main() {
     }
     ztracing::init();
 
+    #[cfg(unix)]
+    util::increase_open_file_limit().log_err();
+
     let version = option_env!("ZED_BUILD_ID");
     let app_commit_sha =
         option_env!("ZED_COMMIT_SHA").map(|commit_sha| AppCommitSha::new(commit_sha.to_string()));
@@ -407,7 +415,7 @@ fn main() {
         log::info!("Using git binary path: {:?}", git_binary_path);
     }
 
-    let fs = Arc::new(RealFs::new(git_binary_path, app.background_executor()));
+    let fs = RealFs::new(git_binary_path, app.background_executor());
     let (user_keymap_file_rx, user_keymap_watcher) = watch_config_file(
         &app.background_executor(),
         fs.clone(),
@@ -531,7 +539,7 @@ fn main() {
             tx.send(Some(options)).log_err();
         })
         .detach();
-        ui::on_new_scrollbars::<SettingsStore>(cx);
+        ui::observe_scrollbar_settings::<SettingsStore>(cx);
 
         let node_runtime = NodeRuntime::new(client.http_client(), Some(shell_env_loaded_rx), rx);
 
@@ -583,6 +591,7 @@ fn main() {
         });
         AppState::set_global(app_state.clone(), cx);
 
+        watcher_debug::init(app_state.clone(), cx);
         auto_update::init(client.clone(), cx);
         dap_adapters::init(cx);
         auto_update_ui::init(cx);
@@ -605,7 +614,37 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9:crates/wu/src/main.rs
         wu::remote_debug::init(cx);
+=======
+        let copilot_chat_configuration = copilot_chat::CopilotChatConfiguration {
+            enterprise_uri: settings::CopilotSettings::get_global(cx)
+                .enterprise_uri
+                .clone(),
+        };
+        let credentials_provider = zed_credentials_provider::global(cx);
+        copilot_chat::init(
+            app_state.client.http_client(),
+            credentials_provider,
+            copilot_chat_configuration,
+            cx,
+        );
+
+        copilot_ui::init(&app_state, cx);
+        language_model::init(cx);
+        RefreshLlmTokenListener::register(
+            app_state.client.clone(),
+            app_state.user_store.clone(),
+            cx,
+        );
+        language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
+        acp_tools::init(cx);
+        zed::telemetry_log::init(cx);
+        zed::remote_debug::init(cx);
+        edit_prediction_ui::init(cx);
+        web_search::init(cx);
+        web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52:crates/zed/src/main.rs
         snippet_provider::init(cx);
 
         recent_projects::init(cx);
@@ -647,6 +686,7 @@ fn main() {
         encoding_selector::init(cx);
         language_selector::init(cx);
         line_ending_selector::init(cx);
+        lsp_command_selector::init(cx);
         toolchain_selector::init(cx);
         theme_selector::init(cx);
         settings_profile_selector::init(cx);
@@ -1661,7 +1701,12 @@ fn load_user_themes_in_background(fs: Arc<dyn fs::Fs>, cx: &mut App) {
                 let Some(theme_path) = theme_path.log_err() else {
                     continue;
                 };
-                let Some(bytes) = fs.load_bytes(&theme_path).await.log_err() else {
+                let Some(bytes) = fs
+                    .load_bytes(&theme_path)
+                    .await
+                    .with_context(|| format!("loading theme bytes from {theme_path:?}"))
+                    .log_err()
+                else {
                     continue;
                 };
 
@@ -1693,7 +1738,11 @@ fn watch_themes(fs: Arc<dyn fs::Fs>, cx: &mut App) {
                     .is_some_and(|m| !m.is_dir)
                 {
                     let theme_registry = cx.update(|cx| ThemeRegistry::global(cx));
-                    if let Some(bytes) = fs.load_bytes(&event.path).await.log_err()
+                    if let Some(bytes) = fs
+                        .load_bytes(&event.path)
+                        .await
+                        .with_context(|| format!("loading theme bytes from {:?}", event.path))
+                        .log_err()
                         && load_user_theme(&theme_registry, &bytes).log_err().is_some()
                     {
                         cx.update(theme_settings::reload_theme);

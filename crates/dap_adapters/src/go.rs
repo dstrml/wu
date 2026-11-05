@@ -454,37 +454,59 @@ impl DebugAdapter for GoDebugAdapter {
             path.to_string_lossy().into_owned()
         } else if let Some(path) = delegate.which(OsStr::new("dlv")).await {
             path.to_string_lossy().into_owned()
-        } else if delegate.fs().is_file(&dlv_path).await {
-            dlv_path.to_string_lossy().into_owned()
         } else {
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
             let go = delegate
                 .which(OsStr::new("go"))
                 .await
                 .context(t!(
                     "Go not found in path. Please install Go first, then Dlv will be installed automatically."
                 ))?;
+=======
+            // Refresh managed Delve for each debug session so Go upgrades aren't blocked by a stale binary.
+            let install_result = async {
+                let go = delegate
+                    .which(OsStr::new("go"))
+                    .await
+                    .context("Go not found in path. Please install Go first, then Dlv will be installed automatically.")?;
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
 
-            let adapter_path = paths::debug_adapters_dir().join(&Self::ADAPTER_NAME);
+                let install_output = util::command::new_command(&go)
+                    .env("GO111MODULE", "on")
+                    .env("GOBIN", &adapter_path)
+                    .args(&["install", "github.com/go-delve/delve/cmd/dlv@latest"])
+                    .output()
+                    .await?;
 
-            let install_output = util::command::new_command(&go)
-                .env("GO111MODULE", "on")
-                .env("GOBIN", &adapter_path)
-                .args(&["install", "github.com/go-delve/delve/cmd/dlv@latest"])
-                .output()
-                .await?;
+                if !install_output.status.success() {
+                    bail!(
+                        "failed to install dlv via `go install`. stdout: {:?}, stderr: {:?}\n Please try installing it manually using 'go install github.com/go-delve/delve/cmd/dlv@latest'",
+                        String::from_utf8_lossy(&install_output.stdout),
+                        String::from_utf8_lossy(&install_output.stderr)
+                    );
+                }
+                anyhow::Ok(())
+            }
+            .await;
 
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
             if !install_output.status.success() {
                 bail!(t!(
                     "failed to install dlv via `go install`. stdout: {stdout}, stderr: {stderr}\n Please try installing it manually using 'go install github.com/go-delve/delve/cmd/dlv@latest'",
                     stdout = format!("{:?}", String::from_utf8_lossy(&install_output.stdout)),
                     stderr = format!("{:?}", String::from_utf8_lossy(&install_output.stderr))
                 ));
+=======
+            if let Err(error) = install_result {
+                if delegate.fs().is_file(&dlv_path).await {
+                    warn!("Failed to update Delve, using cached version: {error:#}");
+                } else {
+                    return Err(error);
+                }
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
             }
 
-            adapter_path
-                .join(&dlv_binary)
-                .to_string_lossy()
-                .into_owned()
+            dlv_path.to_string_lossy().into_owned()
         };
 
         let cwd = Some(

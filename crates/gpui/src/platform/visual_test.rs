@@ -6,10 +6,10 @@
 //! - Controllable time via `advance_clock`
 
 use crate::{
-    AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, Keymap,
-    Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform, PlatformDisplay,
-    PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Task,
-    TestDispatcher, WindowAppearance, WindowParams,
+    ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle,
+    ForegroundExecutor, Keymap, Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform,
+    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    PlatformWindow, Task, TestDispatcher, WindowAppearance, WindowParams,
 };
 use anyhow::Result;
 use futures::channel::oneshot;
@@ -64,6 +64,10 @@ impl VisualTestPlatform {
 }
 
 impl Platform for VisualTestPlatform {
+    fn platform_info(&self) -> crate::PlatformInfo {
+        self.platform.platform_info()
+    }
+
     fn background_executor(&self) -> BackgroundExecutor {
         self.background_executor.clone()
     }
@@ -104,6 +108,10 @@ impl Platform for VisualTestPlatform {
 
     fn primary_display(&self) -> Option<Rc<dyn PlatformDisplay>> {
         self.platform.primary_display()
+    }
+
+    fn on_displays_changed(&self, callback: Box<dyn FnMut()>) {
+        self.platform.on_displays_changed(callback)
     }
 
     fn active_window(&self) -> Option<AnyWindowHandle> {
@@ -170,6 +178,8 @@ impl Platform for VisualTestPlatform {
     fn on_quit(&self, _callback: Box<dyn FnMut() -> bool>) {}
 
     fn on_reopen(&self, _callback: Box<dyn FnMut()>) {}
+
+    fn on_system_sleep(&self, _callback: Box<dyn FnMut()>) {}
 
     fn on_system_wake(&self, _callback: Box<dyn FnMut()>) {}
 
@@ -256,4 +266,10 @@ impl Platform for VisualTestPlatform {
     }
 
     fn on_thermal_state_change(&self, _callback: Box<dyn FnMut()>) {}
+
+    fn prevent_idle_sleep(&self, reason: &str) -> Task<Result<ActivityGuard>> {
+        Task::ready(Err(anyhow::anyhow!(
+            "Idle sleep prevention for {reason:?} is not supported in visual tests"
+        )))
+    }
 }
