@@ -7962,6 +7962,96 @@ fn agent_chat_page() -> SettingsPage {
         ]
     }
 
+    fn commit_message_section() -> [SettingsPageItem; 4] {
+        [
+            SettingsPageItem::SectionHeader(n!("Commit Messages")),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Commit Message Agent"),
+                description: n!(
+                    "The agent that writes commit messages in the Git panel. When unset, the first installed agent."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.commit_message.agent"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .commit_message
+                            .as_ref()?
+                            .agent
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .commit_message
+                            .get_or_insert_default()
+                            .agent = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Commit Message Model"),
+                description: n!(
+                    "The model that writes commit messages. When unset, a small, fast model."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.commit_message.model"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .commit_message
+                            .as_ref()?
+                            .model
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .commit_message
+                            .get_or_insert_default()
+                            .model = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Commit Message Instructions"),
+                description: n!(
+                    "Extra instructions for commit messages, such as the language or style to use."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.commit_message.instructions"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .commit_message
+                            .as_ref()?
+                            .instructions
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .commit_message
+                            .get_or_insert_default()
+                            .instructions = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+        ]
+    }
+
     SettingsPage {
         title: AGENT_CHAT_PAGE,
         items: concat_sections![
@@ -7970,6 +8060,7 @@ fn agent_chat_page() -> SettingsPage {
             new_chats_section(),
             agents_section(),
             context_section(),
+            commit_message_section(),
             notifications_section()
         ],
     }

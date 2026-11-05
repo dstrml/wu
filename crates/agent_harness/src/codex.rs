@@ -923,6 +923,9 @@ async fn run_session(session: Session) {
         if let Some(tier) = &service_tier {
             p.insert("serviceTier".into(), Value::String(tier.clone()));
         }
+        if request.ephemeral {
+            p.insert("ephemeral".into(), Value::Bool(true));
+        }
         p
     };
 

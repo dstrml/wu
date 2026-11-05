@@ -105,6 +105,10 @@
     "name": "强制推送",
     "description": "将提交强制推送到远程仓库。"
   },
+  "git::GenerateCommitMessage": {
+    "name": "生成提交消息",
+    "description": "用智能体为你的更改生成提交消息。"
+  },
   "git::Init": {
     "name": "初始化仓库",
     "description": "初始化新的 Git 仓库。"

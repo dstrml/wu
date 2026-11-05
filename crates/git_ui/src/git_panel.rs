@@ -28,7 +28,7 @@ use futures::channel::oneshot::Canceled;
 use git::Oid;
 use git::commit::ParsedCommitMessage;
 use git::repository::{
-    Branch, CommitData, CommitDetails, CommitOptions, CommitSummary, FetchOptions,
+    Branch, CommitData, CommitDetails, CommitOptions, CommitSummary, DiffType, FetchOptions,
     GitCommitTemplate, InitialGraphCommitData, LogOrder, LogSource, PushOptions, Remote,
     RemoteCommandOutput, ResetMode, Upstream, UpstreamTracking, UpstreamTrackingStatus,
 };
@@ -38,9 +38,9 @@ use git::{
     Amend, Commit, Signoff, SkipHooks, ToggleStaged, repository::RepoPath, status::FileStatus,
 };
 use git::{
-    ExpandCommitEditor, GitHostingProviderRegistry, GitRemote, RestoreTrackedFiles, StageAll,
-    StashAll, StashApply, StashPop, StashStaged, StashTracked, ToggleFillCommitEditor,
-    TrashUntrackedFiles, UnstageAll, ViewFile, parse_git_remote_url,
+    ExpandCommitEditor, GenerateCommitMessage, GitHostingProviderRegistry, GitRemote,
+    RestoreTrackedFiles, StageAll, StashAll, StashApply, StashPop, StashStaged, StashTracked,
+    ToggleFillCommitEditor, TrashUntrackedFiles, UnstageAll, ViewFile, parse_git_remote_url,
 };
 use gpui::{
     AbsoluteLength, Action, Anchor, AnyElement, AsyncWindowContext, ClickEvent, ClipboardItem,
@@ -1052,6 +1052,154 @@ impl GitStatusEntry {
     }
 }
 
+const MAX_COMMIT_DIFF_BYTES: usize = 20_000;
+
+fn build_commit_message_prompt(instructions: Option<&str>, draft: &str, diff: &str) -> String {
+    let mut prompt = include_str!("commit_message_prompt.txt").to_owned();
+    if let Some(instructions) = instructions {
+        prompt.push_str(&format!(
+            "\nThe user has provided the following instructions for writing commit messages that you should follow:\n<commit_message_instructions>\n{instructions}\n</commit_message_instructions>\n"
+        ));
+    }
+    if !draft.trim().is_empty() {
+        prompt.push_str(&format!(
+            "\nThe user has started this commit message. Keep what it says and improve on it:\n<draft>\n{}\n</draft>\n",
+            draft.trim()
+        ));
+    }
+    prompt.push_str(&format!("\nHere are the changes in this commit:\n{diff}"));
+    prompt
+}
+
+fn split_patch(patch: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current_patch = String::new();
+    for line in patch.lines() {
+        if line.starts_with("---") && !current_patch.is_empty() {
+            result.push(current_patch.trim_end_matches('\n').into());
+            current_patch = String::new();
+        }
+        current_patch.push_str(line);
+        current_patch.push('\n');
+    }
+    if !current_patch.is_empty() {
+        result.push(current_patch.trim_end_matches('\n').into());
+    }
+    result
+}
+
+fn truncate_iteratively(patch: &str, max_bytes: usize) -> String {
+    let mut current_size = patch.len();
+    if current_size <= max_bytes {
+        return patch.to_string();
+    }
+    let mut file_infos: Vec<TruncatedPatch> = split_patch(patch)
+        .iter()
+        .filter_map(|patch| TruncatedPatch::from_unified_diff(patch))
+        .collect();
+    if file_infos.is_empty() {
+        return patch.to_string();
+    }
+    current_size = file_infos.iter().map(TruncatedPatch::size).sum::<usize>();
+    while current_size > max_bytes {
+        let Some(file) = file_infos
+            .iter_mut()
+            .filter(|file| file.hunks_to_keep > 1)
+            .max_by_key(|file| file.hunks_to_keep)
+        else {
+            break;
+        };
+        let size_before = file.size();
+        file.hunks_to_keep -= 1;
+        current_size = current_size.saturating_sub(size_before.saturating_sub(file.size()));
+    }
+    file_infos
+        .iter()
+        .map(TruncatedPatch::render)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn compress_commit_diff(diff_text: &str, max_bytes: usize) -> String {
+    if diff_text.len() <= max_bytes {
+        return diff_text.to_string();
+    }
+    let compressed = diff_text
+        .lines()
+        .map(|line| {
+            if line.len() > 256 {
+                format!("{}...[truncated]\n", &line[..line.floor_char_boundary(256)])
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect::<String>();
+    if compressed.len() <= max_bytes {
+        return compressed;
+    }
+    truncate_iteratively(&compressed, max_bytes)
+}
+
+struct TruncatedPatch {
+    header: String,
+    hunks: Vec<String>,
+    hunks_to_keep: usize,
+}
+
+impl TruncatedPatch {
+    fn from_unified_diff(patch: &str) -> Option<Self> {
+        let mut lines = patch.lines();
+        let header = format!("{}\n{}\n", lines.next()?, lines.next()?);
+        let mut hunks = Vec::new();
+        let mut current_hunk = String::new();
+        for line in lines {
+            if line.starts_with("@@") {
+                if !current_hunk.is_empty() {
+                    hunks.push(std::mem::take(&mut current_hunk));
+                }
+                current_hunk = format!("{line}\n");
+            } else if !current_hunk.is_empty() {
+                current_hunk.push_str(line);
+                current_hunk.push('\n');
+            }
+        }
+        if !current_hunk.is_empty() {
+            hunks.push(current_hunk);
+        }
+        if hunks.is_empty() {
+            return None;
+        }
+        let hunks_to_keep = hunks.len();
+        Some(Self {
+            header,
+            hunks,
+            hunks_to_keep,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.header.len()
+            + self
+                .hunks
+                .iter()
+                .take(self.hunks_to_keep)
+                .map(String::len)
+                .sum::<usize>()
+    }
+
+    fn render(&self) -> String {
+        let mut out = self.header.clone();
+        for hunk in self.hunks.iter().take(self.hunks_to_keep) {
+            out.push_str(hunk);
+        }
+        let skipped_hunks = self.hunks.len() - self.hunks_to_keep;
+        if skipped_hunks > 0 {
+            out.push_str(&format!("[...skipped {skipped_hunks} hunks...]\n"));
+        }
+        out
+    }
+}
+
 struct GitPanelContextMenu {
     menu: Entity<ContextMenu>,
     position: Point<Pixels>,
@@ -1082,6 +1230,7 @@ pub struct GitPanel {
     diff_stat_total: DiffStat,
     new_staged_count: usize,
     pending_commit: Option<Task<()>>,
+    generate_commit_message_task: Option<Task<()>>,
     pending_remote_operation: Option<RemoteOperationKind>,
     amend_pending: bool,
     original_commit_message: Option<String>,
@@ -1353,6 +1502,7 @@ impl GitPanel {
                 changes_count: 0,
                 diff_stat_total: DiffStat::default(),
                 pending_commit: None,
+                generate_commit_message_task: None,
                 pending_remote_operation: None,
                 amend_pending,
                 original_commit_message,
@@ -3298,6 +3448,163 @@ impl GitPanel {
             }
         })
         .detach();
+    }
+
+    fn generate_commit_message_action(
+        &mut self,
+        _: &GenerateCommitMessage,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.generate_commit_message(cx);
+    }
+
+    pub fn generate_commit_message(&mut self, cx: &mut Context<Self>) {
+        if self.generate_commit_message_task.is_some()
+            || !agent_chat::AgentChatSettings::get_global(cx).enabled
+            || !(self.has_staged_changes() || self.has_tracked_changes())
+        {
+            return;
+        }
+        let Some(repo) = self.active_repository.clone() else {
+            return;
+        };
+        let diff_type = if self.has_staged_changes() {
+            DiffType::HeadToIndex
+        } else {
+            DiffType::HeadToWorktree
+        };
+        let diff = repo.update(cx, |repo, cx| repo.diff(diff_type, cx));
+        let work_directory = repo.read(cx).work_directory_abs_path.to_path_buf();
+        let languages = self.project.read(cx).languages().clone();
+        let instructions = agent_chat::AgentChatSettings::get_global(cx)
+            .commit_message
+            .instructions
+            .clone();
+        let draft = self.commit_editor.read(cx).text(cx);
+        self.generate_commit_message_task = Some(cx.spawn(async move |this, cx| {
+            let result = async {
+                let diff_text = diff.await??;
+                let diff_text = compress_commit_diff(&diff_text, MAX_COMMIT_DIFF_BYTES);
+                let prompt =
+                    build_commit_message_prompt(instructions.as_deref(), &draft, &diff_text);
+                cx.update(|cx| {
+                    agent_chat::generate_commit_message(prompt, work_directory, languages, cx)
+                })
+                .await
+            }
+            .await;
+            this.update(cx, |this, cx| {
+                this.generate_commit_message_task = None;
+                match result {
+                    Ok(message) => {
+                        this.commit_message_buffer(cx).update(cx, |buffer, cx| {
+                            buffer.set_text(message, cx);
+                        });
+                    }
+                    Err(error) => this.show_commit_message_error(error, cx),
+                }
+                cx.notify();
+            })
+            .log_err();
+        }));
+        cx.notify();
+    }
+
+    fn show_commit_message_error(&self, error: anyhow::Error, cx: &mut App) {
+        struct CommitMessageError;
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let message = t!(
+            "Couldn't write a commit message: {error}",
+            error = error.to_string()
+        )
+        .to_string();
+        workspace.update(cx, |workspace, cx| {
+            workspace.show_toast(
+                workspace::Toast::new(NotificationId::unique::<CommitMessageError>(), message),
+                cx,
+            )
+        });
+    }
+
+    fn render_generate_commit_message_button(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        if !agent_chat::AgentChatSettings::get_global(cx).enabled {
+            return None;
+        }
+        if self.generate_commit_message_task.is_some() {
+            return Some(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        IconButton::new("stop-generate-commit-message", IconName::Stop)
+                            .icon_color(Color::Error)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text(t!("Stop Writing Commit Message")))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.generate_commit_message_task = None;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Label::new(t!("Generating…"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .into_any_element(),
+            );
+        }
+        let has_changes = self.has_staged_changes() || self.has_tracked_changes();
+        let agent = agent_chat::commit_message_agent_label(cx);
+        let editor_focus_handle = self.commit_editor.focus_handle(cx);
+        let languages = self.project.read(cx).languages().clone();
+        let generate = IconButton::new("generate-commit-message", IconName::Sparkle)
+            .icon_size(IconSize::Small)
+            .icon_color(Color::Muted)
+            .disabled(!has_changes)
+            .tooltip(move |_window, cx| {
+                if !has_changes {
+                    return Tooltip::simple(t!("No Changes to Commit"), cx);
+                }
+                match &agent {
+                    Some(agent) => Tooltip::with_meta_in(
+                        t!("Write Commit Message"),
+                        Some(&GenerateCommitMessage),
+                        agent.clone(),
+                        &editor_focus_handle,
+                        cx,
+                    ),
+                    None => Tooltip::for_action_in(
+                        t!("Write Commit Message"),
+                        &GenerateCommitMessage,
+                        &editor_focus_handle,
+                        cx,
+                    ),
+                }
+            })
+            .on_click(cx.listener(|this, _, _, cx| this.generate_commit_message(cx)));
+        let pick_agent = PopoverMenu::new("commit-message-agent-menu")
+            .trigger_with_tooltip(
+                IconButton::new("commit-message-agent", IconName::ChevronDown)
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(Color::Muted),
+                Tooltip::text(t!("Choose Agent and Model")),
+            )
+            .menu(move |window, cx| {
+                Some(agent_chat::commit_message_menu(
+                    languages.clone(),
+                    window,
+                    cx,
+                ))
+            })
+            .anchor(Anchor::BottomLeft);
+        Some(
+            h_flex()
+                .child(generate)
+                .child(pick_agent)
+                .into_any_element(),
+        )
     }
 
     pub fn commit_message_buffer(&self, cx: &App) -> Entity<Buffer> {
@@ -5711,7 +6018,9 @@ impl GitPanel {
     }
 
     pub fn configure_commit_button(&self, cx: &mut Context<Self>) -> (bool, SharedString) {
-        if self.has_unstaged_conflicts() {
+        if self.generate_commit_message_task.is_some() {
+            (false, t!("Generating…"))
+        } else if self.has_unstaged_conflicts() {
             (false, t!("You must resolve conflicts before committing"))
         } else if !self.has_staged_changes() && !self.has_tracked_changes() && !self.amend_pending {
             (false, t!("No changes to commit"))
@@ -6131,7 +6440,11 @@ impl GitPanel {
                             .when(editor_is_long, |el| {
                                 el.border_color(cx.theme().colors().border_variant)
                             })
-                            .justify_end()
+                            .justify_between()
+                            .child(
+                                self.render_generate_commit_message_button(cx)
+                                    .unwrap_or_else(|| div().into_any_element()),
+                            )
                             .child(
                                 h_flex()
                                     .gap_0p5()
@@ -8378,6 +8691,7 @@ impl Render for GitPanel {
                     .on_action(cx.listener(GitPanel::on_commit))
                     .on_action(cx.listener(GitPanel::toggle_skip_hooks))
                     .on_action(cx.listener(GitPanel::on_amend))
+                    .on_action(cx.listener(Self::generate_commit_message_action))
                     .on_action(cx.listener(GitPanel::toggle_signoff_enabled))
                     .on_action(cx.listener(Self::stage_all))
                     .on_action(cx.listener(Self::unstage_all))
@@ -14514,5 +14828,75 @@ mod tests {
                 "marks must not carry over to another repository",
             );
         });
+    }
+
+    #[test]
+    fn small_commit_diffs_stay_whole() {
+        let diff = indoc::indoc! {"
+            --- a/file.txt
+            +++ b/file.txt
+            @@ -1,2 +1,2 @@
+            -old
+            +new
+        "};
+        assert_eq!(compress_commit_diff(diff, 1000), diff);
+    }
+
+    #[test]
+    fn long_lines_in_commit_diffs_are_cut() {
+        let long_line = "🦀".repeat(300);
+        let diff = indoc::formatdoc! {"
+            --- a/file.txt
+            +++ b/file.txt
+            @@ -1,2 +1,3 @@
+             context
+            +{long_line}
+             more context
+        "};
+        let result = compress_commit_diff(&diff, 100);
+        assert!(result.contains("...[truncated]"));
+        assert!(result.len() < diff.len());
+    }
+
+    #[test]
+    fn large_commit_diffs_drop_later_hunks() {
+        let diff = indoc::indoc! {"
+            --- a/file.txt
+            +++ b/file.txt
+            @@ -1,2 +1,2 @@
+             context
+            -old1
+            +new1
+            @@ -5,2 +5,2 @@
+             context 2
+            -old2
+            +new2
+            @@ -10,2 +10,2 @@
+             context 3
+            -old3
+            +new3
+        "};
+        let expected = indoc::indoc! {"
+            --- a/file.txt
+            +++ b/file.txt
+            @@ -1,2 +1,2 @@
+             context
+            -old1
+            +new1
+            [...skipped 2 hunks...]
+        "};
+        assert_eq!(compress_commit_diff(diff, 100), expected);
+    }
+
+    #[test]
+    fn commit_message_prompt_includes_instructions_and_draft() {
+        let prompt = build_commit_message_prompt(Some("Write in Chinese"), "Fix crash\n", "DIFF");
+        assert!(prompt.contains("<commit_message_instructions>\nWrite in Chinese\n"));
+        assert!(prompt.contains("<draft>\nFix crash\n</draft>"));
+        assert!(prompt.ends_with("Here are the changes in this commit:\nDIFF"));
+
+        let bare = build_commit_message_prompt(None, "  ", "DIFF");
+        assert!(!bare.contains("<commit_message_instructions>"));
+        assert!(!bare.contains("<draft>"));
     }
 }

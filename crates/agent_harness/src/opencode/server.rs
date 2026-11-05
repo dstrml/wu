@@ -465,6 +465,34 @@ impl Server {
         )))
     }
 
+    pub(super) async fn delete_session(
+        &self,
+        session_id: &str,
+        directory: Option<&str>,
+    ) -> Result<(), HarnessError> {
+        let path = match self.protocol().await {
+            Protocol::V1 => format!("/session/{session_id}"),
+            Protocol::V2 => format!("/api/session/{session_id}"),
+        };
+        let request = self.request(reqwest::Method::DELETE, &path);
+        let response = self
+            .scoped(request, directory)
+            .await
+            .timeout(CALL_TIMEOUT)
+            .send()
+            .await
+            .map_err(|error| HarnessError::Protocol(format!("opencode DELETE {path}: {error}")))?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = response.text().await.unwrap_or_default();
+        Err(HarnessError::Protocol(format!(
+            "opencode DELETE {path}: {status} {}",
+            truncate_body(&text)
+        )))
+    }
+
     pub(super) async fn shutdown(&mut self, kill_grace: Duration) {
         if let Some(child) = self.child.as_mut() {
             crate::shutdown_child(child, kill_grace).await;

@@ -1479,6 +1479,7 @@ impl AgentSession {
             auto_compact_tokens: self.auto_compact_tokens(cx),
             chrome: AgentChatSettings::get_global(cx).claude_in_chrome,
             drop_prompt,
+            ephemeral: false,
         };
         let (steering_tx, steering_rx) = tokio::sync::mpsc::channel(32);
         let interrupt = CancellationToken::new();
@@ -2229,7 +2230,7 @@ pub(crate) struct ShellEnvLoaded(
 
 impl Global for ShellEnvLoaded {}
 
-fn shell_env_loaded(cx: &App) -> impl std::future::Future<Output = ()> + Send + 'static {
+pub(crate) fn shell_env_loaded(cx: &App) -> impl std::future::Future<Output = ()> + Send + 'static {
     let loaded = cx.try_global::<ShellEnvLoaded>().map(|loaded| loaded.0.clone());
     async move {
         if let Some(loaded) = loaded {
@@ -2636,7 +2637,7 @@ impl AgentStore {
         })
     }
 
-    fn harness(&mut self, kind: AgentKind) -> Arc<dyn Harness> {
+    pub(crate) fn harness(&mut self, kind: AgentKind) -> Arc<dyn Harness> {
         self.harnesses
             .entry(kind)
             .or_insert_with(|| kind.new_harness())

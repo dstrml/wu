@@ -1,6 +1,6 @@
 use agent_harness::{PermissionMode, ReasoningLevel};
 use settings::{
-    AgentChatDefaultEffort, AgentChatWhileWorking, ClaudeCodePermissionDefault,
+    AgentChatAgent, AgentChatDefaultEffort, AgentChatWhileWorking, ClaudeCodePermissionDefault,
     CodexPermissionDefault, ContextTokens, DockSide, OpencodePermissionDefault, RegisterSetting,
     Settings,
 };
@@ -28,6 +28,14 @@ pub struct AgentChatSettings {
     pub steer_while_working: bool,
     pub confirm_quit_while_working: bool,
     pub claude_in_chrome: bool,
+    pub commit_message: CommitMessageSettings,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CommitMessageSettings {
+    pub agent: Option<AgentKind>,
+    pub model: Option<String>,
+    pub instructions: Option<String>,
 }
 
 impl AgentChatSettings {
@@ -98,6 +106,18 @@ impl Settings for AgentChatSettings {
                 == AgentChatWhileWorking::Steer,
             confirm_quit_while_working: content.confirm_quit_while_working.unwrap_or(true),
             claude_in_chrome: content.claude_in_chrome.unwrap_or(true),
+            commit_message: {
+                let commit_message = content.commit_message.unwrap_or_default();
+                CommitMessageSettings {
+                    agent: commit_message.agent.map(AgentKind::from_setting),
+                    model: commit_message
+                        .model
+                        .filter(|model| !model.trim().is_empty()),
+                    instructions: commit_message
+                        .instructions
+                        .filter(|instructions| !instructions.trim().is_empty()),
+                }
+            },
         }
     }
 }
@@ -139,5 +159,23 @@ fn opencode_permission(mode: OpencodePermissionDefault) -> PermissionMode {
         OpencodePermissionDefault::AcceptEdits => PermissionMode::AcceptEdits,
         OpencodePermissionDefault::Auto => PermissionMode::Auto,
         OpencodePermissionDefault::FullAccess => PermissionMode::FullAccess,
+    }
+}
+
+impl AgentKind {
+    pub(crate) fn from_setting(agent: AgentChatAgent) -> Self {
+        match agent {
+            AgentChatAgent::ClaudeCode => AgentKind::Claude,
+            AgentChatAgent::Codex => AgentKind::Codex,
+            AgentChatAgent::Opencode => AgentKind::Opencode,
+        }
+    }
+
+    pub(crate) fn to_setting(self) -> AgentChatAgent {
+        match self {
+            AgentKind::Claude => AgentChatAgent::ClaudeCode,
+            AgentKind::Codex => AgentChatAgent::Codex,
+            AgentKind::Opencode => AgentChatAgent::Opencode,
+        }
     }
 }

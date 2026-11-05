@@ -2,6 +2,7 @@ mod agent_chat_settings;
 mod agent_panel;
 mod chat_style;
 mod chat_view;
+mod commit_message;
 mod model_picker;
 mod notifications;
 mod saved_chats;
@@ -9,9 +10,12 @@ mod session;
 mod slash_commands;
 mod usage_rings;
 
-pub use agent_chat_settings::AgentChatSettings;
+pub use agent_chat_settings::{AgentChatSettings, CommitMessageSettings};
 pub use agent_panel::AgentPanel;
 pub use chat_view::ChatView;
+pub use commit_message::{
+    commit_message_agent_label, commit_message_menu, generate_commit_message,
+};
 
 use command_palette_hooks::CommandPaletteFilter;
 use futures::FutureExt as _;

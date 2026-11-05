@@ -146,6 +146,9 @@ pub struct RunRequest {
     /// A `PromptRecorded` id: the agent forgets that prompt and everything after it before this run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drop_prompt: Option<String>,
+    /// The agent doesn't keep this run as a saved chat.
+    #[serde(default)]
+    pub ephemeral: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

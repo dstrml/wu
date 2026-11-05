@@ -817,6 +817,7 @@
       "alt-up": "git_panel::FocusChanges",
       "shift-escape": "git::ExpandCommitEditor",
       "alt-shift-escape": "git::ToggleFillCommitEditor",
+      "alt-l": "git::GenerateCommitMessage",
     },
   },
   {

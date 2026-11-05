@@ -50,6 +50,7 @@ fn request(prompt: &str) -> RunRequest {
         auto_compact_tokens: None,
         chrome: false,
         drop_prompt: None,
+        ephemeral: false,
     }
 }
 

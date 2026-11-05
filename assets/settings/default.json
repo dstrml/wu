@@ -147,6 +147,15 @@
     "confirm_quit_while_working": true,
     // Lets Claude Code chats use Chrome through the Claude in Chrome extension.
     "claude_in_chrome": true,
+    // How the Git panel writes commit messages.
+    "commit_message": {
+      // "claude_code", "codex" or "opencode". When unset, the first installed agent.
+      "agent": null,
+      // When unset, a small, fast model.
+      "model": null,
+      // Extra instructions, such as the language or style to use.
+      "instructions": null,
+    },
   },
   // Image viewer settings
   "image_viewer": {

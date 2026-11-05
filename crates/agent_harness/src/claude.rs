@@ -202,6 +202,9 @@ impl ClaudeHarness {
             cmd.arg(format!("--resume={fork}"));
             cmd.arg("--fork-session");
         }
+        if request.ephemeral {
+            cmd.arg("--no-session-persistence");
+        }
         let settings = flag_settings(request);
         if !settings.is_empty() {
             cmd.arg("--settings");
@@ -1525,6 +1528,7 @@ mod tests {
             auto_compact_tokens: None,
             chrome: false,
             drop_prompt: None,
+            ephemeral: false,
         };
         assert!(flag_settings(&request).is_empty());
         request.auto_compact_tokens = Some(150_000);
@@ -1550,6 +1554,7 @@ mod tests {
             auto_compact_tokens: None,
             chrome: true,
             drop_prompt: None,
+            ephemeral: false,
         };
         let harness = ClaudeHarness::new();
         let args = |request: &RunRequest| -> Vec<String> {
@@ -1567,6 +1572,37 @@ mod tests {
         let without_chrome = args(&request);
         assert!(without_chrome.contains(&"--no-chrome".to_string()));
         assert!(!without_chrome.contains(&"--chrome".to_string()));
+    }
+
+    #[test]
+    fn ephemeral_runs_keep_no_saved_session() {
+        let mut request = RunRequest {
+            prompt: "hi".into(),
+            model: None,
+            reasoning: None,
+            model_options: serde_json::Map::new(),
+            cwd: String::new(),
+            permission: PermissionMode::Ask,
+            resume: None,
+            fork: None,
+            attachments: Vec::new(),
+            skills: Vec::new(),
+            auto_compact_tokens: None,
+            chrome: false,
+            drop_prompt: None,
+            ephemeral: false,
+        };
+        let harness = ClaudeHarness::new();
+        let persists = |request: &RunRequest| {
+            !harness
+                .build_command(&PathBuf::from("claude"), request, None)
+                .as_std()
+                .get_args()
+                .any(|arg| arg == "--no-session-persistence")
+        };
+        assert!(persists(&request));
+        request.ephemeral = true;
+        assert!(!persists(&request));
     }
 
     #[test]

@@ -549,6 +549,7 @@ fn init_renderers(cx: &mut App) {
         .add_dropdown_renderer::<settings::ProjectPanelSortMode>()
         .add_dropdown_renderer::<settings::ProjectPanelSortOrder>()
         .add_dropdown_renderer::<settings::ProjectPanelOpenMode>()
+        .add_dropdown_renderer::<settings::AgentChatAgent>()
         .add_dropdown_renderer::<settings::RewrapBehavior>()
         .add_dropdown_renderer::<settings::FormatOnSave>()
         .add_dropdown_renderer::<settings::LineEndingSetting>()

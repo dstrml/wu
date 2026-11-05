@@ -128,6 +128,8 @@ actions!(
         /// Toggles whether the commit message editor fills all the available
         /// vertical space within the git panel.
         ToggleFillCommitEditor,
+        /// Writes a commit message for your changes with an agent.
+        GenerateCommitMessage,
         /// Initializes a new git repository.
         Init,
         /// Opens all modified files in the editor.

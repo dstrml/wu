@@ -1115,6 +1115,44 @@ pub struct AgentChatSettingsContent {
     ///
     /// Default: true
     pub claude_in_chrome: Option<bool>,
+    /// How the Git panel writes commit messages.
+    pub commit_message: Option<AgentChatCommitMessageContent>,
+}
+
+#[with_fallible_options]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, MergeFrom, Default, PartialEq)]
+pub struct AgentChatCommitMessageContent {
+    /// The agent that writes commit messages. When unset, the first installed agent.
+    pub agent: Option<AgentChatAgent>,
+    /// The model the agent uses. When unset, a small, fast model.
+    pub model: Option<String>,
+    /// Extra instructions for commit messages, such as the language or style to use.
+    pub instructions: Option<String>,
+}
+
+#[with_fallible_options]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    Default,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentChatAgent {
+    #[default]
+    #[strum(serialize = "Claude Code")]
+    ClaudeCode,
+    Codex,
+    #[strum(serialize = "OpenCode")]
+    Opencode,
 }
 
 #[with_fallible_options]
