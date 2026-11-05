@@ -5,6 +5,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 ## Unreleased
 
 - Clearer message in Agent Chat when an agent isn't installed.
+- Fixed the Windows installer putting Wu into Zed's folder, and Zed into Wu's, when both are installed.
 
 ## 1.1.16 - 2026-11-02
 

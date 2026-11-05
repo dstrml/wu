@@ -128,8 +128,8 @@ impl IClassFactory_Impl for ExplorerCommandInjectorFactory_Impl {
 }
 
 const MODULE_ID: GUID = cfg_select! {
-    feature = "stable" => { GUID::from_u128(0x6a1f6b13_3b82_48a1_9e06_7bb0a6d0bffd) },
-    _ => { GUID::from_u128(0x685f4d49_6718_4c55_b271_ebb5c6a48d6f) },
+    feature = "stable" => { GUID::from_u128(0x1e6daf2f_4a3b_4d29_9ea7_ed82888c16a2) },
+    _ => { GUID::from_u128(0x13e28046_5ef0_4561_91a0_4a0e6296e211) },
 };
 
 #[unsafe(no_mangle)]
