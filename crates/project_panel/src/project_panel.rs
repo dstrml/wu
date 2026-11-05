@@ -44,8 +44,8 @@ use rayon::slice::ParallelSliceMut;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::{
-    DockSide, ProjectPanelEntrySpacing, Settings, SettingsStore, ShowDiagnostics, ShowIndentGuides,
-    update_settings_file,
+    DockSide, ProjectPanelEntrySpacing, ProjectPanelOpenMode, Settings, SettingsStore,
+    ShowDiagnostics, ShowIndentGuides, update_settings_file,
 };
 use smallvec::SmallVec;
 use std::{
@@ -6595,6 +6595,17 @@ impl ProjectPanel {
                             project_panel.toggle_expand_all(entry_id, window, cx);
                         } else {
                             project_panel.toggle_expanded(entry_id, window, cx);
+                        }
+                    } else if ProjectPanelSettings::get_global(cx).open_mode
+                        == ProjectPanelOpenMode::DoubleClick
+                    {
+                        if event.click_count() > 1 {
+                            project_panel.open_entry(entry_id, true, false, cx);
+                        } else {
+                            project_panel.marked_entries.clear();
+                            project_panel.selection = Some(selection);
+                            window.focus(&project_panel.focus_handle, cx);
+                            cx.notify();
                         }
                     } else {
                         let preview_tabs_enabled =

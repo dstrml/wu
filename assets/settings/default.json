@@ -936,6 +936,14 @@
     "hide_root": false,
     // Whether to hide the hidden entries in the project panel.
     "hide_hidden": false,
+    // Whether files open with a single click or a double click.
+    // This setting can take two values:
+    //
+    // 1. Open files with a single click:
+    //    "single_click"
+    // 2. Select files with a single click and open them with a double click:
+    //    "double_click"
+    "open_mode": "single_click",
     // Settings for automatically opening files.
     "auto_open": {
       // Whether to automatically open newly created files in the editor.

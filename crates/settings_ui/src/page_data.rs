@@ -4530,7 +4530,7 @@ fn window_and_layout_page() -> SettingsPage {
 }
 
 fn panels_page() -> SettingsPage {
-    fn project_panel_section() -> [SettingsPageItem; 29] {
+    fn project_panel_section() -> [SettingsPageItem; 30] {
         [
             SettingsPageItem::SectionHeader(n!("Project Panel")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -5060,6 +5060,24 @@ fn panels_page() -> SettingsPage {
                             .sort_order = value;
                     },
                     json_path: Some("project_panel.sort_order"),
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Open Mode"),
+                description: n!("Whether files open with a single click or a double click."),
+                field: Box::new(SettingField {
+                    json_path: Some("project_panel.open_mode"),
+                    pick: |settings_content| {
+                        settings_content.project_panel.as_ref()?.open_mode.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .project_panel
+                            .get_or_insert_default()
+                            .open_mode = value;
+                    },
                 }),
                 metadata: None,
                 files: USER,

@@ -819,6 +819,11 @@ impl VsCodeSettings {
             starts_open: None,
             sticky_scroll: None,
             auto_open: None,
+            open_mode: self.read_enum("workbench.list.openMode", |s| match s {
+                "singleClick" => Some(ProjectPanelOpenMode::SingleClick),
+                "doubleClick" => Some(ProjectPanelOpenMode::DoubleClick),
+                _ => None,
+            }),
             diagnostic_badges: None,
             git_status_indicator: None,
         };

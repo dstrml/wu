@@ -3,8 +3,9 @@ use gpui::Pixels;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{
-    DockSide, FolderIndicator, IntoGpui, ProjectPanelEntrySpacing, ProjectPanelSortMode,
-    ProjectPanelSortOrder, RegisterSetting, Settings, ShowDiagnostics, ShowIndentGuides,
+    DockSide, FolderIndicator, IntoGpui, ProjectPanelEntrySpacing, ProjectPanelOpenMode,
+    ProjectPanelSortMode, ProjectPanelSortOrder, RegisterSetting, Settings, ShowDiagnostics,
+    ShowIndentGuides,
 };
 use ui::scrollbars::{ScrollbarVisibility, ShowScrollbar};
 
@@ -31,6 +32,7 @@ pub struct ProjectPanelSettings {
     pub hide_hidden: bool,
     pub drag_and_drop: bool,
     pub auto_open: AutoOpenSettings,
+    pub open_mode: ProjectPanelOpenMode,
     pub sort_mode: ProjectPanelSortMode,
     pub sort_order: ProjectPanelSortOrder,
     pub diagnostic_badges: bool,
@@ -138,6 +140,7 @@ impl Settings for ProjectPanelSettings {
                     on_drop: auto_open.on_drop.unwrap(),
                 }
             },
+            open_mode: project_panel.open_mode.unwrap(),
             sort_mode: project_panel.sort_mode.unwrap(),
             sort_order: project_panel.sort_order.unwrap(),
             diagnostic_badges: project_panel.diagnostic_badges.unwrap(),
