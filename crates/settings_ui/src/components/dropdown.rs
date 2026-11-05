@@ -209,6 +209,7 @@ pub(crate) fn translated_setting_value(label: &str) -> Option<SharedString> {
         "History" => tc!("setting value", "History"),
         "Hollow" => tc!("setting value", "Hollow"),
         "Hover" => tc!("setting value", "Hover"),
+        "ISO" => tc!("setting value", "ISO"),
         "Icon" => tc!("setting value", "Icon"),
         "InComments" => tc!("setting value", "In Comments"),
         "InSelections" => tc!("setting value", "In Selections"),

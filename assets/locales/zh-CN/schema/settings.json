@@ -144,6 +144,7 @@
   "Customize default width (in pixels) taken by project panel\n\nDefault: 240": "自定义项目面板的默认宽度（以像素为单位）\n\n默认值：240",
   "Customize default width (in pixels) taken by the search panel\n\nDefault: 300": "自定义搜索面板的默认宽度（以像素为单位）\n\n默认值：300",
   "Cyan ANSI terminal color.": "青色 ANSI 终端颜色。",
+  "Day, short month name, year and time, like 04 Nov 2026 16:14.": "日、月份简称、年和时间，例如 04 Nov 2026 16:14。",
   "Default action when clicking a changed file in the Git panel.\n\nDefault: project_diff": "在 Git 面板中点击已更改文件时的默认操作。\n\n默认值：project_diff",
   "Default cursor shape for the terminal.\nCan be \"bar\", \"block\", \"underline\", or \"hollow\".\n\nDefault: \"block\"": "终端的默认光标形状。可以是 \"bar\"、\"block\"、\"underline\" 或 \"hollow\"。\n\n默认值：\"block\"",
   "Default depth to expand outline items in the current file.\nThe default depth to which outline entries are expanded on reveal.\n- Set to 0 to collapse all items that have children\n- Set to 1 or higher to collapse items at that depth or deeper\n\nDefault: 100": "当前文件中大纲项默认展开的深度。即显示时大纲条目默认展开到的深度。\n- 设为 0 会折叠所有含子项的条目\n- 设为 1 或更大会折叠该深度及更深的条目\n\n默认值：100",
@@ -269,6 +270,7 @@
   "Hollow border color for added diff hunk row highlights in the editor.": "编辑器中新增差异块行高亮的空心边框色。",
   "Hollow border color for deleted diff hunk row highlights in the editor.": "编辑器中删除差异块行高亮的空心边框色。",
   "How and when the scrollbar should be displayed.\n\nDefault: inherits editor scrollbar settings": "滚动条的显示方式和时机。\n\n默认值：继承编辑器的滚动条设置",
+  "How commit dates are shown in the Git Graph.\n\nDefault: default": "提交日期在 Git 图谱中的显示方式。\n\n默认值：default",
   "How entry statuses are displayed.\n\nDefault: icon": "条目状态的显示方式。\n\n默认值：icon",
   "How file paths are displayed in the git gutter.\n\nDefault: file_name_first": "文件路径在 Git 装订线中的显示方式。\n\n默认值：file_name_first",
   "How hunks are displayed visually in the editor.\n\nDefault: staged_hollow": "差异块在编辑器中的显示方式。\n\n默认值：staged_hollow",
@@ -892,5 +894,6 @@
   "Width scales automatically with the buffer font size.": "宽度随缓冲区字号自动缩放。",
   "Wu draws its own window decorations/titlebar (client-side decoration).": "Wu 自行绘制窗口装饰/标题栏（客户端装饰）。",
   "Wu's Prettier integration settings.\nAllows to enable/disable formatting with Prettier\nand configure default Prettier, used when no project-level Prettier installation is found.\n\nDefault: off": "Wu 的 Prettier 集成设置。用于启用/停用 Prettier 格式化，并配置默认的 Prettier，在找不到项目级 Prettier 安装时使用。\n\n默认值：off",
+  "Year, month, day and time, like 2026-11-04 16:14:00.": "年、月、日和时间，例如 2026-11-04 16:14:00。",
   "Yellow ANSI terminal color.": "ANSI 终端黄色。"
 }

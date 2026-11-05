@@ -33,7 +33,9 @@ use project::{
         CommitDataState, CommitDiff, CommitFile, GitGraphEvent, GitStore, GitStoreEvent,
         GraphDataResponse, Repository, RepositoryEvent, RepositoryId,
     },
+    project_settings::ProjectSettings,
 };
+use settings::{GitGraphDateFormat, Settings as _};
 use smallvec::{SmallVec, smallvec};
 use std::{
     cell::Cell,
@@ -600,15 +602,20 @@ pub struct OpenAtCommit {
     pub sha: String,
 }
 
-fn timestamp_format() -> &'static [BorrowedFormatItem<'static>] {
-    static FORMAT: OnceLock<Vec<BorrowedFormatItem<'static>>> = OnceLock::new();
-    FORMAT.get_or_init(|| {
-        time::format_description::parse("[day] [month repr:short] [year] [hour]:[minute]")
-            .unwrap_or_default()
-    })
+fn timestamp_format(date_format: GitGraphDateFormat) -> &'static [BorrowedFormatItem<'static>] {
+    static DEFAULT_FORMAT: OnceLock<Vec<BorrowedFormatItem<'static>>> = OnceLock::new();
+    static ISO_FORMAT: OnceLock<Vec<BorrowedFormatItem<'static>>> = OnceLock::new();
+    let (format, description) = match date_format {
+        GitGraphDateFormat::Default => (
+            &DEFAULT_FORMAT,
+            "[day] [month repr:short] [year] [hour]:[minute]",
+        ),
+        GitGraphDateFormat::Iso => (&ISO_FORMAT, "[year]-[month]-[day] [hour]:[minute]:[second]"),
+    };
+    format.get_or_init(|| time::format_description::parse(description).unwrap_or_default())
 }
 
-fn format_timestamp(timestamp: i64) -> String {
+fn format_timestamp(timestamp: i64, date_format: GitGraphDateFormat) -> String {
     let Ok(datetime) = OffsetDateTime::from_unix_timestamp(timestamp) else {
         return t!("Unknown").to_string();
     };
@@ -617,7 +624,7 @@ fn format_timestamp(timestamp: i64) -> String {
     let local_datetime = datetime.to_offset(local_offset);
 
     local_datetime
-        .format(timestamp_format())
+        .format(timestamp_format(date_format))
         .unwrap_or_default()
 }
 
@@ -1529,8 +1536,14 @@ impl GitGraph {
             },
         );
         let mut row_height = Self::row_height(window, cx);
+        let mut date_format = ProjectSettings::get_global(cx).git.graph_date_format;
 
         cx.observe_global_in::<settings::SettingsStore>(window, move |this, window, cx| {
+            let new_date_format = ProjectSettings::get_global(cx).git.graph_date_format;
+            if new_date_format != date_format {
+                date_format = new_date_format;
+                cx.notify();
+            }
             let new_row_height = Self::row_height(window, cx);
             if new_row_height != row_height {
                 // The `uniform_list` powering the table caches the item size
@@ -1807,6 +1820,7 @@ impl GitGraph {
             });
         }
 
+        let date_format = ProjectSettings::get_global(cx).git.graph_date_format;
         range
             .map(|idx| {
                 let Some((commit, repository)) =
@@ -1834,7 +1848,7 @@ impl GitGraph {
                 if let CommitDataState::Loaded(ref data) = data {
                     subject = data.subject.clone();
                     author_name = data.author_name.clone();
-                    formatted_time = format_timestamp(data.commit_timestamp);
+                    formatted_time = format_timestamp(data.commit_timestamp, date_format);
                 } else {
                     subject = t!("Loading…");
                     author_name = "".into();
@@ -4753,6 +4767,32 @@ mod tests {
             theme_settings::init(theme::LoadThemes::JustBase, cx);
             crate::init(cx);
         });
+    }
+
+    #[test]
+    fn test_graph_date_formats() {
+        let timestamp = 1_793_808_840;
+        let iso = format_timestamp(timestamp, GitGraphDateFormat::Iso);
+        let is_digit_at = |index: usize| iso.as_bytes()[index].is_ascii_digit();
+        assert_eq!(iso.len(), 19, "{iso}");
+        assert!(
+            [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+                .into_iter()
+                .all(is_digit_at)
+        );
+        assert_eq!(
+            (
+                &iso[4..5],
+                &iso[7..8],
+                &iso[10..11],
+                &iso[13..14],
+                &iso[16..17]
+            ),
+            ("-", "-", " ", ":", ":")
+        );
+
+        let default = format_timestamp(timestamp, GitGraphDateFormat::Default);
+        assert!(default.contains(" Nov 2026 "), "{default}");
     }
 
     fn build_oid_to_row_map(graph: &GraphData) -> HashMap<Oid, usize> {

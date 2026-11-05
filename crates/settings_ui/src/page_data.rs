@@ -7315,6 +7315,33 @@ fn version_control_page() -> SettingsPage {
         ]
     }
 
+    fn git_graph_section() -> [SettingsPageItem; 2] {
+        [
+            SettingsPageItem::SectionHeader(n!("Git Graph")),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Date Format"),
+                description: n!("How commit dates are shown in the Git Graph."),
+                field: Box::new(SettingField {
+                    json_path: Some("git.graph_date_format"),
+                    pick: |settings_content| {
+                        settings_content.git.as_ref()?.graph_date_format.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .git
+                            .get_or_insert_default()
+                            .graph_date_format = value;
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    should_do_titlecase: Some(false),
+                    ..Default::default()
+                })),
+                files: USER,
+            }),
+        ]
+    }
+
     fn git_hunks_section() -> [SettingsPageItem; 5] {
         [
             SettingsPageItem::SectionHeader(n!("Git Hunks")),
@@ -7425,6 +7452,7 @@ fn version_control_page() -> SettingsPage {
             git_gutter_section(),
             inline_git_blame_section(),
             git_blame_view_section(),
+            git_graph_section(),
             branch_picker_section(),
             file_diff_section(),
             git_hunks_section(),

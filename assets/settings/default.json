@@ -1541,6 +1541,9 @@
     "path_style": "file_name_first",
     // Whether to show the stage and restore buttons on diff hunks.
     "show_stage_restore_buttons": true,
+    // How commit dates are shown in the Git Graph.
+    // "graph_date_format": "default" (04 Nov 2026 16:14) or "iso" (2026-11-04 16:14:00)
+    "graph_date_format": "default",
     // Directory where git worktrees are created, relative to the repository
     // working directory.
     //

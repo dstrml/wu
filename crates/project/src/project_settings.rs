@@ -326,6 +326,10 @@ pub struct GitSettings {
     ///
     /// Default: true
     pub show_stage_restore_buttons: bool,
+    /// How commit dates are shown in the Git Graph.
+    ///
+    /// Default: default
+    pub graph_date_format: settings::GitGraphDateFormat,
     /// Directory where git worktrees are created, relative to the repository
     /// working directory. When the resolved directory is outside the project
     /// root, the project's directory name is automatically appended so that
@@ -545,6 +549,7 @@ impl Settings for ProjectSettings {
             diff_base: git.diff_base.unwrap_or_default(),
             path_style: git.path_style.unwrap().into(),
             show_stage_restore_buttons: git.show_stage_restore_buttons.unwrap_or(true),
+            graph_date_format: git.graph_date_format.unwrap_or_default(),
             worktree_directory: git
                 .worktree_directory
                 .clone()

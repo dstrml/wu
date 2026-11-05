@@ -534,6 +534,7 @@ fn init_renderers(cx: &mut App) {
         .add_dropdown_renderer::<settings::GitHunkStyleSetting>()
         .add_dropdown_renderer::<settings::GitDiffBaseSetting>()
         .add_dropdown_renderer::<settings::GitPathStyle>()
+        .add_dropdown_renderer::<settings::GitGraphDateFormat>()
         .add_dropdown_renderer::<settings::InlineBlameLocation>()
         .add_dropdown_renderer::<settings::DiagnosticSeverityContent>()
         .add_dropdown_renderer::<settings::SeedQuerySetting>()

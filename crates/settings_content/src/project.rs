@@ -449,6 +449,10 @@ pub struct GitSettings {
     ///
     /// Default: true
     pub show_stage_restore_buttons: Option<bool>,
+    /// How commit dates are shown in the Git Graph.
+    ///
+    /// Default: default
+    pub graph_date_format: Option<GitGraphDateFormat>,
     /// Directory where git worktrees are created, relative to the repository
     /// working directory.
     ///
@@ -667,6 +671,30 @@ pub enum GitPathStyle {
     FileNameFirst,
     /// Show full path first
     FilePathFirst,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum GitGraphDateFormat {
+    /// Day, short month name, year and time, like 04 Nov 2026 16:14.
+    #[default]
+    Default,
+    /// Year, month, day and time, like 2026-11-04 16:14:00.
+    #[strum(serialize = "ISO")]
+    Iso,
 }
 
 #[with_fallible_options]

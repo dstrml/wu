@@ -9,6 +9,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - New `project_panel.open_mode` setting to open files in the Project panel with a double click. Possible values: `single_click` (default) and `double_click`.
 - Write commit messages with agents from the Git panel.
 - Commits in the Git panel's History now expand to list their changed files. Clicking a file follows `git_panel.entry_primary_click_action`.
+- New `git.graph_date_format` setting to show Git Graph dates as `2026-11-04 16:14:00`. Possible values: `default` and `iso`.
 
 ## 1.1.16 - 2026-11-02
 
