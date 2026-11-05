@@ -845,6 +845,7 @@ async fn run_session(session: Session) {
         }
     };
 
+    let created_session = std::sync::OnceLock::<String>::new();
     let setup = async {
         let protocol = server.protocol().await;
         let forced = forced_asks(permission);
@@ -930,7 +931,9 @@ async fn run_session(session: Session) {
             }
             None => {
                 let create_rules = rules.as_deref().filter(|_| !forced.is_empty());
-                create_session(&server, dir, agent, create_rules).await?
+                let id = create_session(&server, dir, agent, create_rules).await?;
+                created_session.get_or_init(|| id.clone());
+                id
             }
         };
         let providers = match server.provider_catalog(dir).await {
@@ -965,7 +968,8 @@ async fn run_session(session: Session) {
                     error: Some(error.to_string()),
                     session_id: None,
                 }).await;
-                server.shutdown(kill_grace).await;
+                let ephemeral_session = created_session.get().filter(|_| request.ephemeral);
+                finish(&mut server, ephemeral_session.map(String::as_str), dir, kill_grace).await;
                 return;
             }
         },
@@ -977,7 +981,8 @@ async fn run_session(session: Session) {
                 error: None,
                 session_id: None,
             }).await;
-            server.shutdown(kill_grace).await;
+            let ephemeral_session = created_session.get().filter(|_| request.ephemeral);
+            finish(&mut server, ephemeral_session.map(String::as_str), dir, kill_grace).await;
             return;
         }
     };

@@ -8010,15 +8010,21 @@ fn agent_chat_page() -> SettingsPage {
                             .as_ref()
                     },
                     write: |settings_content, value, _| {
-                        settings_content
+                        let commit_message = settings_content
                             .agent_chat
                             .get_or_insert_default()
                             .commit_message
-                            .get_or_insert_default()
-                            .agent = value;
+                            .get_or_insert_default();
+                        if commit_message.agent != value {
+                            commit_message.model = None;
+                        }
+                        commit_message.agent = value;
                     },
                 }),
-                metadata: None,
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    should_do_titlecase: Some(false),
+                    ..Default::default()
+                })),
                 files: USER,
             }),
             SettingsPageItem::SettingItem(SettingItem {

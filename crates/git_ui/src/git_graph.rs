@@ -2766,8 +2766,11 @@ impl GitGraph {
             .map(|datetime| {
                 let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
                 let local_datetime = datetime.to_offset(local_offset);
-                let format =
-                    time::format_description::parse("[month repr:short] [day], [year]").ok();
+                let description = match ProjectSettings::get_global(cx).git.graph_date_format {
+                    GitGraphDateFormat::Default => "[month repr:short] [day], [year]",
+                    GitGraphDateFormat::Iso => "[year]-[month]-[day]",
+                };
+                let format = time::format_description::parse(description).ok();
                 format
                     .and_then(|f| local_datetime.format(&f).ok())
                     .unwrap_or_default()

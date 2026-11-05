@@ -6603,6 +6603,7 @@ impl ProjectPanel {
                             project_panel.open_entry(entry_id, true, false, cx);
                         } else {
                             project_panel.marked_entries.clear();
+                            project_panel.marked_entries.push(selection);
                             project_panel.selection = Some(selection);
                             window.focus(&project_panel.focus_handle, cx);
                             cx.notify();

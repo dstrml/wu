@@ -177,6 +177,8 @@ function BuildInstaller {
     switch ($channel) {
         "stable" {
             $appId = "{{9BDBDF5C-B3B7-4F80-B831-98CFF7361C8A}"
+            # Wu used Zed's AppId before it got its own, so installs from then are registered under it.
+            $oldAppId = "2DB0DA96-CA55-49BB-AF4F-64AF36A86712"
             $appIconName = "app-icon"
             $appName = "Wu"
             $appDisplayName = "Wu"
@@ -192,6 +194,7 @@ function BuildInstaller {
         }
         "dev" {
             $appId = "{{3EF9FC05-FE00-4BD0-941C-21F3BA4E6952}"
+            $oldAppId = "8357632E-24A4-4F32-BA97-E575B4D1FE5D"
             $appIconName = "app-icon-dev"
             $appName = "Wu Dev"
             $appDisplayName = "Wu Dev"
@@ -214,6 +217,7 @@ function BuildInstaller {
 
     $definitions = @{
         "AppId"          = $appId
+        "OldAppId"       = $oldAppId
         "AppIconName"    = $appIconName
         "OutputDir"      = "$workspace\target"
         "AppSetupName"   = $appSetupName

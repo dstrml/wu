@@ -576,6 +576,37 @@ impl ListState {
         old_range: Range<usize>,
         focus_handles: impl IntoIterator<Item = Option<FocusHandle>>,
     ) {
+        self.splice_items(
+            old_range,
+            focus_handles
+                .into_iter()
+                .map(|focus_handle| ListItem::Unmeasured {
+                    size_hint: None,
+                    focus_handle,
+                }),
+        )
+    }
+
+    /// Like [`Self::splice`], but gives each new item an estimated height so the scrollbar
+    /// is sized correctly before the items are drawn. Drawn items replace the estimate.
+    pub fn splice_with_height_hints(
+        &self,
+        old_range: Range<usize>,
+        heights: impl IntoIterator<Item = Pixels>,
+    ) {
+        self.splice_items(
+            old_range,
+            heights.into_iter().map(|height| ListItem::Unmeasured {
+                size_hint: Some(Size {
+                    width: px(0.),
+                    height,
+                }),
+                focus_handle: None,
+            }),
+        )
+    }
+
+    fn splice_items(&self, old_range: Range<usize>, items: impl IntoIterator<Item = ListItem>) {
         self.clear_tail_extra();
         let state = &mut *self.0.borrow_mut();
 
@@ -584,16 +615,7 @@ impl ListState {
         old_items.seek_forward(&Count(old_range.end), Bias::Right);
 
         let mut spliced_count = 0;
-        new_items.extend(
-            focus_handles.into_iter().map(|focus_handle| {
-                spliced_count += 1;
-                ListItem::Unmeasured {
-                    size_hint: None,
-                    focus_handle,
-                }
-            }),
-            (),
-        );
+        new_items.extend(items.into_iter().inspect(|_| spliced_count += 1), ());
         new_items.append(old_items.suffix(), ());
         drop(old_items);
         state.items = new_items;

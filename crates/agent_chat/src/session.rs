@@ -2684,6 +2684,13 @@ impl AgentStore {
         }
     }
 
+    pub(crate) fn discovered_models(&self, kind: AgentKind) -> Option<&[Model]> {
+        self.catalogs
+            .get(&kind)
+            .filter(|catalog| catalog.loaded)
+            .map(|catalog| catalog.models.as_slice())
+    }
+
     pub fn ensure_models(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
         let harness = self.harness(kind);
         let env_loaded = shell_env_is_loaded(cx);

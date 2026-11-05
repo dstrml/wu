@@ -1148,6 +1148,7 @@ pub struct AgentChatCommitMessageContent {
 #[serde(rename_all = "snake_case")]
 pub enum AgentChatAgent {
     #[default]
+    Automatic,
     #[strum(serialize = "Claude Code")]
     ClaudeCode,
     Codex,

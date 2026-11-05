@@ -1393,10 +1393,32 @@ begin
   Result := SwitchHasValue('update', 'true') and WizardSilent();
 end;
 
+procedure RemoveOldUninstallEntry();
+var
+  Key, Publisher, OldUninstaller: String;
+begin
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + '{' + '{#OldAppId}' + '}_is1';
+  // The old AppId is also Zed's, so only remove entries that Wu wrote.
+  if not RegQueryStringValue(HKCU, Key, 'Publisher', Publisher) or (Publisher <> 'Farshed') then
+    exit;
+  if RegQueryStringValue(HKCU, Key, 'UninstallString', OldUninstaller) then
+  begin
+    OldUninstaller := RemoveQuotes(OldUninstaller);
+    if (CompareText(ExtractFileDir(OldUninstaller), ExpandConstant('{app}')) = 0)
+      and (CompareText(OldUninstaller, ExpandConstant('{uninstallexe}')) <> 0) then
+    begin
+      DeleteFile(OldUninstaller);
+      DeleteFile(ChangeFileExt(OldUninstaller, '.dat'));
+    end;
+  end;
+  RegDeleteKeyIncludingSubkeys(HKCU, Key);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    RemoveOldUninstallEntry();
     if IsUpdating() then
     begin
       SaveStringToFile(ExpandConstant('{app}\updates\versions.txt'), '{#Version}' + #13#10, True);

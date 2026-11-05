@@ -6,6 +6,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 - Clearer message in Agent Chat when an agent isn't installed.
 - Fixed the Windows installer putting Wu into Zed's folder, and Zed into Wu's, when both are installed.
+- Fixed the Explorer "Open with Wu" menu showing Zed's title when Zed is installed.
 - New `project_panel.open_mode` setting to open files in the Project panel with a double click. Possible values: `single_click` (default) and `double_click`.
 - Write commit messages with agents from the Git panel.
 - Commits in the Git panel's History now expand to list their changed files. Clicking a file follows `git_panel.entry_primary_click_action`.

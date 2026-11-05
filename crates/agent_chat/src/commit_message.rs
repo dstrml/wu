@@ -28,15 +28,24 @@ pub fn generate_commit_message(
         Some(kind) => vec![kind],
         None => settings.agents().to_vec(),
     };
-    let candidates: Vec<(AgentKind, Arc<dyn Harness>, Option<String>)> = kinds
+    let candidates: Vec<Candidate> = kinds
         .into_iter()
         .map(|kind| {
-            let model = match chosen {
-                Some(_) => chosen_model.clone(),
-                None => default_model(kind, store.read(cx).models(kind)),
-            };
-            let harness = store.update(cx, |store, _| store.harness(kind));
-            (kind, harness, model)
+            let discovered_models = store
+                .read(cx)
+                .discovered_models(kind)
+                .map(<[Model]>::to_vec);
+            let harness = store.update(cx, |store, cx| {
+                if kind == AgentKind::Codex {
+                    store.ensure_models(kind, cx);
+                }
+                store.harness(kind)
+            });
+            Candidate {
+                kind,
+                harness,
+                discovered_models,
+            }
         })
         .collect();
     let env_loaded = crate::session::shell_env_loaded(cx);
@@ -45,24 +54,43 @@ pub fn generate_commit_message(
         env_loaded.await;
         let candidate = candidates
             .into_iter()
-            .find(|(_, harness, _)| !checks_install || harness.installed());
-        let Some((kind, harness, model)) = candidate else {
+            .find(|candidate| !checks_install || candidate.harness.installed());
+        let Some(candidate) = candidate else {
             return Err(anyhow!(t!(
                 "Install Claude Code, Codex or OpenCode to write commit messages."
             )));
         };
-        run_once(kind, harness, model, prompt, cwd).await
+        let model = match chosen_model {
+            Some(model) => Some(model),
+            None => small_model(&candidate).await,
+        };
+        run_once(candidate.kind, candidate.harness, model, prompt, cwd).await
     });
     cx.background_spawn(async move { work.await? })
 }
 
-fn default_model(kind: AgentKind, models: &[Model]) -> Option<String> {
-    match kind {
+struct Candidate {
+    kind: AgentKind,
+    harness: Arc<dyn Harness>,
+    discovered_models: Option<Vec<Model>>,
+}
+
+async fn small_model(candidate: &Candidate) -> Option<String> {
+    match candidate.kind {
         AgentKind::Claude => Some("haiku".to_owned()),
-        AgentKind::Codex => models
-            .iter()
-            .find(|model| model.id.contains("mini"))
-            .map(|model| model.id.clone()),
+        AgentKind::Codex => {
+            let models = match &candidate.discovered_models {
+                Some(models) => models.clone(),
+                None => match candidate.harness.models().await {
+                    Ok(models) if !models.is_empty() => models,
+                    _ => candidate.harness.fallback_models(),
+                },
+            };
+            models
+                .into_iter()
+                .find(|model| model.id.contains("mini"))
+                .map(|model| model.id)
+        }
         AgentKind::Opencode => None,
     }
 }
@@ -159,12 +187,24 @@ async fn run_once(
 
 fn clean_reply(reply: &str) -> String {
     let trimmed = reply.trim();
-    let unfenced = trimmed
+    if trimmed.trim_matches('`').trim().is_empty() {
+        return String::new();
+    }
+    let Some(inner) = trimmed
         .strip_prefix("```")
         .and_then(|rest| rest.strip_suffix("```"))
-        .map(|inner| inner.split_once('\n').map_or("", |(_, body)| body))
-        .unwrap_or(trimmed);
-    unfenced.trim().to_owned()
+    else {
+        return trimmed.to_owned();
+    };
+    let body = match inner.split_once('\n') {
+        Some((info, body))
+            if !info.trim().contains(char::is_whitespace) && !body.trim().is_empty() =>
+        {
+            body
+        }
+        _ => inner,
+    };
+    body.trim().to_owned()
 }
 
 pub fn commit_message_agent_label(cx: &App) -> Option<SharedString> {
@@ -256,5 +296,8 @@ mod tests {
             "Fix crash\n\nBody line"
         );
         assert_eq!(clean_reply("```\nFix crash\n```"), "Fix crash");
+        assert_eq!(clean_reply("```Fix crash```"), "Fix crash");
+        assert_eq!(clean_reply("```Refactor\n```"), "Refactor");
+        assert_eq!(clean_reply("```"), "");
     }
 }

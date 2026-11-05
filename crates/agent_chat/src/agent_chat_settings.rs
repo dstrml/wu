@@ -109,7 +109,7 @@ impl Settings for AgentChatSettings {
             commit_message: {
                 let commit_message = content.commit_message.unwrap_or_default();
                 CommitMessageSettings {
-                    agent: commit_message.agent.map(AgentKind::from_setting),
+                    agent: commit_message.agent.and_then(AgentKind::from_setting),
                     model: commit_message
                         .model
                         .filter(|model| !model.trim().is_empty()),
@@ -163,11 +163,12 @@ fn opencode_permission(mode: OpencodePermissionDefault) -> PermissionMode {
 }
 
 impl AgentKind {
-    pub(crate) fn from_setting(agent: AgentChatAgent) -> Self {
+    pub(crate) fn from_setting(agent: AgentChatAgent) -> Option<Self> {
         match agent {
-            AgentChatAgent::ClaudeCode => AgentKind::Claude,
-            AgentChatAgent::Codex => AgentKind::Codex,
-            AgentChatAgent::Opencode => AgentKind::Opencode,
+            AgentChatAgent::Automatic => None,
+            AgentChatAgent::ClaudeCode => Some(AgentKind::Claude),
+            AgentChatAgent::Codex => Some(AgentKind::Codex),
+            AgentChatAgent::Opencode => Some(AgentKind::Opencode),
         }
     }
 
