@@ -3,10 +3,10 @@
 struct SubpixelSprite {
     order: u32,
     pad: u32,
+    tile: AtlasTile,
     bounds: Bounds,
     content_mask: Bounds,
     color: Hsla,
-    tile: AtlasTile,
     transformation: TransformationMatrix,
     fade: EdgeFadeParams,
 }

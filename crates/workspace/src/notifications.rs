@@ -72,12 +72,26 @@ pub trait Notification:
 pub struct SuppressEvent;
 
 impl Workspace {
+    pub fn has_notification(&self, id: &NotificationId) -> bool {
+        self.notifications
+            .iter()
+            .any(|(existing_id, _)| existing_id == id)
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub fn notification_ids(&self) -> Vec<NotificationId> {
         self.notifications
             .iter()
             .map(|(id, _)| id)
             .cloned()
+            .collect()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn notification_views(&self) -> Vec<AnyView> {
+        self.notifications
+            .iter()
+            .map(|(_, view)| view.clone())
             .collect()
     }
 
@@ -473,8 +487,16 @@ pub mod simple_message_notification {
         AnyElement, DismissEvent, EventEmitter, FocusHandle, Focusable, ParentElement, Render,
         ScrollHandle, SharedString, Styled, Task,
     };
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
     use i18n::t;
     use ui::{CopyButton, Tooltip, WithScrollbar, prelude::*};
+=======
+    use ui::{
+        ContextMenu, CopyButton, PopoverMenu, SplitButton, SplitButtonStyle, Tooltip,
+        WithScrollbar, prelude::*,
+    };
+    use util::ResultExt as _;
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
 
     use crate::SuppressNotification;
     use crate::workspace_error::{
@@ -655,6 +677,7 @@ pub mod simple_message_notification {
         secondary_icon: Option<ActionIcon>,
         secondary_icon_color: Option<Color>,
         secondary_on_click: Option<Arc<dyn Fn(&mut Window, &mut Context<Self>)>>,
+        secondary_menu_entries: Vec<(SharedString, Arc<dyn Fn(&mut Window, &mut Context<Self>)>)>,
         more_info_message: Option<SharedString>,
         more_info_url: Option<Arc<str>>,
         show_close_button: bool,
@@ -707,6 +730,7 @@ pub mod simple_message_notification {
                 secondary_icon: None,
                 secondary_icon_color: None,
                 secondary_on_click: None,
+                secondary_menu_entries: Vec::new(),
                 more_info_message: None,
                 more_info_url: None,
                 show_close_button: true,
@@ -805,6 +829,52 @@ pub mod simple_message_notification {
             self
         }
 
+        /// Adds an entry to a dropdown attached to the secondary action button,
+        /// turning it into a split button. Like the buttons themselves, choosing
+        /// an entry dismisses the notification.
+        pub fn secondary_menu_entry<S, F>(mut self, label: S, on_click: F) -> Self
+        where
+            S: Into<SharedString>,
+            F: 'static + Fn(&mut Window, &mut Context<Self>),
+        {
+            self.secondary_menu_entries
+                .push((label.into(), Arc::new(on_click)));
+            self
+        }
+
+        fn render_secondary_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+            let notification = cx.weak_entity();
+            let entries = self.secondary_menu_entries.clone();
+            PopoverMenu::new(("notification-secondary-menu", cx.entity_id()))
+                .trigger_with_tooltip(
+                    IconButton::new(
+                        ("notification-secondary-menu-trigger", cx.entity_id()),
+                        IconName::ChevronDown,
+                    )
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(Color::Muted),
+                    Tooltip::text("More Options"),
+                )
+                .menu(move |window, cx| {
+                    let entries = entries.clone();
+                    let notification = notification.clone();
+                    Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                        entries.into_iter().fold(menu, |menu, (label, on_click)| {
+                            let notification = notification.clone();
+                            menu.entry(label, None, move |window, cx| {
+                                notification
+                                    .update(cx, |this, cx| {
+                                        on_click(window, cx);
+                                        this.dismiss(cx);
+                                    })
+                                    .log_err();
+                            })
+                        })
+                    }))
+                })
+                .into_any_element()
+        }
+
         pub fn more_info_message<S>(mut self, message: S) -> Self
         where
             S: Into<SharedString>,
@@ -859,6 +929,12 @@ pub mod simple_message_notification {
         pub fn copy_text<S: Into<SharedString>>(mut self, text: S) -> Self {
             self.copy_text = Some(text.into());
             self
+        }
+
+        /// The text copied to the clipboard; for error notifications, the full message.
+        #[cfg(any(test, feature = "test-support"))]
+        pub fn copied_text(&self) -> Option<&SharedString> {
+            self.copy_text.as_ref()
         }
 
         fn auto_dismiss(mut self, severity: ErrorSeverity, cx: &mut Context<Self>) -> Self {
@@ -1049,8 +1125,8 @@ pub mod simple_message_notification {
                             }
                         })
                 }))
-                .children(self.secondary_message.iter().map(|message| {
-                    Button::new(("notification-secondary", cx.entity_id()), message.clone())
+                .children(self.secondary_message.clone().map(|message| {
+                    let button = Button::new(("notification-secondary", cx.entity_id()), message)
                         .when_some(self.button_style, |button, style| button.style(style))
                         .label_size(LabelSize::Small)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -1067,7 +1143,14 @@ pub mod simple_message_notification {
                                 IconPosition::Start => button.start_icon(element),
                                 IconPosition::End => button.end_icon(element),
                             }
-                        })
+                        });
+                    if self.secondary_menu_entries.is_empty() {
+                        button.into_any_element()
+                    } else {
+                        SplitButton::new(button, self.render_secondary_menu(cx))
+                            .style(SplitButtonStyle::Transparent)
+                            .into_any_element()
+                    }
                 }))
                 .child(
                     h_flex().w_full().justify_end().children(

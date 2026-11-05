@@ -50,19 +50,27 @@
 //! is a std implementation detail, not a guarantee; if it changes, the cost
 //! is added latency under contention, not incorrectness.)
 
+use crate::main_thread_marker;
 use anyhow::Result;
 use core_graphics::display::CGDirectDisplayID;
 use dispatch2::{
     _dispatch_source_type_data_add, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
 };
+use gpui::{FrameRequestSource, PlatformFrameSignal};
 use gpui_util::ResultExt;
+use scheduler::Instant;
 use std::{
     collections::{BTreeMap, btree_map},
     ffi::c_void,
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
+=======
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    time::Duration,
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
 };
 
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry::new());
@@ -84,11 +92,21 @@ impl Registry {
 struct DisplayEntry {
     link: sys::DisplayLink,
     running: bool,
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
     subscribers: Vec<(
         SubscriberId,
         DispatchRetained<DispatchSource>,
         Arc<AtomicBool>,
     )>,
+=======
+    subscribers: Vec<DisplayLinkSubscriber>,
+}
+
+struct DisplayLinkSubscriber {
+    id: SubscriberId,
+    frame_requests: DispatchRetained<DispatchSource>,
+    signal: Arc<PlatformFrameSignal>,
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
 }
 
 // SAFETY: Both fields wrapping raw pointers are refcounted handles to
@@ -110,43 +128,91 @@ fn lock_registry() -> MutexGuard<'static, Registry> {
 }
 
 fn debug_assert_main_thread() {
-    #[cfg(debug_assertions)]
-    {
-        use objc::{class, msg_send, sel, sel_impl};
-        let is_main_thread: objc::runtime::BOOL =
-            unsafe { msg_send![class!(NSThread), isMainThread] };
-        debug_assert!(
-            is_main_thread == objc::runtime::YES,
-            "display link registry mutations must happen on the main thread; \
-             the registry's lock ordering and state consistency depend on it"
-        );
-    }
+    debug_assert!(
+        main_thread_marker().is_some(),
+        "display link registry mutations must happen on the main thread; \
+         the registry's lock ordering and state consistency depend on it"
+    );
 }
 
 unsafe extern "C" fn display_link_output_callback(
     _display_link_out: *mut sys::CVDisplayLink,
-    _current_time: *const sys::CVTimeStamp,
+    current_time: *const sys::CVTimeStamp,
     _output_time: *const sys::CVTimeStamp,
     _flags_in: i64,
     _flags_out: *mut i64,
     display_id: *mut c_void,
 ) -> i32 {
+    let signal_at = PlatformFrameSignal::capture(|| {
+        // Instant cannot be constructed from Mach ticks, so sample both clock domains.
+        let current_host_time = objc2_core_video::CVGetCurrentHostTime();
+        let received_at = Instant::now();
+        let host_clock_frequency = objc2_core_video::CVGetHostClockFrequency();
+        // SAFETY: CoreVideo owns this timestamp for the lifetime of the callback.
+        let current_time = unsafe { current_time.as_ref() };
+        frame_request_instant(
+            current_time,
+            current_host_time,
+            host_clock_frequency,
+            received_at,
+        )
+    });
     let display_id = display_id as usize as CGDirectDisplayID;
     let registry = lock_registry();
     if let Some(entry) = registry.displays.get(&display_id) {
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
         for (_, frame_requests, requested) in &entry.subscribers {
             if requested.load(Ordering::Acquire) {
                 frame_requests.merge_data(1);
             }
+=======
+        for subscriber in &entry.subscribers {
+            if let Some(signal_at) = signal_at {
+                subscriber
+                    .signal
+                    .record(signal_at, FrameRequestSource::NativeCallback);
+            }
+            subscriber.frame_requests.merge_data(1);
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
         }
     }
     0
 }
 
+/// Maps a CoreVideo host timestamp using a paired clock sample.
+///
+/// Invalid timestamps or clock conversions fall back to callback receipt time.
+fn frame_request_instant(
+    timestamp: Option<&sys::CVTimeStamp>,
+    current_host_time: u64,
+    host_clock_frequency: f64,
+    received_at: Instant,
+) -> Instant {
+    let Some(timestamp) = timestamp.filter(|timestamp| {
+        timestamp.version == 0 && timestamp.flags & sys::kCVTimeStampHostTimeValid != 0
+    }) else {
+        return received_at;
+    };
+    if !host_clock_frequency.is_finite() || host_clock_frequency <= 0.0 {
+        return received_at;
+    }
+    current_host_time
+        .checked_sub(timestamp.host_time)
+        .and_then(|elapsed_ticks| {
+            Duration::try_from_secs_f64(elapsed_ticks as f64 / host_clock_frequency).ok()
+        })
+        .and_then(|elapsed| received_at.checked_sub(elapsed))
+        .unwrap_or(received_at)
+}
+
 fn subscribe(
     display_id: CGDirectDisplayID,
     frame_requests: DispatchRetained<DispatchSource>,
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
     requested: Arc<AtomicBool>,
+=======
+    signal: Arc<PlatformFrameSignal>,
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
 ) -> Result<SubscriberId> {
     debug_assert_main_thread();
 
@@ -185,9 +251,17 @@ fn subscribe(
                 anyhow::bail!("display link registry entry vanished for display {display_id}");
             }
         };
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
         entry
             .subscribers
             .push((subscriber_id, frame_requests, requested));
+=======
+        entry.subscribers.push(DisplayLinkSubscriber {
+            id: subscriber_id,
+            frame_requests,
+            signal,
+        });
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
         let link_to_start = if entry.running {
             None
         } else {
@@ -204,7 +278,18 @@ fn subscribe(
             let mut registry = lock_registry();
             if let Some(entry) = registry.displays.get_mut(&display_id) {
                 entry.running = false;
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
                 entry.subscribers.retain(|(id, _, _)| *id != subscriber_id);
+=======
+                entry.subscribers.retain(|subscriber| {
+                    if subscriber.id == subscriber_id {
+                        subscriber.signal.take();
+                        false
+                    } else {
+                        true
+                    }
+                });
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
             }
             return Err(error);
         }
@@ -221,7 +306,13 @@ fn unsubscribe(display_id: CGDirectDisplayID, subscriber_id: SubscriberId) {
         let Some(entry) = registry.displays.get_mut(&display_id) else {
             return;
         };
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
         entry.subscribers.retain(|(id, _, _)| *id != subscriber_id);
+=======
+        entry
+            .subscribers
+            .retain(|subscriber| subscriber.id != subscriber_id);
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
         if entry.subscribers.is_empty() && entry.running {
             entry.running = false;
             Some(entry.link.clone())
@@ -244,6 +335,7 @@ pub struct WindowFrameSource {
     frame_requests: DispatchRetained<DispatchSource>,
     requested: Arc<AtomicBool>,
     registration: Option<(CGDirectDisplayID, SubscriberId)>,
+    signal: Arc<PlatformFrameSignal>,
 }
 
 impl WindowFrameSource {
@@ -270,24 +362,35 @@ impl WindowFrameSource {
             frame_requests,
             requested,
             registration: None,
+            signal: Arc::new(PlatformFrameSignal::new()),
         }
     }
 
     pub fn start(&mut self, display_id: CGDirectDisplayID) -> Result<()> {
         self.stop();
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
         let subscriber_id = subscribe(
             display_id,
             self.frame_requests.clone(),
             self.requested.clone(),
         )?;
+=======
+        let subscriber_id =
+            subscribe(display_id, self.frame_requests.clone(), self.signal.clone())?;
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
         self.registration = Some((display_id, subscriber_id));
         // Latched only on success so a failed start stays retryable.
         self.requested.store(true, Ordering::Release);
         Ok(())
     }
 
+<<<<<<< 09ad9d82939034edf9a8474a11af13e93be1b8d9
     pub(crate) fn is_running(&self) -> bool {
         self.registration.is_some()
+=======
+    pub fn take_signal(&self) -> Option<(Instant, FrameRequestSource)> {
+        self.signal.take()
+>>>>>>> 237c4b3edd5573e29fcf7862dec3b92b2ad58d52
     }
 
     pub fn stop(&mut self) {
@@ -295,6 +398,7 @@ impl WindowFrameSource {
         if let Some((display_id, subscriber_id)) = self.registration.take() {
             unsubscribe(display_id, subscriber_id);
         }
+        self.signal.take();
     }
 }
 
@@ -345,7 +449,7 @@ mod sys {
     }
 
     #[repr(C)]
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Default)]
     pub(crate) struct CVTimeStamp {
         pub version: u32,
         pub video_time_scale: i32,
@@ -495,6 +599,60 @@ mod sys {
                 );
                 Ok(())
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_timestamp_preserves_request_age_at_different_clock_rates() {
+        let received_at = Instant::now();
+        for (host_time, current_host_time, frequency, age) in [
+            (4_000_000, 10_000_000, 1e9, Duration::from_millis(6)),
+            (1_760_000, 2_000_000, 24e6, Duration::from_millis(10)),
+        ] {
+            let timestamp = timestamp(host_time);
+            assert_eq!(
+                frame_request_instant(Some(&timestamp), current_host_time, frequency, received_at),
+                received_at - age,
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_host_timestamps_fall_back_to_receipt_time() {
+        let received_at = Instant::now();
+        let valid = timestamp(1_000);
+        let mut missing_host_time = valid;
+        missing_host_time.flags = 0;
+        let mut unknown_version = valid;
+        unknown_version.version = 1;
+        for timestamp in [None, Some(&missing_host_time), Some(&unknown_version)] {
+            assert_eq!(
+                frame_request_instant(timestamp, 2_000, 1e9, received_at),
+                received_at,
+            );
+        }
+        assert_eq!(
+            frame_request_instant(Some(&valid), 999, 1e9, received_at),
+            received_at,
+        );
+        for frequency in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::MIN_POSITIVE] {
+            assert_eq!(
+                frame_request_instant(Some(&valid), 2_000, frequency, received_at),
+                received_at,
+            );
+        }
+    }
+
+    fn timestamp(host_time: u64) -> sys::CVTimeStamp {
+        sys::CVTimeStamp {
+            host_time,
+            flags: sys::kCVTimeStampHostTimeValid,
+            ..Default::default()
         }
     }
 }
