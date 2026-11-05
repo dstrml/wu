@@ -3,7 +3,8 @@ use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::{
     Addon, Editor, EditorEvent, EditorSettings, HiddenDiffHunkRenderer, MultiBuffer,
-    SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    SelectionEffects, SplittableEditor, hover_markdown_style, multibuffer_context_lines,
+    scroll::Autoscroll,
 };
 use futures_lite::future::yield_now;
 use git::repository::{CommitDetails, RepoPath};
@@ -120,6 +121,96 @@ pub(crate) fn worktree_id_for_repo_path(
         })
 }
 
+pub(crate) fn open_file_at_commit(
+    commit_sha: &str,
+    path: RepoPath,
+    text: String,
+    repository: Entity<Repository>,
+    workspace: WeakEntity<Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let short_sha = commit_sha
+        .get(0..git::SHORT_SHA_LENGTH)
+        .unwrap_or(commit_sha);
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string())
+        .unwrap_or_else(|| path.display(PathStyle::local()).to_string());
+    let display_name = format!("{file_name} @ {short_sha}");
+    window
+        .spawn(cx, {
+            let workspace = workspace.clone();
+            async move |cx| {
+                let (language_registry, worktree_id) =
+                    workspace.read_with(cx, |workspace, cx| {
+                        let project = workspace.project().read(cx);
+                        (
+                            project.languages().clone(),
+                            worktree_id_for_repo_path(repository.read(cx), project, &path, cx),
+                        )
+                    })?;
+                let worktree_id = worktree_id.context("project has no worktrees")?;
+
+                let activated_existing = workspace.update_in(cx, |workspace, window, cx| {
+                    let existing = existing_commit_file_editor(workspace, &path, &display_name, cx);
+                    if let Some(existing) = &existing {
+                        workspace.activate_item(existing, true, true, window, cx);
+                    }
+                    existing.is_some()
+                })?;
+                if activated_existing {
+                    return Ok(());
+                }
+
+                let file = Arc::new(GitBlob {
+                    path,
+                    worktree_id,
+                    is_deleted: false,
+                    is_binary: false,
+                    display_name,
+                }) as Arc<dyn File>;
+                let buffer = build_buffer(text, file, &language_registry, cx).await?;
+
+                workspace.update_in(cx, |workspace, window, cx| {
+                    let project = workspace.project().clone();
+                    let multi_buffer = cx.new(|cx| MultiBuffer::singleton(buffer, cx));
+                    let editor = cx.new(|cx| {
+                        let mut editor =
+                            Editor::for_multibuffer(multi_buffer, Some(project), window, cx);
+                        editor.set_read_only(true);
+                        editor.set_should_serialize(false, cx);
+                        editor
+                    });
+                    workspace.add_item_to_active_pane(Box::new(editor), None, true, window, cx);
+                })
+            }
+        })
+        .detach_and_notify_err(workspace, window, cx);
+}
+
+fn existing_commit_file_editor(
+    workspace: &Workspace,
+    path: &RepoPath,
+    display_name: &str,
+    cx: &App,
+) -> Option<Entity<Editor>> {
+    workspace
+        .panes()
+        .iter()
+        .flat_map(|pane| pane.read(cx).items())
+        .find_map(|item| {
+            let editor = item.downcast::<Editor>()?;
+            if editor.read(cx).blame().is_some() {
+                return None;
+            }
+            let buffer = editor.read(cx).buffer().read(cx).as_singleton()?;
+            let file = buffer.read(cx).file()?;
+            let blob = (file.as_ref() as &dyn Any).downcast_ref::<GitBlob>()?;
+            (blob.path == *path && blob.display_name == display_name).then_some(editor)
+        })
+}
+
 struct CommitDiffAddon {
     file_statuses: HashMap<language::BufferId, FileStatus>,
     commit_view: WeakEntity<CommitView>,
@@ -196,6 +287,28 @@ impl CommitView {
             workspace,
             stash,
             file_filter,
+            None,
+            false,
+            window,
+            cx,
+        )
+    }
+
+    pub fn open_at_file(
+        commit_sha: String,
+        repo: WeakEntity<Repository>,
+        workspace: WeakEntity<Workspace>,
+        path: RepoPath,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        Self::open_with_options(
+            commit_sha,
+            repo,
+            workspace,
+            None,
+            None,
+            Some(path),
             false,
             window,
             cx,
@@ -208,6 +321,7 @@ impl CommitView {
         workspace: WeakEntity<Workspace>,
         stash: Option<usize>,
         file_filter: Option<RepoPath>,
+        scroll_to: Option<RepoPath>,
         ignore_shallow_boundary: bool,
         window: &mut Window,
         cx: &mut App,
@@ -251,6 +365,7 @@ impl CommitView {
                                 workspace_handle,
                                 stash,
                                 file_filter,
+                                scroll_to,
                                 window,
                                 cx,
                             )
@@ -298,6 +413,7 @@ impl CommitView {
         workspace: WeakEntity<Workspace>,
         stash: Option<usize>,
         file_filter: Option<RepoPath>,
+        scroll_to: Option<RepoPath>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -346,6 +462,7 @@ impl CommitView {
             let mut file_statuses: HashMap<language::BufferId, FileStatus> = HashMap::default();
 
             for file in commit_diff.files {
+                let is_scroll_target = scroll_to.as_ref() == Some(&file.path);
                 let is_created = file.old_text.is_none();
                 let is_deleted = file.new_text.is_none();
                 let raw_new_text = file.new_text.unwrap_or_default();
@@ -474,6 +591,11 @@ impl CommitView {
                         yield_now().await;
                     }
                 }
+                if is_scroll_target {
+                    this.update_in(cx, |this, window, cx| {
+                        this.scroll_to_path(&path, window, cx)
+                    })?;
+                }
             }
 
             this.update(cx, |this, cx| {
@@ -529,6 +651,22 @@ impl CommitView {
             file_filter,
             _load_diff_task: load_diff_task,
         }
+    }
+
+    fn scroll_to_path(&self, path: &PathKey, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(position) = self.multibuffer.read(cx).location_for_path(path, cx) else {
+            return;
+        };
+        self.editor.update(cx, |editor, cx| {
+            editor.rhs_editor().update(cx, |editor, cx| {
+                editor.change_selections(
+                    SelectionEffects::scroll(Autoscroll::top_relative(0.)),
+                    window,
+                    cx,
+                    |selections| selections.select_ranges([position..position]),
+                );
+            })
+        });
     }
 
     fn render_shallow_boundary_notice(&self, cx: &App) -> impl IntoElement {
@@ -598,6 +736,7 @@ impl CommitView {
                                                     workspace,
                                                     stash,
                                                     file_filter,
+                                                    None,
                                                     false,
                                                     window,
                                                     cx,
@@ -630,6 +769,7 @@ impl CommitView {
                                     workspace.clone(),
                                     stash,
                                     file_filter.clone(),
+                                    None,
                                     true,
                                     window,
                                     cx,
