@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.1.19 - 2026-11-07
+
 - Fix jank in git panel's history.
 - Improve agent chat input UI.
 - Improve agent questions UX.
