@@ -195,7 +195,6 @@ pub struct ChatView {
     diagram_scan: (Option<bool>, HashMap<gpui::EntityId, usize>),
     diagram_sources_shown: HashSet<String>,
     editing_queued: Option<queue_panel::QueuedEdit>,
-    composer_layout: composer::ComposerLayout,
     lightbox_focus: FocusHandle,
     attachment_error: Option<SharedString>,
     staging_count: usize,
@@ -237,7 +236,7 @@ impl ChatView {
         let flavour = flavour_seed(&session.read(cx).metadata().id);
         let composer = cx.new(|cx| {
             let mut editor = Editor::auto_height(1, 10, window, cx);
-            editor.set_placeholder_text(&t!("Do anything…"), window, cx);
+            editor.set_placeholder_text(&t!("Ask the agent. @ for files, / for commands"), window, cx);
             editor.set_bar_cursor_width(px(1.), cx);
             editor.set_text_style_refinement(TextStyleRefinement {
                 font_size: Some(ui(14.).into()),
@@ -372,7 +371,6 @@ impl ChatView {
             diagram_scan: Default::default(),
             diagram_sources_shown: HashSet::default(),
             editing_queued: None,
-            composer_layout: Default::default(),
             lightbox_focus: cx.focus_handle(),
             attachment_error: None,
             staging_count: 0,
@@ -2694,7 +2692,7 @@ impl ChatView {
                                 .child(div().min_w_0().truncate().child(project_name)),
                         ),
                     )
-                    .child(self.render_pill(true, COMPOSER_RADIUS, window, cx))
+                    .child(self.render_pill(COMPOSER_RADIUS, window, cx))
                     .child(
                         h_flex()
                             .h(px(24.))
@@ -3320,7 +3318,6 @@ impl Render for ChatView {
                 .child(self.render_with_side_pane(new_chat, cx))
                 .into_any_element();
         }
-        let expanded = self.composer_is_expanded(window, cx);
         let composer_area = match pending.and_then(|id| {
             self.session
                 .read(cx)
@@ -3330,7 +3327,7 @@ impl Render for ChatView {
                 .map(|pending| self.render_question_panel(pending, cx))
         }) {
             Some(panel) => panel,
-            None => self.render_pill(expanded, DOCKED_COMPOSER_RADIUS, window, cx),
+            None => self.render_pill(DOCKED_COMPOSER_RADIUS, window, cx),
         };
         let chat = v_flex()
             .size_full()
