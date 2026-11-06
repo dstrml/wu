@@ -1793,6 +1793,7 @@ fn user_input_questions(params: &Value) -> Vec<(String, UserInputQuestion)> {
                     .collect(),
                 prefill: None,
                 multiline: false,
+                accepts_typed_answer: true,
                 multi_select: ["multiSelect", "multi_select"]
                     .iter()
                     .find_map(|k| q.get(*k).and_then(Value::as_bool))
@@ -1856,6 +1857,7 @@ fn elicitation_question(params: &Value) -> Option<(UserInputQuestion, Vec<(Strin
         options: replies.iter().map(|(choice, _)| choice.clone()).collect(),
         prefill: None,
         multiline: false,
+        accepts_typed_answer: false,
         multi_select: false,
     };
     Some((question, replies))
@@ -1920,6 +1922,7 @@ fn permissions_question(params: &Value) -> UserInputQuestion {
         ],
         prefill: None,
         multiline: false,
+        accepts_typed_answer: false,
         multi_select: false,
     }
 }
@@ -1979,6 +1982,7 @@ fn approval_question(method: &str, params: &Value) -> UserInputQuestion {
         ],
         prefill: None,
         multiline: false,
+        accepts_typed_answer: false,
         multi_select: false,
     }
 }

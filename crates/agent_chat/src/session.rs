@@ -4009,6 +4009,7 @@ pub(crate) mod tests {
                 multi_select: false,
                 prefill: None,
                 multiline: false,
+                accepts_typed_answer: false,
             }],
             responder: None,
         };

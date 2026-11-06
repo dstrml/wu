@@ -369,6 +369,8 @@ pub struct UserInputQuestion {
     pub prefill: Option<String>,
     #[serde(default)]
     pub multiline: bool,
+    #[serde(default)]
+    pub accepts_typed_answer: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

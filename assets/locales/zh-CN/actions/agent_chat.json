@@ -43,6 +43,10 @@
     "name": "停止",
     "description": "停止智能体当前这一轮的回复。"
   },
+  "agent_chat::SubmitAnswer": {
+    "name": "提交回答",
+    "description": "回答智能体的问题并进入下一个问题，最后一个问题时直接提交。"
+  },
   "agent_chat::ToggleDictation": {
     "name": "切换听写",
     "description": "在对话输入框中开始或停止听写。"

@@ -1292,6 +1292,27 @@
     },
   },
   {
+    "context": "AgentQuestion",
+    "bindings": {
+      "escape": "agent_chat::Stop",
+    },
+  },
+  {
+    "context": "AgentQuestion && !send_with_modifier > Editor && mode == auto_height",
+    "bindings": {
+      "enter": "agent_chat::SubmitAnswer",
+      "shift-enter": "editor::Newline",
+      "cmd-enter": "agent_chat::SubmitAnswer",
+    },
+  },
+  {
+    "context": "AgentQuestion && send_with_modifier > Editor && mode == auto_height",
+    "bindings": {
+      "cmd-enter": "agent_chat::SubmitAnswer",
+      "enter": "editor::Newline",
+    },
+  },
+  {
     "context": "AgentChat",
     "bindings": {
       "cmd-f": "buffer_search::Deploy",

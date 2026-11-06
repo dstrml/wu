@@ -61,6 +61,7 @@ fn permission_question(tool_name: &str, input: &Value) -> UserInputQuestion {
         multi_select: false,
         prefill: None,
         multiline: false,
+        accepts_typed_answer: false,
     }
 }
 
@@ -1270,6 +1271,7 @@ fn elicitation_question(request: &ControlRequestBody) -> Option<UserInputQuestio
         multi_select: false,
         prefill: None,
         multiline: false,
+        accepts_typed_answer: false,
     })
 }
 
@@ -1332,6 +1334,7 @@ fn parse_questions(input: &Value) -> Vec<UserInputQuestion> {
                 question: field(["question", "prompt"]).unwrap_or("").into(),
                 prefill: None,
                 multiline: false,
+                accepts_typed_answer: true,
                 multi_select: ["multiSelect", "multi_select"]
                     .iter()
                     .find_map(|k| q.get(*k).and_then(Value::as_bool))

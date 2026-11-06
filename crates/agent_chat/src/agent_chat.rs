@@ -45,6 +45,8 @@ actions!(
         Send,
         /// Stops the agent's current turn.
         Stop,
+        /// Answers the agent's question and moves to the next one, or submits on the last.
+        SubmitAnswer,
         /// Highlights the previous command in the slash command menu.
         SelectPreviousCommand,
         /// Highlights the next command in the slash command menu.

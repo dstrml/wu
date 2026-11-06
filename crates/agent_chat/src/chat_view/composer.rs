@@ -628,6 +628,46 @@ impl ChatView {
         });
     }
 
+    pub(super) fn submit_answer(&mut self, _: &SubmitAnswer, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(pending) = self.session.read(cx).pending_questions().first() else {
+            return;
+        };
+        if pending.is_permission() {
+            return;
+        }
+        let pending_id = pending.id().to_string();
+        let count = pending.questions.len();
+        let page_index = self
+            .question_pages
+            .get(&pending_id)
+            .copied()
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
+        let Some(question) = pending.questions.get(page_index) else {
+            return;
+        };
+        if self.answer_labels(question, cx).is_empty() {
+            return;
+        }
+        self.advance_question(&pending_id, page_index, count, cx);
+    }
+
+    fn advance_question(
+        &mut self,
+        pending_id: &str,
+        page_index: usize,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if page_index + 1 >= count {
+            self.submit_answers(pending_id, cx);
+        } else {
+            self.question_pages
+                .insert(pending_id.to_string(), page_index + 1);
+            cx.notify();
+        }
+    }
+
     pub(super) fn submit_answers(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(pending) = self
             .session
@@ -643,7 +683,7 @@ impl ChatView {
             .iter()
             .map(|question| UserInputAnswer {
                 question_id: question.id.clone(),
-                labels: self.answer_labels(&question.id, cx),
+                labels: self.answer_labels(question, cx),
             })
             .collect();
         for answer in &answers {
@@ -658,7 +698,7 @@ impl ChatView {
         &self,
         key: SharedString,
         number: usize,
-        label: SharedString,
+        label: AnyElement,
         picked: bool,
         cx: &App,
     ) -> gpui::Stateful<gpui::Div> {
@@ -807,13 +847,14 @@ impl ChatView {
             .get(&question.id)
             .cloned()
             .unwrap_or_default();
-        let answer_editor = self
+        let typed_editor = self
             .answer_editors
             .get(&question.id)
             .map(|(editor, _)| editor.clone());
-        let options: Vec<AnyElement> = if answer_editor.is_some() {
-            Vec::new()
-        } else if is_permission {
+        let answer_editor = typed_editor
+            .clone()
+            .filter(|_| question.options.is_empty());
+        let options: Vec<AnyElement> = if is_permission {
             [(t!("Allow"), true), (t!("Deny"), false)]
                 .into_iter()
                 .enumerate()
@@ -822,7 +863,7 @@ impl ChatView {
                     self.render_option_row(
                         format!("permission-{pending_id}-{position}").into(),
                         position + 1,
-                        label,
+                        label.into_any_element(),
                         false,
                         cx,
                     )
@@ -848,7 +889,7 @@ impl ChatView {
                     self.render_option_row(
                         format!("option-{}-{position}", question.id).into(),
                         position + 1,
-                        option.clone().into(),
+                        option.clone().into_any_element(),
                         picked,
                         cx,
                     )
@@ -864,9 +905,28 @@ impl ChatView {
                     }))
                     .into_any_element()
                 })
+                .chain(
+                    typed_editor
+                        .filter(|_| !question.options.is_empty())
+                        .map(|editor| {
+                            let typed = !editor.read(cx).text(cx).trim().is_empty()
+                                && (question.multi_select || selected.is_empty());
+                            let focus = editor.focus_handle(cx);
+                            self.render_option_row(
+                                format!("option-{}-typed", question.id).into(),
+                                question.options.len() + 1,
+                                editor.into_any_element(),
+                                typed,
+                                cx,
+                            )
+                            .cursor_text()
+                            .on_click(move |_, window, cx| window.focus(&focus, cx))
+                            .into_any_element()
+                        }),
+                )
                 .collect()
         };
-        let answered = !self.answer_labels(&question.id, cx).is_empty();
+        let answered = !self.answer_labels(question, cx).is_empty();
         let is_last_page = page_index + 1 >= count;
         let header = if is_permission {
             t!("Permission").to_string()
@@ -883,7 +943,15 @@ impl ChatView {
             .map_or(px(QUESTION_EXPANDED_FALLBACK), |bounds| {
                 bounds.size.height * QUESTION_OPTIONS_FRACTION
             });
+        let question_focus = self.question_focus.clone();
+        let mut key_context = KeyContext::default();
+        key_context.add("AgentQuestion");
+        if AgentChatSettings::get_global(cx).send_with == AgentChatSendKey::ModifierEnter {
+            key_context.add("send_with_modifier");
+        }
         v_flex()
+            .track_focus(&self.question_focus)
+            .key_context(key_context)
             .w_full()
             .rounded(px(COMPOSER_RADIUS))
             .border_1()
@@ -983,39 +1051,55 @@ impl ChatView {
                     } else {
                         div().into_any_element()
                     })
-                    .when(!is_permission, |this| {
-                        let pending_id = pending_id.clone();
-                        this.child(
-                            div()
-                                .id("agent-question-next")
-                                .px(px(16.))
-                                .py(px(6.))
-                                .rounded(px(8.))
-                                .bg(colors.text)
-                                .text_size(ui(13.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(page(cx))
-                                .when(!answered, |this| this.opacity(0.4))
-                                .when(answered, |this| {
-                                    this.cursor_pointer()
-                                        .hover(|style| style.opacity(0.9))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            if is_last_page {
-                                                this.submit_answers(&pending_id, cx);
-                                            } else {
-                                                this.question_pages
-                                                    .insert(pending_id.to_string(), page_index + 1);
-                                                cx.notify();
-                                            }
-                                        }))
-                                })
-                                .child(if is_last_page {
-                                    t!("Submit")
-                                } else {
-                                    t!("Next")
-                                }),
-                        )
-                    }),
+                    .child(
+                        h_flex()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .id("agent-question-stop")
+                                    .px(px(12.))
+                                    .py(px(6.))
+                                    .rounded(px(8.))
+                                    .cursor_pointer()
+                                    .text_size(ui(13.))
+                                    .text_color(colors.text_muted)
+                                    .hover(move |style| style.bg(back_hover).text_color(colors.text))
+                                    .tooltip(move |_, cx| {
+                                        Tooltip::for_action_in(t!("Stop"), &Stop, &question_focus, cx)
+                                    })
+                                    .child(t!("Stop"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.stop(&Stop, window, cx)
+                                    })),
+                            )
+                            .when(!is_permission, |this| {
+                                let pending_id = pending_id.clone();
+                                this.child(
+                                    div()
+                                        .id("agent-question-next")
+                                        .px(px(16.))
+                                        .py(px(6.))
+                                        .rounded(px(8.))
+                                        .bg(colors.text)
+                                        .text_size(ui(13.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(page(cx))
+                                        .when(!answered, |this| this.opacity(0.4))
+                                        .when(answered, |this| {
+                                            this.cursor_pointer()
+                                                .hover(|style| style.opacity(0.9))
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.advance_question(&pending_id, page_index, count, cx)
+                                                }))
+                                        })
+                                        .child(if is_last_page {
+                                            t!("Submit")
+                                        } else {
+                                            t!("Next")
+                                        }),
+                                )
+                            })
+                    ),
             )
             .into_any_element()
     }

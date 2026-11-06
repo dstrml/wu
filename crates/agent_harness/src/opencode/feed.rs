@@ -461,6 +461,10 @@ pub(super) fn map_questions(properties: &Value) -> Vec<UserInputQuestion> {
                     .collect(),
                 prefill: None,
                 multiline: false,
+                accepts_typed_answer: question
+                    .get("custom")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
                 multi_select: question
                     .get("multiple")
                     .and_then(Value::as_bool)
