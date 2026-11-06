@@ -607,6 +607,7 @@ struct HistoryAnchor {
 
 const HISTORY_COMMIT_ROW_HEIGHT: Pixels = px(48.);
 const HISTORY_FILE_ROW_HEIGHT: Pixels = px(24.);
+const HISTORY_LOADING_DELAY: Duration = Duration::from_millis(150);
 
 struct HistoryFile {
     path: RepoPath,
@@ -614,7 +615,11 @@ struct HistoryFile {
 }
 
 enum HistoryCommitFiles {
-    Loading { _load: Task<()> },
+    Loading {
+        visible: bool,
+        _load: Task<()>,
+        _reveal: Task<()>,
+    },
     Loaded(Rc<[HistoryFile]>),
     Failed,
 }
@@ -1335,6 +1340,7 @@ pub struct GitPanel {
     commit_history_list: ListState,
     history_rows: Rc<[HistoryRow]>,
     expanded_history_commits: HashMap<Oid, HistoryCommitFiles>,
+    collapsed_history_files: HashMap<Oid, Rc<[HistoryFile]>>,
     history_context_menu_commit: Option<Oid>,
     commit_history: CommitHistory,
     focused_history_entry: Option<usize>,
@@ -1613,6 +1619,7 @@ impl GitPanel {
                 commit_history_list: ListState::new(0, ListAlignment::Top, px(1000.)),
                 history_rows: Rc::from([]),
                 expanded_history_commits: HashMap::default(),
+                collapsed_history_files: HashMap::default(),
                 history_context_menu_commit: None,
                 commit_history: CommitHistory::Loading,
                 focused_history_entry: None,
@@ -6974,7 +6981,14 @@ impl GitPanel {
             return;
         };
         let anchor = self.history_anchor();
-        if self.expanded_history_commits.remove(&sha).is_none() {
+        if let Some(files) = self.expanded_history_commits.remove(&sha) {
+            if let HistoryCommitFiles::Loaded(files) = files {
+                self.collapsed_history_files.insert(sha, files);
+            }
+        } else if let Some(files) = self.collapsed_history_files.remove(&sha) {
+            self.expanded_history_commits
+                .insert(sha, HistoryCommitFiles::Loaded(files));
+        } else {
             let Some(repository) = self.active_repository.clone() else {
                 return;
             };
@@ -7018,8 +7032,28 @@ impl GitPanel {
                 })
                 .ok();
             });
-            self.expanded_history_commits
-                .insert(sha, HistoryCommitFiles::Loading { _load: load_files });
+            let reveal = cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(HISTORY_LOADING_DELAY).await;
+                this.update(cx, |this, cx| {
+                    let Some(HistoryCommitFiles::Loading { visible, .. }) =
+                        this.expanded_history_commits.get_mut(&sha)
+                    else {
+                        return;
+                    };
+                    *visible = true;
+                    let anchor = this.history_anchor();
+                    this.rebuild_history_rows(anchor, cx);
+                })
+                .ok();
+            });
+            self.expanded_history_commits.insert(
+                sha,
+                HistoryCommitFiles::Loading {
+                    visible: false,
+                    _load: load_files,
+                    _reveal: reveal,
+                },
+            );
         }
         self.rebuild_history_rows(anchor, cx);
     }
@@ -7157,7 +7191,7 @@ impl GitPanel {
         for (commit, entry) in entries.iter().enumerate() {
             rows.push(HistoryRow::Commit(commit));
             match self.expanded_history_commits.get(&entry.sha) {
-                None => {}
+                None | Some(HistoryCommitFiles::Loading { visible: false, .. }) => {}
                 Some(HistoryCommitFiles::Loaded(files)) if !files.is_empty() => {
                     rows.extend((0..files.len()).map(|file| HistoryRow::File { commit, file }))
                 }
@@ -7356,6 +7390,7 @@ impl GitPanel {
         let anchor = self.history_anchor();
         if !matches!(commit_history, CommitHistory::Loaded(_)) {
             self.expanded_history_commits.clear();
+            self.collapsed_history_files.clear();
         }
         self.commit_history = commit_history;
         self.rebuild_history_rows(anchor, cx);
@@ -10581,14 +10616,8 @@ mod tests {
         panel.update(cx, |panel, cx| {
             assert_eq!(rows(panel), [HistoryRow::Commit(0), HistoryRow::Commit(1)]);
             panel.toggle_history_commit(0, cx);
-            assert_eq!(
-                rows(panel),
-                [
-                    HistoryRow::Commit(0),
-                    HistoryRow::FilesStatus(0),
-                    HistoryRow::Commit(1)
-                ]
-            );
+            assert!(panel.is_history_commit_expanded(0));
+            assert_eq!(rows(panel), [HistoryRow::Commit(0), HistoryRow::Commit(1)]);
         });
         cx.run_until_parked();
 
@@ -10621,6 +10650,17 @@ mod tests {
             panel.collapse_history_row(cx);
             assert_eq!(rows(panel), [HistoryRow::Commit(0), HistoryRow::Commit(1)]);
             assert_eq!(panel.focused_history_entry, Some(0));
+
+            panel.toggle_history_commit(0, cx);
+            assert_eq!(
+                rows(panel),
+                [
+                    HistoryRow::Commit(0),
+                    HistoryRow::File { commit: 0, file: 0 },
+                    HistoryRow::File { commit: 0, file: 1 },
+                    HistoryRow::Commit(1)
+                ]
+            );
         });
     }
 

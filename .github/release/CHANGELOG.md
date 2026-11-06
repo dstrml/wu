@@ -4,6 +4,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Fix jank in git panel's history.
 - New look for the agent chat box, with the model picker next to the + button under the text.
 - Improve Agent questions UX.
 - Smaller download and install size on macOS.
