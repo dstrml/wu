@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Smaller download and install size on all platforms.
+
 ## 1.1.17 - 2026-11-06
 
 - Clearer message in Agent Chat when an agent isn't installed.

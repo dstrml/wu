@@ -83,7 +83,14 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
 else
     export RUSTFLAGS="${RUSTFLAGS:-} -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
 fi
-cargo build --release --target "${target_triple}" --package wu --package cli
+lld=$("$CC" -print-prog-name=ld.lld)
+lld_version=$("$lld" --version)
+if [[ ! "$lld_version" =~ LLD\ ([0-9]+)\. ]] || (( BASH_REMATCH[1] < 12 )); then
+    echo "Bundling requires LLD 12 or newer for safe ICF; select a matching compiler with CC (e.g. CC=clang-18)." >&2
+    exit 1
+fi
+cargo --config .cargo/bundle-config.toml rustc --release --target "${target_triple}" --package wu --bin wu -- -C linker="$CC" -C llvm-args=-addrsig -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=safe
+cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package cli
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.
 if [[ "$remote_server_triple" == "$musl_triple" ]]; then
@@ -91,12 +98,11 @@ if [[ "$remote_server_triple" == "$musl_triple" ]]; then
     musl_cc_var="CC_$(echo "$remote_server_triple" | tr '-' '_')"
     export "$musl_cc_var"=musl-gcc
 fi
-cargo build --release --target "${remote_server_triple}" --package remote_server
+cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" --package remote_server
 
-# Strip debug symbols and save them for upload to DigitalOcean.
 # We use llvm-objcopy because GNU objcopy on older distros (e.g. Ubuntu 20.04)
 # doesn't understand CREL sections produced by newer LLVM.
-llvm-objcopy --strip-debug "${target_dir}/${target_triple}/release/wu"
+llvm-objcopy --strip-unneeded "${target_dir}/${target_triple}/release/wu"
 llvm-objcopy --strip-debug "${target_dir}/${target_triple}/release/cli"
 llvm-objcopy --strip-debug "${target_dir}/${remote_server_triple}/release/remote_server"
 
