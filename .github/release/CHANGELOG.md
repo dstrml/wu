@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Smaller download and install size on macOS.
+
 ## 1.1.18 - 2026-11-06
 
 - Smaller download and install size on all platforms.
