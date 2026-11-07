@@ -6,6 +6,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 - Fix voice dictation UI in agent chat.
 - Fix window resize not persisting on Windows.
+- Inter at 350 weight is now the new interface font.
 
 ## 1.1.19 - 2026-11-07
 

@@ -59,8 +59,8 @@
   "ui_language": "system",
   // The name of a font to use for rendering text in the UI
   // You can set this to ".SystemUIFont" to use the system font, or to
-  // "IBM Plex Sans" for the previous default
-  "ui_font_family": "Geist",
+  // "Geist" for the previous default
+  "ui_font_family": "Inter",
   // Set the UI's font fallbacks, this will be merged with the platform's
   // default font fallbacks.
   "ui_font_fallbacks": null,
@@ -70,7 +70,7 @@
     "calt": false,
   },
   // The weight of the UI font in standard CSS units from 100 to 900.
-  "ui_font_weight": 400,
+  "ui_font_weight": 350,
   // The default font size for text in the UI
   "ui_font_size": 15,
   // The default font size for the commit editor in the git panel and commit modal.

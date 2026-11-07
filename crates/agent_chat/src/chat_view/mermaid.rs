@@ -37,7 +37,7 @@ pub(super) fn diagram_theme(cx: &App) -> DiagramTheme {
     };
     let border_strong = ink(if is_light { 0.17 } else { 0.14 }, cx);
     DiagramTheme {
-        font_family: "Geist".into(),
+        font_family: "Inter".into(),
         background: rgba(canvas),
         text: rgba(colors.text),
         line: rgba(text_faint(cx)),

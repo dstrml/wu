@@ -71,7 +71,7 @@ impl TextSystem {
             fallback_font_stack: smallvec![
                 // TODO: Remove this when Linux have implemented setting fallbacks.
                 font("JetBrains Mono"),
-                font("Geist"),
+                font("Inter"),
                 font("Helvetica"),
                 font("Segoe UI"),     // Windows
                 font("Ubuntu"),       // Gnome (Ubuntu)

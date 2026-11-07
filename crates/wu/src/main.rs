@@ -1604,7 +1604,7 @@ fn prewarm_fonts(cx: &mut App) {
     ] {
         add_variant(&ui_font, weight, gpui::FontStyle::Normal);
     }
-    add_variant(&ui_font, gpui::FontWeight::NORMAL, gpui::FontStyle::Italic);
+    add_variant(&ui_font, ui_font.weight, gpui::FontStyle::Italic);
     add_variant(
         &buffer_font,
         gpui::FontWeight::BOLD,
