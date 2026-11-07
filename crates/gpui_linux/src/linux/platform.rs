@@ -129,7 +129,7 @@ impl LinuxCommon {
         let (wake_sender, wake_receiver) = calloop::channel::channel();
 
         #[cfg(any(feature = "wayland", feature = "x11"))]
-        let text_system = Arc::new(crate::linux::CosmicTextSystem::new("IBM Plex Sans"));
+        let text_system = Arc::new(crate::linux::CosmicTextSystem::new("Inter"));
         #[cfg(not(any(feature = "wayland", feature = "x11")))]
         let text_system = Arc::new(gpui::NoopTextSystem::new());
 

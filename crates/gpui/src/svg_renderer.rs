@@ -310,7 +310,7 @@ fn rasterize_tree(tree: &usvg::Tree, size: SvgSize) -> Result<Pixmap, usvg::Erro
 
 fn load_bundled_fonts(asset_source: &dyn AssetSource, db: &mut usvg::fontdb::Database) {
     let font_paths = [
-        "fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf",
+        "fonts/inter/Inter-Regular.ttf",
         "fonts/jetbrains-mono/JetBrainsMono-Regular.ttf",
     ];
     for path in font_paths {
@@ -329,12 +329,12 @@ fn fix_generic_font_families(db: &mut usvg::fontdb::Database) {
     use usvg::fontdb::{Family, Query};
 
     let families_and_fallbacks: &[(Family<'_>, &str)] = &[
-        (Family::SansSerif, "IBM Plex Sans"),
+        (Family::SansSerif, "Inter"),
         // No serif font bundled; use sans-serif as best available fallback.
-        (Family::Serif, "IBM Plex Sans"),
+        (Family::Serif, "Inter"),
         (Family::Monospace, "JetBrains Mono"),
-        (Family::Cursive, "IBM Plex Sans"),
-        (Family::Fantasy, "IBM Plex Sans"),
+        (Family::Cursive, "Inter"),
+        (Family::Fantasy, "Inter"),
     ];
 
     for (family, fallback_name) in families_and_fallbacks {
@@ -360,8 +360,8 @@ mod tests {
     use super::*;
     use usvg::fontdb::{Database, Family, Query};
 
-    const IBM_PLEX_REGULAR: &[u8] =
-        include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
+    const INTER_REGULAR: &[u8] =
+        include_bytes!("../../../assets/fonts/inter/Inter-Regular.ttf");
     const JETBRAINS_MONO_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
 
     #[test]
@@ -394,7 +394,7 @@ mod tests {
 
     fn db_with_bundled_fonts() -> Database {
         let mut db = Database::new();
-        db.load_font_data(IBM_PLEX_REGULAR.to_vec());
+        db.load_font_data(INTER_REGULAR.to_vec());
         db.load_font_data(JETBRAINS_MONO_REGULAR.to_vec());
         db
     }
@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn text_with_split_glyph_clusters_in_mixed_fonts_does_not_panic() {
         let mut db = Database::new();
-        db.load_font_data(IBM_PLEX_REGULAR.to_vec());
+        db.load_font_data(INTER_REGULAR.to_vec());
         db.load_font_data(JETBRAINS_MONO_REGULAR.to_vec());
         let options = usvg::Options {
             fontdb: std::sync::Arc::new(db),
@@ -415,7 +415,7 @@ mod tests {
         // chunk must use two different fonts so the buggy merge path runs.
         let zalgo = "e\u{0301}\u{0302}\u{0303}\u{0304}\u{0306}\u{0307}\u{0308}\u{030a}";
         let svg = format!(
-            r#"<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><text font-family="JetBrains Mono" font-size="32">{zalgo}<tspan font-family="IBM Plex Sans">{zalgo}</tspan></text></svg>"#
+            r#"<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><text font-family="JetBrains Mono" font-size="32">{zalgo}<tspan font-family="Inter">{zalgo}</tspan></text></svg>"#
         );
 
         // Before the fix this aborts via panic with a message like
@@ -484,9 +484,9 @@ mod tests {
     fn test_select_emoji_font_skips_family_without_glyph() {
         let mut db = db_with_bundled_fonts();
 
-        let ibm_plex_sans = db
+        let inter_sans = db
             .query(&usvg::fontdb::Query {
-                families: &[usvg::fontdb::Family::Name("IBM Plex Sans")],
+                families: &[usvg::fontdb::Family::Name("Inter")],
                 weight: usvg::fontdb::Weight(400),
                 stretch: usvg::fontdb::Stretch::Normal,
                 style: usvg::fontdb::Style::Normal,
@@ -500,10 +500,10 @@ mod tests {
                 style: usvg::fontdb::Style::Normal,
             })
             .unwrap();
-        let selected = select_emoji_font('│', &[], &db, &["IBM Plex Sans", "JetBrains Mono"]).unwrap();
+        let selected = select_emoji_font('│', &[], &db, &["Inter", "JetBrains Mono"]).unwrap();
 
         assert_eq!(selected, jetbrains_mono);
-        assert!(!font_has_char(&db, ibm_plex_sans, '│'));
+        assert!(!font_has_char(&db, inter_sans, '│'));
         assert!(font_has_char(&db, selected, '│'));
     }
 

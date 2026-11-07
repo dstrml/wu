@@ -5562,7 +5562,7 @@ mod tests {
                     .unwrap()
                     .unwrap(),
                 Assets
-                    .load("fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf")
+                    .load("fonts/inter/Inter-Regular.ttf")
                     .unwrap()
                     .unwrap(),
             ])

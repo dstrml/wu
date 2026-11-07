@@ -86,6 +86,17 @@ export function Icon({ name, size = 16, color, className = '' }: { name: string;
   );
 }
 
+export function ModelChip({ effort }: { effort: string }) {
+  return (
+    <span className={`flex h-8 min-w-0 items-center gap-1.5 rounded-[16px] px-1.5 text-[12px] font-normal text-[#f0eef4e6] ${hover}`}>
+      <Icon name="agent_claude" size={16} color={claude} />
+      <span className="truncate">Opus 5.5</span>
+      <span className="truncate text-[#aaa8b7b3]">{effort}</span>
+      <Icon name="agent_arrow_down" size={12} color={muted} />
+    </span>
+  );
+}
+
 function ImageIcon({ src, size = 16, className = '' }: { src: string; size?: number; className?: string }) {
   return <img src={src} alt="" width={size} height={size} className={`shrink-0 ${className}`} draggable={false} />;
 }
@@ -550,59 +561,49 @@ function ChatView({
       </div>
       <div className="mx-auto w-full max-w-[768px] px-4 pb-2">
         <div className="h-6" />
-        <div className="flex h-[47px] items-center rounded-[22px] border border-[#2c2f3a] bg-[#2a2d37] pr-2 pl-2 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-4px_rgba(0,0,0,0.1)]">
-          <span className={`grid size-7 shrink-0 place-items-center rounded-full ${hover}`}>
-            <Icon name="agent_paperclip" size={18} color={muted} />
-          </span>
-          <input
-            className="min-w-0 flex-1 bg-transparent px-2 text-[14px] outline-none placeholder:text-[#727080]"
-            style={{ color: text }}
-            placeholder={t.placeholder}
-            aria-label={t.messageLabel}
-            value={draft}
-            onChange={(event) => onDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                onSend();
-              }
-            }}
-          />
-          <span className="flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium text-[#f0eef4e6] hover:bg-[#ffffff1c]">
-            <Icon name="agent_claude" size={16} color={claude} />
-            Opus 5.5
-            <span className="text-[#aaa8b7b3]">{t.effort}</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-2 pl-0.5">
-            <span className={`grid size-7 place-items-center rounded-full ${hover}`}>
-              <Icon name="agent_microphone" size={18} color={muted} />
+        <div className="flex flex-col rounded-[22px] border border-[#2c2f3a] bg-[#2a2d37] shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-4px_rgba(0,0,0,0.1)]">
+          <div className="px-4 pt-4 pb-2.5">
+            <input
+              className="w-full bg-transparent text-[14px] leading-[22.75px] outline-none placeholder:text-[#727080]"
+              style={{ color: text }}
+              placeholder={t.placeholder}
+              aria-label={t.messageLabel}
+              value={draft}
+              onChange={(event) => onDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onSend();
+                }
+              }}
+            />
+          </div>
+          <div className="flex h-[42px] items-center gap-2 px-3 pt-0.5 pb-2">
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <span className={`grid size-7 shrink-0 place-items-center rounded-full ${hover}`}>
+                <Icon name="plus" size={18} color={muted} />
+              </span>
+              <ModelChip effort={t.effort} />
             </span>
-            <button
-              type="button"
-              aria-label={t.send}
-              disabled={!canSend}
-              className={`grid size-7 place-items-center rounded-full bg-[#f0eef4] ${canSend ? 'cursor-pointer hover:opacity-85' : 'opacity-35'}`}
-              onClick={onSend}
-            >
-              <Icon name="agent_send" size={14} color="#181a21" />
-            </button>
-          </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className={`grid size-7 place-items-center rounded-full ${hover}`}>
+                <Icon name="agent_microphone" size={18} color={muted} />
+              </span>
+              <button
+                type="button"
+                aria-label={t.send}
+                disabled={!canSend}
+                className={`grid size-7 place-items-center rounded-full bg-[#f0eef4] ${canSend ? 'cursor-pointer hover:opacity-85' : 'opacity-35'}`}
+                onClick={onSend}
+              >
+                <Icon name="agent_send" size={14} color="#181a21" />
+              </button>
+            </span>
+          </div>
         </div>
-        <div className="flex h-6 items-center pt-2 text-[12px] font-medium text-[#aaa8b799]">
-          <span className="flex items-center gap-1 pl-2.5">
-            <span className="flex h-5 items-center gap-1.5 px-2">
-              <Icon name="agent_folder" size={12} />
-              {t.checkout}
-            </span>
-            <span className="flex h-5 items-center gap-1.5 px-2">
-              <Icon name="agent_git_branch" size={12} />
-              main
-            </span>
-          </span>
-          <span className="ml-auto flex items-center gap-1 pr-2.5 pl-1 font-normal">
-            <UsageRing percent={18} color={accent} />
-            <UsageRing percent={34} color={muted} />
-          </span>
+        <div className="mt-2 flex h-6 items-center justify-end gap-1 pr-2.5 pl-1">
+          <UsageRing percent={18} color={accent} />
+          <UsageRing percent={34} color={muted} />
         </div>
       </div>
     </div>
@@ -1354,7 +1355,7 @@ export function WuWindow() {
   const symbols = activeFile && cursor ? symbolPath(activeFile, cursor.line) : [];
 
   return (
-    <div className="flex flex-col overflow-hidden bg-[#181a21] font-wu text-[14px] tracking-normal select-none" style={{ width: WIDTH, height: HEIGHT, color: text }}>
+    <div className="flex flex-col overflow-hidden bg-[#181a21] font-wu text-[14px] font-[350] tracking-normal select-none" style={{ width: WIDTH, height: HEIGHT, color: text }}>
       <div className="relative flex h-[34px] shrink-0 items-center gap-0.5 pl-[71px] text-[12px]">
         <span className="absolute top-1/2 left-[13px] flex -translate-y-1/2 gap-2" aria-hidden="true">
           <span className="size-3 rounded-full bg-[#ff5f57]" />

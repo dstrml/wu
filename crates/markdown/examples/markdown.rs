@@ -74,7 +74,7 @@ impl Render for MarkdownExample {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let markdown_style = MarkdownStyle {
             base_text_style: gpui::TextStyle {
-                font_family: "IBM Plex Sans".into(),
+                font_family: "Inter".into(),
                 color: cx.theme().colors().terminal_ansi_black,
                 ..Default::default()
             },

@@ -7,19 +7,19 @@ use gpui::App;
 pub fn load_fonts(cx: &App) -> bool {
     let fonts = [
         Cow::Borrowed(
-            include_bytes!("../../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf")
+            include_bytes!("../../../../assets/fonts/inter/Inter-Regular.ttf")
                 .as_slice(),
         ),
         Cow::Borrowed(
-            include_bytes!("../../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Italic.ttf")
+            include_bytes!("../../../../assets/fonts/inter/Inter-Italic.ttf")
                 .as_slice(),
         ),
         Cow::Borrowed(
-            include_bytes!("../../../../assets/fonts/ibm-plex-sans/IBMPlexSans-SemiBold.ttf")
+            include_bytes!("../../../../assets/fonts/inter/Inter-SemiBold.ttf")
                 .as_slice(),
         ),
         Cow::Borrowed(
-            include_bytes!("../../../../assets/fonts/ibm-plex-sans/IBMPlexSans-SemiBoldItalic.ttf")
+            include_bytes!("../../../../assets/fonts/inter/Inter-SemiBoldItalic.ttf")
                 .as_slice(),
         ),
         Cow::Borrowed(

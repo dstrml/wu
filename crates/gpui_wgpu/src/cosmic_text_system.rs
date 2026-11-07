@@ -1060,8 +1060,8 @@ mod tests {
         }
     }
 
-    const IBM_PLEX: &[u8] =
-        include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
+    const INTER: &[u8] =
+        include_bytes!("../../../assets/fonts/inter/Inter-Regular.ttf");
 
     /// Every code point of `Bidi_Class=B`, each of which starts a new bidi
     /// paragraph and so can split one line into mixed-direction paragraphs.
@@ -1070,13 +1070,13 @@ mod tests {
     ];
 
     fn text_system() -> Result<CosmicTextSystem> {
-        let text_system = CosmicTextSystem::new_without_system_fonts("IBM Plex Sans");
-        text_system.add_fonts(vec![Cow::Borrowed(IBM_PLEX)])?;
+        let text_system = CosmicTextSystem::new_without_system_fonts("Inter");
+        text_system.add_fonts(vec![Cow::Borrowed(INTER)])?;
         Ok(text_system)
     }
 
     fn layout_text(text_system: &CosmicTextSystem, text: &str) -> Result<LineLayout> {
-        let font_id = text_system.font_id(&gpui::font("IBM Plex Sans"))?;
+        let font_id = text_system.font_id(&gpui::font("Inter"))?;
         let runs = [FontRun {
             len: text.len(),
             font_id,
@@ -1095,7 +1095,7 @@ mod tests {
         let text: SharedString = "first line\n\u{05d0}\u{001c}A".into();
         let runs = [gpui::TextRun {
             len: text.len(),
-            font: gpui::font("IBM Plex Sans"),
+            font: gpui::font("Inter"),
             ..Default::default()
         }];
 
@@ -1181,7 +1181,7 @@ mod tests {
     #[test]
     fn layout_line_with_font_run_straddling_a_separator() -> Result<()> {
         let text_system = text_system()?;
-        let font_id = text_system.font_id(&gpui::font("IBM Plex Sans"))?;
+        let font_id = text_system.font_id(&gpui::font("Inter"))?;
         let text = "ab\u{001c}\u{05d0}\u{05d1}";
 
         // The run boundary falls inside the trailing RTL paragraph.

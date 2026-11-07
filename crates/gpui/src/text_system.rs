@@ -1196,7 +1196,7 @@ pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
     // Old Zed font names, kept so user settings that still name them resolve.
     match name {
         ".SystemUIFont" => system,
-        ".ZedSans" | "Zed Plex Sans" => "IBM Plex Sans",
+        ".ZedSans" | "Zed Plex Sans" => "Inter",
         ".ZedMono" | "Zed Plex Mono" => "JetBrains Mono",
         _ => name,
     }
@@ -1211,7 +1211,7 @@ pub fn font_name_with_fallbacks_shared<'a>(
     // Old Zed font names, kept so user settings that still name them resolve.
     match name.as_str() {
         ".SystemUIFont" => system,
-        ".ZedSans" | "Zed Plex Sans" => const { &SharedString::new_static("IBM Plex Sans") },
+        ".ZedSans" | "Zed Plex Sans" => const { &SharedString::new_static("Inter") },
         ".ZedMono" | "Zed Plex Mono" => const { &SharedString::new_static("JetBrains Mono") },
         _ => name,
     }

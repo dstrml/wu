@@ -19,19 +19,11 @@
 }
 
 @font-face {
-  font-family: "Geist";
+  font-family: "Inter";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 350 700;
   font-display: swap;
-  src: url("/fonts/geist-latin.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Geist";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("/fonts/geist-medium-latin.woff2") format("woff2");
+  src: url("/fonts/inter-latin.woff2") format("woff2");
 }
 
 @font-face {
@@ -68,7 +60,7 @@
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", monospace;
   --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --font-wu: "Geist", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-wu: "Inter", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-wu-mono: "JetBrains Mono", ui-monospace, Menlo, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", monospace;
   --color-primary: var(--primary);
   --color-secondary: var(--secondary);

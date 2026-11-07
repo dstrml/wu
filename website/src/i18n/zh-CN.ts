@@ -269,13 +269,12 @@ export const zhCN: Messages = {
       openFile: '打开文件'
     },
     chat: {
-      placeholder: '想做什么都行…',
+      placeholder: '向智能体提问。@ 引用文件，/ 使用命令',
       messageLabel: '消息',
       send: '发送',
       thinking: '思考中…',
       working: '琢磨中…',
       effort: '高',
-      checkout: '本地签出',
       saveMessage: '收藏消息',
       justNow: '刚刚',
       thoughtProcess: '思考过程',

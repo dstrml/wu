@@ -4,8 +4,8 @@ use gpui_wgpu::CosmicTextSystem;
 use std::borrow::Cow;
 
 const JETBRAINS_MONO: &[u8] = include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
-const IBM_PLEX: &[u8] =
-    include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
+const INTER: &[u8] =
+    include_bytes!("../../../assets/fonts/inter/Inter-Regular.ttf");
 
 // ~4 000 chars of typical ASCII code text, as a single display line.
 //
@@ -49,14 +49,14 @@ fn code_text() -> String {
 fn bench_layout_line(c: &mut Criterion) {
     let system = CosmicTextSystem::new_without_system_fonts("JetBrains Mono");
     system
-        .add_fonts(vec![Cow::Borrowed(JETBRAINS_MONO), Cow::Borrowed(IBM_PLEX)])
+        .add_fonts(vec![Cow::Borrowed(JETBRAINS_MONO), Cow::Borrowed(INTER)])
         .unwrap();
 
     let font_id_no_fallback = system.font_id(&font("JetBrains Mono")).unwrap();
 
     let font_id_with_fallback = {
         let mut f = font("JetBrains Mono");
-        f.fallbacks = Some(FontFallbacks::from_fonts(vec!["IBM Plex Sans".to_string()]));
+        f.fallbacks = Some(FontFallbacks::from_fonts(vec!["Inter".to_string()]));
         system.font_id(&f).unwrap()
     };
 

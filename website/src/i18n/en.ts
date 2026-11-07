@@ -281,13 +281,12 @@ export const en = {
       openFile: 'Open File'
     },
     chat: {
-      placeholder: 'Do anything…',
+      placeholder: 'Ask the agent. @ for files, / for commands',
       messageLabel: 'Message',
       send: 'Send',
       thinking: 'Thinking…',
       working: 'Pondering…',
       effort: 'High',
-      checkout: 'Local checkout',
       saveMessage: 'Save message',
       justNow: 'Just now',
       thoughtProcess: 'Thought process',
