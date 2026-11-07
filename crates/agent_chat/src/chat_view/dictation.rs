@@ -19,7 +19,7 @@ use settings::Settings as _;
 use ui::{ContextMenu, IconName, prelude::*, right_click_menu};
 use util::ResultExt as _;
 
-const LEVEL_SAMPLES: usize = 48;
+const LEVEL_SAMPLES: usize = 32;
 const LEVEL_INTERVAL: Duration = Duration::from_millis(60);
 const DOWNLOAD_POLL: Duration = Duration::from_millis(250);
 const HOLD_TO_TALK: Duration = Duration::from_millis(400);
@@ -35,8 +35,9 @@ const WAVEFORM_BAR_WIDTH: f32 = 3.;
 const WAVEFORM_BAR_GAP: f32 = 3.;
 const WAVEFORM_HEIGHT: f32 = 16.;
 const VOICE_LIMIT_WARNING_SECS: u64 = 10;
-pub(super) const VOICE_TRACK_HEIGHT: f32 = 32.;
-pub(super) const VOICE_TRACK_GAP: f32 = 8.;
+const VOICE_TRACK_HEIGHT: f32 = 28.;
+const SILENT_DECIBELS: f32 = -50.;
+const LOUD_DECIBELS: f32 = -15.;
 
 pub(super) enum DictationState {
     Idle,
@@ -122,7 +123,7 @@ impl ChatView {
                     if levels.len() == LEVEL_SAMPLES {
                         levels.pop_front();
                     }
-                    levels.push_back(session.take_peak_input_level());
+                    levels.push_back(loudness(session.take_peak_input_level()));
                     cx.notify();
                     true
                 });
@@ -375,13 +376,7 @@ impl ChatView {
         Some(devices_menu.into_any_element())
     }
 
-    pub(super) fn render_voice_track(
-        &self,
-        left: f32,
-        right: f32,
-        top: f32,
-        cx: &Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_voice_track(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let (levels, elapsed, live) = match &self.dictation {
             DictationState::Recording {
                 levels, started, ..
@@ -401,8 +396,7 @@ impl ChatView {
         let bars = std::iter::repeat_n(0., padding)
             .chain(levels)
             .map(move |level: f32| {
-                let level = level.clamp(0., 1.);
-                let height = (level.sqrt() * WAVEFORM_HEIGHT).max(WAVEFORM_BAR_WIDTH);
+                let height = (level.clamp(0., 1.) * WAVEFORM_HEIGHT).max(WAVEFORM_BAR_WIDTH);
                 div()
                     .flex_none()
                     .w(px(WAVEFORM_BAR_WIDTH))
@@ -431,17 +425,17 @@ impl ChatView {
         });
         let track = glass_light(
             h_flex()
-                .size_full()
+                .min_w_0()
+                .h(px(VOICE_TRACK_HEIGHT))
                 .rounded_full()
                 .overflow_hidden()
                 .gap(px(10.))
-                .pl(px(12.))
-                .pr(px(12.)),
+                .px(px(12.)),
             cx,
         )
+        .id("agent-dictation-track")
         .child(
             h_flex()
-                .flex_1()
                 .min_w_0()
                 .h(px(WAVEFORM_HEIGHT))
                 .justify_end()
@@ -450,20 +444,7 @@ impl ChatView {
                 .children(bars),
         )
         .children(clock);
-        Some(
-            div()
-                .id("agent-dictation-track")
-                .absolute()
-                .left(px(left))
-                .right(px(right))
-                .top(px(top))
-                .h(px(VOICE_TRACK_HEIGHT))
-                .flex()
-                .justify_end()
-                .occlude()
-                .child(track)
-                .into_any_element(),
-        )
+        Some(track.into_any_element())
     }
 
     pub(super) fn render_dictation_status(&self, cx: &Context<Self>) -> Option<AnyElement> {
@@ -532,6 +513,14 @@ impl ChatView {
                 .into_any_element(),
         )
     }
+}
+
+fn loudness(root_mean_square: f32) -> f32 {
+    if root_mean_square <= 0. {
+        return 0.;
+    }
+    let decibels = 20. * root_mean_square.log10();
+    ((decibels - SILENT_DECIBELS) / (LOUD_DECIBELS - SILENT_DECIBELS)).clamp(0., 1.)
 }
 
 fn shadow(color: Hsla, y: f32, blur: f32, spread: f32, inset: bool) -> BoxShadow {

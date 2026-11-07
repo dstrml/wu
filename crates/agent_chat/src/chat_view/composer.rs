@@ -211,22 +211,20 @@ impl ChatView {
         };
         let dictating = self.dictation_active();
         let microphone = self.render_dictation_button(cx);
-        let voice_track = if microphone.is_some() {
-            let leading = ACTION_INSET + ACTION_BUTTON_SIZE + dictation::VOICE_TRACK_GAP;
-            let trailing = leading + ACTION_BUTTON_SIZE + ACTION_PRIMARY_GAP;
-            self.render_voice_track(leading, trailing, 2., cx)
-        } else {
-            None
-        };
-        let beneath_voice = if voice_track.is_some() { 0. } else { 1. };
-        let model_picker = div()
-            .min_w_0()
-            .max_w(gpui::relative(MODEL_CHIP_MAX_FRACTION))
-            .opacity(beneath_voice)
-            .child(self.render_model_chip(window, cx));
+        let voice_track = microphone
+            .is_some()
+            .then(|| self.render_voice_track(cx))
+            .flatten();
+        let model_picker = voice_track.is_none().then(|| {
+            div()
+                .min_w_0()
+                .max_w(gpui::relative(MODEL_CHIP_MAX_FRACTION))
+                .child(self.render_model_chip(window, cx))
+        });
         let trailing = h_flex()
-            .flex_none()
+            .min_w_0()
             .gap(px(ACTION_PRIMARY_GAP))
+            .children(voice_track)
             .children(microphone)
             .child(self.render_send_button(cx));
         let textarea_min = if new_chat { NEW_CHAT_TEXTAREA_MIN } else { 0. };
@@ -260,7 +258,6 @@ impl ChatView {
             )
             .child(
                 h_flex()
-                    .relative()
                     .h(px(ACTIONS_ROW_HEIGHT))
                     .pt(px(2.))
                     .pb(px(8.))
@@ -272,10 +269,9 @@ impl ChatView {
                             .min_w_0()
                             .gap(px(ACTION_PRIMARY_GAP))
                             .child(self.render_attach_button(dictating, cx))
-                            .child(model_picker),
+                            .children(model_picker),
                     )
-                    .child(trailing)
-                    .children(voice_track),
+                    .child(trailing),
             );
         v_flex()
             .w_full()
