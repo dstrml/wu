@@ -1,0 +1,8 @@
+{
+  "Arguments": "参数",
+  "Executing command…": "正在执行命令…",
+  "Failed to execute language server command {command}: {error}": "执行语言服务器命令 {command} 失败：{error}",
+  "JSON arguments (42, {\"key\": \"value\"}, …) or plain text for one string": "JSON 参数（42、{\"key\": \"value\"}…），或作为单个字符串的纯文本",
+  "Select a language server command…": "选择语言服务器命令…",
+  "to switch focus": "切换焦点"
+}

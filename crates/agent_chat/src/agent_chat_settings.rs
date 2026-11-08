@@ -27,6 +27,7 @@ pub struct AgentChatSettings {
     agents: Vec<AgentKind>,
     pub steer_while_working: bool,
     pub confirm_quit_while_working: bool,
+    pub prevent_idle_sleep: bool,
     pub claude_in_chrome: bool,
     pub commit_message: CommitMessageSettings,
 }
@@ -105,6 +106,7 @@ impl Settings for AgentChatSettings {
             steer_while_working: content.while_working.unwrap_or_default()
                 == AgentChatWhileWorking::Steer,
             confirm_quit_while_working: content.confirm_quit_while_working.unwrap_or(true),
+            prevent_idle_sleep: content.prevent_idle_sleep.unwrap_or(true),
             claude_in_chrome: content.claude_in_chrome.unwrap_or(true),
             commit_message: {
                 let commit_message = content.commit_message.unwrap_or_default();

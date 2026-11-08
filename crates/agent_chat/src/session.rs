@@ -2288,6 +2288,7 @@ pub struct AgentStore {
     save_defaults_task: Task<()>,
     load_task: Option<Shared<Task<()>>>,
     agent_updates: HashMap<AgentKind, AgentUpdate>,
+    idle_sleep_guard: Option<Task<()>>,
 }
 
 #[derive(Clone)]
@@ -2554,11 +2555,32 @@ impl AgentStore {
             save_defaults_task: Task::ready(()),
             load_task: None,
             agent_updates: HashMap::default(),
+            idle_sleep_guard: None,
         };
+        cx.observe_self(|store, cx| store.update_idle_sleep_guard(cx)).detach();
+        cx.observe_global::<settings::SettingsStore>(|store, cx| {
+            store.update_idle_sleep_guard(cx)
+        })
+        .detach();
         if AgentChatSettings::get_global(cx).enabled {
             store.load_saved_chats(cx);
         }
         store
+    }
+
+    fn update_idle_sleep_guard(&mut self, cx: &mut Context<Self>) {
+        let keep_awake =
+            AgentChatSettings::get_global(cx).prevent_idle_sleep && self.working_count(cx) > 0;
+        if keep_awake == self.idle_sleep_guard.is_some() {
+            return;
+        }
+        self.idle_sleep_guard = keep_awake.then(|| {
+            let guard = cx.prevent_idle_sleep("An agent is working");
+            cx.spawn(async move |_, _| match guard.await {
+                Ok(_guard) => futures::future::pending::<()>().await,
+                Err(error) => log::warn!("Failed to keep the computer awake: {error:#}"),
+            })
+        });
     }
 
     fn load_saved_chats(&mut self, cx: &mut Context<Self>) {
@@ -4594,6 +4616,49 @@ done
             );
             assert!(session.is_working());
         });
+    }
+
+    #[gpui::test]
+    async fn the_computer_stays_awake_while_an_agent_works(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Codex, directory.path().to_path_buf(), cx)
+        });
+        let set_working = |working: bool, cx: &mut TestAppContext| {
+            session.update(cx, |session, cx| {
+                let event = if working {
+                    AgentEvent::Steered {
+                        assistant_message_id: None,
+                        next_assistant_message_id: None,
+                    }
+                } else {
+                    AgentEvent::Done {
+                        status: DoneStatus::Completed,
+                        result: None,
+                        error: None,
+                        session_id: None,
+                    }
+                };
+                session.apply_event(event, cx);
+            });
+            cx.run_until_parked();
+        };
+        assert_eq!(cx.active_idle_sleep_preventions(), 0);
+
+        set_working(true, cx);
+        assert_eq!(cx.active_idle_sleep_preventions(), 1);
+
+        update_chat_settings(cx, |settings| settings.prevent_idle_sleep = Some(false));
+        cx.run_until_parked();
+        assert_eq!(cx.active_idle_sleep_preventions(), 0);
+
+        update_chat_settings(cx, |settings| settings.prevent_idle_sleep = Some(true));
+        cx.run_until_parked();
+        assert_eq!(cx.active_idle_sleep_preventions(), 1);
+
+        set_working(false, cx);
+        assert_eq!(cx.active_idle_sleep_preventions(), 0);
     }
 
     #[gpui::test]

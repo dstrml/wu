@@ -139,6 +139,8 @@
     // "queue" waits for the agent to finish; "steer" sends the message right away.
     "while_working": "queue",
     "confirm_quit_while_working": true,
+    // Keeps the computer from going to sleep while an agent is working.
+    "prevent_idle_sleep": true,
     // Lets Claude Code chats use Chrome through the Claude in Chrome extension.
     "claude_in_chrome": true,
     // How the Git panel writes commit messages.
