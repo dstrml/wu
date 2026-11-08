@@ -12,6 +12,7 @@ use crate::AgentKind;
 pub struct AgentChatSettings {
     pub enabled: bool,
     pub dock: DockSide,
+    pub chat_panel_dock: DockSide,
     pub send_with: AgentChatSendKey,
     pub compact_transcript: bool,
     pub model_picker: AgentChatModelPickerLayout,
@@ -72,6 +73,7 @@ impl Settings for AgentChatSettings {
         Self {
             enabled: content.enabled.unwrap_or(true),
             dock: content.dock.unwrap_or(DockSide::Left),
+            chat_panel_dock: content.chat_panel_dock.unwrap_or(DockSide::Right),
             send_with: content.send_with.unwrap_or_default(),
             compact_transcript: content.compact_transcript.unwrap_or(false),
             model_picker: content.model_picker.unwrap_or_default(),

@@ -73,6 +73,10 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.docked {
+            self.open_subagent_in_tab(subagent, window, cx);
+            return;
+        }
         if let Some(SidePaneContent::Subagent {
             subagent: open,
             view,
@@ -112,6 +116,10 @@ impl ChatView {
     ) {
         if attachments::is_image_path(&target.path) {
             self.open_image(target.path, window, cx);
+            return;
+        }
+        if self.docked {
+            self.open_file_in_tab(target, window, cx);
             return;
         }
         if let Some(SidePaneContent::File {

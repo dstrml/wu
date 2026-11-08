@@ -107,6 +107,8 @@
     "enabled": true,
     // Where to dock the agent panel: "left" or "right".
     "dock": "left",
+    // Where to dock a chat you move out of its tab: "left" or "right".
+    "chat_panel_dock": "right",
     // "modifier_enter" means Cmd-Enter on macOS and Ctrl-Enter elsewhere.
     "send_with": "enter",
     "compact_transcript": false,

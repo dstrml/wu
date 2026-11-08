@@ -1065,6 +1065,10 @@ pub struct AgentChatSettingsContent {
     ///
     /// Default: left
     pub dock: Option<DockSide>,
+    /// Which side of the window a chat docks to when you move it out of its tab.
+    ///
+    /// Default: right
+    pub chat_panel_dock: Option<DockSide>,
     /// Which key sends a message from the chat box.
     ///
     /// Default: "enter"

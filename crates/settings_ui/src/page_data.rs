@@ -7646,7 +7646,7 @@ fn version_control_page() -> SettingsPage {
 }
 
 fn agent_chat_page() -> SettingsPage {
-    fn general_section() -> [SettingsPageItem; 3] {
+    fn general_section() -> [SettingsPageItem; 4] {
         [
             SettingsPageItem::SectionHeader(n!("General")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -7672,6 +7672,21 @@ fn agent_chat_page() -> SettingsPage {
                     pick: |settings_content| settings_content.agent_chat.as_ref()?.dock.as_ref(),
                     write: |settings_content, value, _| {
                         settings_content.agent_chat.get_or_insert_default().dock = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Chat Panel Dock"),
+                description: n!("Where to dock a chat you move out of its tab."),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.chat_panel_dock"),
+                    pick: |settings_content| {
+                        settings_content.agent_chat.as_ref()?.chat_panel_dock.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content.agent_chat.get_or_insert_default().chat_panel_dock = value;
                     },
                 }),
                 metadata: None,

@@ -327,6 +327,30 @@ impl ChatView {
         })
     }
 
+    pub(super) fn render_move_to_panel(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
+        if self.docked || self.subagent.is_some() {
+            return None;
+        }
+        let color = cx.theme().colors().text_muted.opacity(0.8);
+        Some(
+            Chip::new(
+                "agent-move-to-panel",
+                6.,
+                div()
+                    .size(px(24.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon(IconName::Split, px(14.), color)),
+            )
+            .hover_background(ink(0.05, cx))
+            .tooltip(t!("Move to Side Panel"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.move_to_panel(&crate::MoveChatToPanel, window, cx)
+            })),
+        )
+    }
+
     pub(super) fn render_footer(&self, cx: &Context<Self>) -> impl IntoElement {
         let session = self.session.read(cx);
         let kind = session.kind();
@@ -358,6 +382,7 @@ impl ChatView {
                     .pl(px(4.))
                     .pr(px(10.))
                     .gap(px(4.))
+                    .children(self.render_move_to_panel(cx))
                     .when(kind.has_plan_usage(), |this| {
                         this.child(
                             PopoverMenu::new(SharedString::from(format!(

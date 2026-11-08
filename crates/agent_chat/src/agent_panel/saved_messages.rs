@@ -1,10 +1,9 @@
 use super::{
-    AgentPanel, HARNESS_ICON_SIZE, LIST_GAP, LIST_PAD_TOP, SPACE_SM, chat_roots, faded_label,
-    format_time_ago, glyph, open_chat,
+    AgentPanel, HARNESS_ICON_SIZE, LIST_GAP, LIST_PAD_TOP, SPACE_SM, chat_roots, chat_view_for,
+    faded_label, format_time_ago, glyph, open_chat,
 };
 use crate::{
     chat_style::{text_faint, ui},
-    chat_view::ChatView,
     session::{SavedMessage, SessionSummary},
 };
 use collections::HashMap;
@@ -48,10 +47,7 @@ impl AgentPanel {
             let session = task.await?;
             workspace.update_in(cx, |workspace, window, cx| {
                 open_chat(workspace, session.clone(), window, cx);
-                let view = workspace.items_of_type::<ChatView>(cx).find(|view| {
-                    let view = view.read(cx);
-                    view.session() == &session && !view.is_subagent()
-                });
+                let view = chat_view_for(workspace, &session, cx);
                 let found = view.is_some_and(|view| {
                     view.update(cx, |view, cx| {
                         view.reveal_message(message.entry, &message.text, cx)

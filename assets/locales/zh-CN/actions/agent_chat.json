@@ -11,6 +11,14 @@
     "name": "关闭命令菜单",
     "description": "关闭斜杠命令菜单。"
   },
+  "agent_chat::MoveChatToPanel": {
+    "name": "将对话移到对话面板",
+    "description": "把对话从标签页移到对话面板中。"
+  },
+  "agent_chat::MoveChatToTab": {
+    "name": "将对话移回标签页",
+    "description": "把对话面板中的对话移回标签页。"
+  },
   "agent_chat::NewClaudeChat": {
     "name": "新建 Claude 对话",
     "description": "开始新的 Claude Code 对话。"
@@ -46,6 +54,10 @@
   "agent_chat::SubmitAnswer": {
     "name": "提交回答",
     "description": "回答智能体的问题并进入下一个问题，最后一个问题时直接提交。"
+  },
+  "agent_chat::ToggleChatPanel": {
+    "name": "切换对话面板",
+    "description": "显示或隐藏对话面板。"
   },
   "agent_chat::ToggleDictation": {
     "name": "切换听写",

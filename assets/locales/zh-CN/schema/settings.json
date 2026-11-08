@@ -899,6 +899,7 @@
   "Which installed extensions may be updated to a newer version.\n\nUpdates are only checked for when you open the Extensions page,\nnever in the background. Set an extension's id to `false` to keep\nits current version.": "哪些已安装的扩展可以更新到新版本。\n\n只有在打开扩展页面时才会检查更新，从不在后台检查。将某个扩展的 id 设为 `false` 可保留其当前版本。",
   "Which key sends a message from the chat box.\n\nDefault: \"enter\"": "在对话输入框中用哪个键发送消息。\n\n默认值：\"enter\"",
   "Which level to use to filter out diagnostics displayed in the editor.\n\nAffects the editor rendering only, and does not interrupt\nthe functionality of diagnostics fetching and project diagnostics editor.\nWhich files containing diagnostic errors/warnings to mark in the tabs.\nDiagnostics are only shown when file icons are also active.\n\nShows all diagnostics if not specified.\n\nDefault: warning": "用哪个级别过滤编辑器中显示的诊断。\n\n只影响编辑器的显示，不会中断诊断获取和项目诊断编辑器的功能。在标签页中标记哪些包含诊断错误/警告的文件。只有在文件图标也启用时才会显示诊断。\n\n未指定时显示所有诊断。\n\n默认值：warning",
+  "Which side of the window a chat docks to when you move it out of its tab.\n\nDefault: right": "从标签页移出的对话停靠在窗口的哪一侧。\n\n默认值：right",
   "Which side of the window the activity bar is on.\n\nDefault: left": "活动栏位于窗口的哪一侧。\n\n默认值：left",
   "Which side of the window the agent panel docks to.\n\nDefault: left": "智能体面板停靠在窗口的哪一侧。\n\n默认值：left",
   "White ANSI terminal color.": "ANSI 终端白色。",

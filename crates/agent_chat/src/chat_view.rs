@@ -15,7 +15,7 @@ mod side_pane;
 mod todo_panel;
 
 use crate::{
-    AgentChatSettings, RenameChat, Send, Stop, SubmitAnswer,
+    AgentChatSettings, MoveChatToPanel, RenameChat, Send, Stop, SubmitAnswer,
     chat_style::{
         Chip, accent, flavour_seed, flavour_word, format_elapsed, gradient_spinner, hairline, ink,
         mix, page, text_faint, ui, wash,
@@ -139,6 +139,7 @@ pub struct ChatView {
     session: Entity<AgentSession>,
     subagent: Option<SubagentRef>,
     host: Option<WeakEntity<ChatView>>,
+    docked: bool,
     side_pane: Option<side_pane::SidePane>,
     side_pane_openings: usize,
     _side_pane_load: Task<()>,
@@ -315,6 +316,7 @@ impl ChatView {
             session,
             subagent,
             host: None,
+            docked: false,
             side_pane: None,
             side_pane_openings: 0,
             _side_pane_load: Task::ready(()),
@@ -520,6 +522,45 @@ impl ChatView {
         self.subagent.is_some()
     }
 
+    pub(crate) fn is_docked(&self) -> bool {
+        self.docked
+    }
+
+    pub(crate) fn set_docked(
+        &mut self,
+        docked: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.docked = docked;
+        if docked {
+            self.close_side_pane(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn move_to_panel(
+        &mut self,
+        _: &MoveChatToPanel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.subagent.is_some() || self.docked {
+            return;
+        }
+        let Some(view) = self.this.upgrade() else {
+            return;
+        };
+        let workspace = self.workspace.clone();
+        window.defer(cx, move |window, cx| {
+            workspace
+                .update(cx, |workspace, cx| {
+                    crate::chat_panel::move_chat_to_panel(workspace, view, window, cx)
+                })
+                .log_err();
+        });
+    }
+
     fn entries<'a>(&self, cx: &'a App) -> &'a [Entry] {
         let session = self.session.read(cx);
         match &self.subagent {
@@ -659,7 +700,7 @@ impl ChatView {
         cx.notify();
     }
 
-    fn title(&self, cx: &App) -> SharedString {
+    pub(crate) fn title(&self, cx: &App) -> SharedString {
         if let Some(subagent) = &self.subagent {
             return subagent.title.clone();
         }
@@ -1310,7 +1351,7 @@ impl ChatView {
             .when_some(undelivered, |this, index| {
                 this.child(self.render_retry(index, cx))
             });
-        column(turn).into_any_element()
+        column(turn, self.gutter()).into_any_element()
     }
 
     fn hover_strip(
@@ -2697,7 +2738,13 @@ impl ChatView {
                         h_flex()
                             .h(px(24.))
                             .px(px(10.))
-                            .children(self.render_agent_update(cx)),
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .children(self.render_agent_update(cx)),
+                            )
+                            .children(self.render_move_to_panel(cx)),
                     ),
             )
             .into_any_element()
@@ -3177,15 +3224,19 @@ fn group_turns(entries: &[Entry]) -> Vec<Turn> {
     turns
 }
 
-fn column(content: impl IntoElement) -> impl IntoElement {
+fn column(content: impl IntoElement, gutter: f32) -> impl IntoElement {
     h_flex()
         .w_full()
         .justify_center()
-        .px(px(SIDE_GUTTER))
+        .px(px(gutter))
         .child(div().w_full().max_w(px(CONTENT_WIDTH)).min_w_0().child(content))
 }
 
 impl ChatView {
+    fn gutter(&self) -> f32 {
+        if self.docked { SPACE_LG } else { SIDE_GUTTER }
+    }
+
     fn first_row_inset(&self) -> f32 {
         if self.subagent.is_some() {
             SPACE_LG
@@ -3309,6 +3360,7 @@ impl Render for ChatView {
             .on_action(cx.listener(Self::dismiss_commands))
             .on_action(cx.listener(Self::toggle_dictation))
             .on_action(cx.listener(Self::rename_chat))
+            .on_action(cx.listener(Self::move_to_panel))
             .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, _, cx| {
                 this.dictation_key_up(event, cx)
             }));
@@ -3378,10 +3430,17 @@ impl Item for ChatView {
             .gap_1()
             // A background tab's chat isn't rendered, so the tab itself receives the rename.
             .when(!params.selected, |this| {
-                this.track_focus(&self.composer.focus_handle(cx))
+                this.track_focus(&Focusable::focus_handle(self, cx))
             })
-            .on_action(move |action: &RenameChat, window, cx| {
-                this.update(cx, |this, cx| this.rename_chat(action, window, cx))
+            .on_action({
+                let this = this.clone();
+                move |action: &RenameChat, window, cx| {
+                    this.update(cx, |this, cx| this.rename_chat(action, window, cx))
+                        .ok();
+                }
+            })
+            .on_action(move |action: &MoveChatToPanel, window, cx| {
+                this.update(cx, |this, cx| this.move_to_panel(action, window, cx))
                     .ok();
             })
             .child(
@@ -3450,7 +3509,10 @@ impl Item for ChatView {
         if self.subagent.is_some() {
             return Vec::new();
         }
-        vec![(t!("Rename"), Box::new(RenameChat))]
+        vec![
+            (t!("Rename"), Box::new(RenameChat)),
+            (t!("Move to Side Panel"), Box::new(MoveChatToPanel)),
+        ]
     }
 
     fn tab_icon(&self, _: &Window, cx: &App) -> Option<Icon> {
