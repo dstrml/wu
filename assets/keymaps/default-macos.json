@@ -1345,7 +1345,7 @@
     },
   },
   {
-    "context": "AgentChat && !docked",
+    "context": "AgentChat",
     "bindings": {
       "cmd-f": "buffer_search::Deploy",
     },

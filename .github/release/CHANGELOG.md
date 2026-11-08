@@ -5,6 +5,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 ## Unreleased
 
 - Fix links and text selection in tables rendered in agent chat.
+- Allow multiple tabs inside the agent chat side panel.
 
 ## 1.2.0 - 2026-11-08
 

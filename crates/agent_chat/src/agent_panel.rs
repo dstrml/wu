@@ -1,7 +1,6 @@
 use crate::{
     AgentChatSettings, AgentKind, ContinueSavedChat, NewClaudeChat, NewCodexChat, NewOpencodeChat,
     ToggleFocus,
-    chat_panel::ChatPanel,
     chat_style::{accent, ink, selected_row, text_faint, ui, wash},
     chat_view::ChatView,
     session::{AgentSession, AgentStore, ChatListPrefs, ChatOutcome, SessionSummary},
@@ -157,14 +156,7 @@ pub(crate) fn chat_view_for(
             let view = view.read(cx);
             view.session() == session && !view.is_subagent()
         })
-        .or_else(|| {
-            workspace
-                .panel::<ChatPanel>(cx)?
-                .read(cx)
-                .chat()
-                .filter(|view| view.read(cx).session() == session)
-                .cloned()
-        })
+        .or_else(|| crate::chat_panel::docked_chat_for(workspace, session, cx))
 }
 
 pub(crate) fn open_chat(
@@ -195,7 +187,7 @@ fn open_chat_in(
     }
     if let Some(view) = chat_view_for(workspace, &session, cx) {
         if view.read(cx).is_docked() {
-            workspace.focus_panel::<ChatPanel>(window, cx);
+            crate::chat_panel::reveal_chat(workspace, &view, window, cx);
         } else {
             workspace.activate_item(&view, true, true, window, cx);
         }

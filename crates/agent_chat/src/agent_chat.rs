@@ -65,7 +65,7 @@ actions!(
         ToggleChatPanel,
         /// Moves the chat out of its tab and into the chat panel.
         MoveChatToPanel,
-        /// Moves the chat panel's chat back into a tab.
+        /// Moves a chat from the chat panel back into a tab.
         MoveChatToTab,
     ]
 );
@@ -213,10 +213,11 @@ fn close_agent_chats(cx: &mut App) {
                             workspace.hide_modal(window, cx);
                         }
                         workspace.close_panel::<AgentPanel>(window, cx);
+                        let mut panes = workspace.panes().to_vec();
                         if let Some(panel) = workspace.panel::<ChatPanel>(cx) {
-                            panel.update(cx, |panel, cx| panel.clear(cx));
+                            panes.push(panel.read(cx).pane().clone());
                         }
-                        for pane in workspace.panes().to_vec() {
+                        for pane in panes {
                             pane.update(cx, |pane, cx| {
                                 let chats: collections::HashSet<EntityId> = pane
                                     .items_of_type::<ChatView>()

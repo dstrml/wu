@@ -1,30 +1,27 @@
 use crate::{
     AgentChatSettings, AgentKind, MoveChatToPanel, MoveChatToTab, ToggleChatPanel,
-    agent_panel::{
-        HEADER_CONTROL_SIZE, HeaderButton, agent_chat_enabled, chat_view_for, create_session,
-        store_for,
-    },
-    chat_style::ui,
+    agent_panel::{agent_chat_enabled, create_session, store_for},
     chat_view::ChatView,
-    model_picker::agent_icon,
     session::{AgentSession, AgentStore},
 };
 use anyhow::Result;
 use db::kvp::KeyValueStore;
 use gpui::{
-    Action, App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, Global, IntoElement, ParentElement, Pixels, Render, Styled, Subscription,
-    WeakEntity, Window, div, px,
+    Action, App, AsyncWindowContext, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
+    Focusable, Global, IntoElement, ParentElement, Pixels, Render, Styled, WeakEntity, Window, div,
+    px,
 };
 use i18n::{n, t};
 use project::Project;
+use serde::{Deserialize, Serialize};
 use settings::{DockSide, Settings as _};
-use ui::{Clickable, ContextMenu, IconName, PopoverMenu, prelude::*};
+use std::sync::Arc;
+use ui::{ContextMenu, IconButton, IconName, PopoverMenu, Tooltip, prelude::*};
 use util::ResultExt as _;
 use workspace::{
-    Workspace, WorkspaceId,
+    DraggedSelection, ItemHandle, Pane, PaneSearchBarCallbacks, Workspace, WorkspaceId,
     dock::{DockPosition, Panel, PanelEvent},
-    item::ItemEvent,
+    pane::{self, DraggedTab},
 };
 
 const CHAT_PANEL_KEY: &str = "AgentChatPanel";
@@ -58,7 +55,26 @@ pub(crate) fn visible_chat(workspace: &Workspace, cx: &App) -> Option<Entity<Cha
     if !panel_is_visible(workspace, cx) {
         return None;
     }
-    workspace.panel::<ChatPanel>(cx)?.read(cx).chat().cloned()
+    workspace.panel::<ChatPanel>(cx)?.read(cx).active_chat(cx)
+}
+
+pub(crate) fn docked_chat_for(
+    workspace: &Workspace,
+    session: &Entity<AgentSession>,
+    cx: &App,
+) -> Option<Entity<ChatView>> {
+    let panel = workspace.panel::<ChatPanel>(cx)?;
+    chat_in_pane(&panel.read(cx).pane, session, cx)
+}
+
+fn chat_in_pane(
+    pane: &Entity<Pane>,
+    session: &Entity<AgentSession>,
+    cx: &App,
+) -> Option<Entity<ChatView>> {
+    pane.read(cx)
+        .items_of_type::<ChatView>()
+        .find(|view| view.read(cx).session() == session)
 }
 
 pub(crate) fn should_open_in_panel(workspace: &Workspace, cx: &App) -> bool {
@@ -75,10 +91,10 @@ pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace
             .register_action(|workspace, _: &ToggleChatPanel, window, cx| {
-                let has_chat = workspace
+                let has_chats = workspace
                     .panel::<ChatPanel>(cx)
-                    .is_some_and(|panel| panel.read(cx).chat().is_some());
-                if agent_chat_enabled(cx) && (has_chat || panel_is_visible(workspace, cx)) {
+                    .is_some_and(|panel| panel.read(cx).has_chats(cx));
+                if agent_chat_enabled(cx) && (has_chats || panel_is_visible(workspace, cx)) {
                     workspace.toggle_panel_focus::<ChatPanel>(window, cx);
                 }
             })
@@ -92,7 +108,12 @@ pub fn init(cx: &mut App) {
                 }
             })
             .register_action(|workspace, _: &MoveChatToTab, window, cx| {
-                move_chat_to_tab(workspace, window, cx);
+                let active_chat = workspace
+                    .panel::<ChatPanel>(cx)
+                    .and_then(|panel| panel.read(cx).active_chat(cx));
+                if let Some(view) = active_chat {
+                    move_chat_to_tab(workspace, view, window, cx);
+                }
             });
     })
     .detach();
@@ -113,7 +134,7 @@ pub(crate) fn show_chat_in_panel(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let view = match chat_view_for(workspace, &session, cx) {
+    let view = match crate::agent_panel::chat_view_for(workspace, &session, cx) {
         Some(view) => view,
         None => {
             let project = workspace.project().clone();
@@ -121,7 +142,7 @@ pub(crate) fn show_chat_in_panel(
             cx.new(|cx| ChatView::new(session, store, project, weak_workspace, window, cx))
         }
     };
-    dock_chat(workspace, view, false, window, cx);
+    move_chat_to_panel(workspace, view, window, cx);
 }
 
 pub(crate) fn move_chat_to_panel(
@@ -130,44 +151,13 @@ pub(crate) fn move_chat_to_panel(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    dock_chat(workspace, view, true, window, cx);
-}
-
-fn dock_chat(
-    workspace: &mut Workspace,
-    view: Entity<ChatView>,
-    previous_to_tab: bool,
-    window: &mut Window,
-    cx: &mut Context<Workspace>,
-) {
-    if !agent_chat_enabled(cx) {
+    if !agent_chat_enabled(cx) || view.read(cx).is_subagent() {
         return;
     }
     let Some(panel) = workspace.panel::<ChatPanel>(cx) else {
         return;
     };
     remember_where_chats_open(true, cx);
-    let source = workspace.panes().iter().find_map(|pane| {
-        let index = pane.read(cx).index_for_item(&view)?;
-        Some((pane.clone(), index))
-    });
-    let previous = panel
-        .read(cx)
-        .chat()
-        .cloned()
-        .filter(|previous| *previous != view);
-    if let Some(previous) = previous {
-        previous.update(cx, |previous, cx| previous.set_docked(false, window, cx));
-        if previous_to_tab || previous.read(cx).has_draft(cx) {
-            let item = Box::new(previous);
-            match &source {
-                Some((pane, index)) => {
-                    workspace.add_item(pane.clone(), item, Some(*index), false, false, window, cx)
-                }
-                None => workspace.add_item_to_active_pane(item, None, false, window, cx),
-            }
-        }
-    }
     for pane in workspace.panes().to_vec() {
         pane.update(cx, |pane, cx| {
             if pane.index_for_item(&view).is_some() {
@@ -175,12 +165,29 @@ fn dock_chat(
             }
         });
     }
-    let workspace_id = workspace.database_id();
-    panel.update(cx, |panel, cx| {
-        panel.workspace_id = workspace_id;
-        panel.set_chat(Some(view.clone()), cx);
+    let pane = panel.read(cx).pane.clone();
+    pane.update(cx, |pane, cx| {
+        pane.add_item(Box::new(view), true, false, None, window, cx)
     });
-    view.update(cx, |view, cx| view.set_docked(true, window, cx));
+    cx.defer_in(window, |workspace, window, cx| {
+        workspace.focus_panel::<ChatPanel>(window, cx);
+    });
+}
+
+pub(crate) fn reveal_chat(
+    workspace: &mut Workspace,
+    view: &Entity<ChatView>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(panel) = workspace.panel::<ChatPanel>(cx) else {
+        return;
+    };
+    panel.read(cx).pane.clone().update(cx, |pane, cx| {
+        if let Some(index) = pane.index_for_item(view) {
+            pane.activate_item(index, true, false, window, cx);
+        }
+    });
     cx.defer_in(window, |workspace, window, cx| {
         workspace.focus_panel::<ChatPanel>(window, cx);
     });
@@ -188,20 +195,21 @@ fn dock_chat(
 
 pub(crate) fn move_chat_to_tab(
     workspace: &mut Workspace,
+    view: Entity<ChatView>,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
     let Some(panel) = workspace.panel::<ChatPanel>(cx) else {
         return;
     };
-    let workspace_id = workspace.database_id();
-    let Some(view) = panel.update(cx, |panel, cx| {
-        panel.workspace_id = workspace_id;
-        panel.clear(cx)
-    }) else {
+    let pane = panel.read(cx).pane.clone();
+    if pane.read(cx).index_for_item(&view).is_none() {
         return;
-    };
+    }
     remember_where_chats_open(false, cx);
+    pane.update(cx, |pane, cx| {
+        pane.remove_item(view.entity_id(), false, false, window, cx)
+    });
     view.update(cx, |view, cx| view.set_docked(false, window, cx));
     workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
 }
@@ -220,23 +228,108 @@ fn new_chat_in_panel(
     let project = workspace.project().clone();
     let weak_workspace = cx.entity().downgrade();
     let view = cx.new(|cx| ChatView::new(session, store, project, weak_workspace, window, cx));
-    dock_chat(workspace, view, false, window, cx);
+    move_chat_to_panel(workspace, view, window, cx);
 }
 
-fn saved_chat_key(workspace_id: WorkspaceId) -> String {
+fn saved_chats_key(workspace_id: WorkspaceId) -> String {
     format!("agent_chat_panel_{}", i64::from(workspace_id))
 }
 
-struct DockedChat {
-    view: Entity<ChatView>,
-    _events: Subscription,
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+struct SavedChats {
+    chats: Vec<String>,
+    active: usize,
+}
+
+impl SavedChats {
+    fn parse(value: &str) -> Self {
+        serde_json::from_str(value).unwrap_or_else(|_| Self {
+            chats: vec![value.to_string()],
+            active: 0,
+        })
+    }
+}
+
+fn new_chat_menu(workspace: WeakEntity<Workspace>) -> impl IntoElement {
+    PopoverMenu::new("chat-panel-new-chat")
+        .trigger_with_tooltip(
+            IconButton::new("chat-panel-new-chat-trigger", IconName::Plus)
+                .icon_size(IconSize::Small),
+            Tooltip::text(t!("New Chat")),
+        )
+        .anchor(gpui::Anchor::TopLeft)
+        .menu(move |window, cx| {
+            let workspace = workspace.clone();
+            let agents = AgentChatSettings::get_global(cx).agents().to_vec();
+            Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                agents.into_iter().fold(menu, |menu, kind| {
+                    let workspace = workspace.clone();
+                    menu.entry(kind.label(), None, move |window, cx| {
+                        workspace
+                            .update(cx, |workspace, cx| {
+                                new_chat_in_panel(workspace, kind, window, cx)
+                            })
+                            .log_err();
+                    })
+                })
+            }))
+        })
+}
+
+fn tab_bar_buttons(workspace: WeakEntity<Workspace>) -> AnyElement {
+    let open_in_tab = IconButton::new("chat-panel-open-in-tab", IconName::Maximize)
+        .icon_size(IconSize::Small)
+        .tooltip(Tooltip::text(t!("Open in Tab")))
+        .on_click({
+            let workspace = workspace.clone();
+            move |_, window, cx| {
+                let workspace = workspace.clone();
+                window.defer(cx, move |window, cx| {
+                    workspace
+                        .update(cx, |workspace, cx| {
+                            let active_chat = workspace
+                                .panel::<ChatPanel>(cx)
+                                .and_then(|panel| panel.read(cx).active_chat(cx));
+                            if let Some(view) = active_chat {
+                                move_chat_to_tab(workspace, view, window, cx);
+                            }
+                        })
+                        .log_err();
+                });
+            }
+        });
+    let close = IconButton::new("chat-panel-close", IconName::Close)
+        .icon_size(IconSize::Small)
+        .tooltip(Tooltip::text(t!("Close")))
+        .on_click(move |_, window, cx| {
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace.close_panel::<ChatPanel>(window, cx)
+                })
+                .log_err();
+        });
+    h_flex()
+        .gap_1()
+        .child(open_in_tab)
+        .child(close)
+        .into_any_element()
+}
+
+fn is_panel_chat(item: &dyn ItemHandle, cx: &App) -> bool {
+    item.downcast::<ChatView>()
+        .is_some_and(|view| !view.read(cx).is_subagent())
+}
+
+fn can_drop_in_panel(dragged: &dyn std::any::Any, _: &mut Window, cx: &mut App) -> bool {
+    if let Some(tab) = dragged.downcast_ref::<DraggedTab>() {
+        return is_panel_chat(tab.item.as_ref(), cx);
+    }
+    dragged.is::<ExternalPaths>() || dragged.is::<DraggedSelection>()
 }
 
 pub struct ChatPanel {
     workspace: WeakEntity<Workspace>,
-    workspace_id: Option<WorkspaceId>,
-    focus_handle: FocusHandle,
-    chat: Option<DockedChat>,
+    pane: Entity<Pane>,
     restoring: bool,
 }
 
@@ -245,29 +338,25 @@ impl ChatPanel {
         workspace: WeakEntity<Workspace>,
         mut cx: AsyncWindowContext,
     ) -> Result<Entity<Self>> {
-        let (panel, saved_chat, store, project) =
-            workspace.update_in(&mut cx, |workspace, _, cx| {
-                let workspace_id = workspace.database_id();
-                let saved_chat = workspace_id
-                    .filter(|_| agent_chat_enabled(cx))
-                    .and_then(|id| {
-                        KeyValueStore::global(cx)
-                            .read_kvp(&saved_chat_key(id))
-                            .log_err()
-                            .flatten()
-                    });
-                let weak_workspace = cx.entity().downgrade();
-                let panel = cx.new(|cx| Self::new(weak_workspace, workspace_id, cx));
-                (
-                    panel,
-                    saved_chat,
-                    store_for(workspace, cx),
-                    workspace.project().clone(),
-                )
-            })?;
-        if let Some(chat_id) = saved_chat {
+        let (panel, saved, store) = workspace.update_in(&mut cx, |workspace, window, cx| {
+            let saved = workspace
+                .database_id()
+                .filter(|_| agent_chat_enabled(cx))
+                .and_then(|id| {
+                    KeyValueStore::global(cx)
+                        .read_kvp(&saved_chats_key(id))
+                        .log_err()
+                        .flatten()
+                })
+                .map(|value| SavedChats::parse(&value));
+            let weak_workspace = cx.entity().downgrade();
+            let project = workspace.project().clone();
+            let panel = cx.new(|cx| Self::new(weak_workspace, project, window, cx));
+            (panel, saved, store_for(workspace, cx))
+        })?;
+        if let Some(saved) = saved {
             panel.update_in(&mut cx, |panel, window, cx| {
-                panel.restore(chat_id, store, project, window, cx)
+                panel.restore(saved, store, window, cx)
             })?;
         }
         Ok(panel)
@@ -275,55 +364,177 @@ impl ChatPanel {
 
     fn new(
         workspace: WeakEntity<Workspace>,
-        workspace_id: Option<WorkspaceId>,
+        project: Entity<Project>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let pane = cx.new(|cx| {
+            let mut pane = Pane::new(
+                workspace.clone(),
+                project.clone(),
+                Default::default(),
+                Some(Arc::new(can_drop_in_panel)),
+                Box::new(gpui::NoAction),
+                false,
+                window,
+                cx,
+            );
+            pane.set_can_navigate(false, cx);
+            pane.display_nav_history_buttons(None);
+            pane.set_should_display_tab_bar(|_, _| true);
+            pane.set_can_split(Some(Arc::new(|_, _, _, _| false)));
+            pane.set_can_toggle_zoom(false, cx);
+            pane.set_close_pane_if_empty(false, cx);
+            pane.set_zoom_out_on_close(false);
+            pane.set_render_trailing_tab_button(cx, {
+                let workspace = workspace.clone();
+                move |_, _, _| Some(new_chat_menu(workspace.clone()).into_any_element())
+            });
+            pane.set_render_tab_bar_buttons(cx, {
+                let workspace = workspace.clone();
+                move |_, _, _| (None, Some(tab_bar_buttons(workspace.clone())))
+            });
+            if let Some(callbacks) = cx.try_global::<PaneSearchBarCallbacks>() {
+                let languages = Some(project.read(cx).languages().clone());
+                (callbacks.setup_search_bar)(languages, pane.toolbar(), window, cx);
+            }
+            pane
+        });
+        cx.subscribe_in(&pane, window, Self::handle_pane_event)
+            .detach();
+        cx.observe(&pane, |_, _, cx| cx.notify()).detach();
         Self {
             workspace,
-            workspace_id,
-            focus_handle: cx.focus_handle(),
-            chat: None,
+            pane,
             restoring: false,
         }
     }
 
-    fn restore(
+    fn handle_pane_event(
         &mut self,
-        chat_id: String,
-        store: Entity<AgentStore>,
-        project: Entity<Project>,
+        pane: &Entity<Pane>,
+        event: &pane::Event,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let opening = store.update(cx, |store, cx| store.open_saved_session(chat_id.into(), cx));
+        match event {
+            pane::Event::AddItem { item } => {
+                if !is_panel_chat(item.as_ref(), cx) {
+                    self.move_to_center(item.boxed_clone(), window, cx);
+                    return;
+                }
+                if let Some(view) = item.downcast::<ChatView>() {
+                    view.update(cx, |view, cx| view.set_docked(true, window, cx));
+                }
+                if let Some(workspace) = self.workspace.upgrade() {
+                    workspace.update(cx, |workspace, cx| {
+                        item.added_to_pane(workspace, pane.clone(), window, cx)
+                    });
+                }
+                self.save(cx);
+            }
+            pane::Event::RemovedItem { item } => {
+                if let Some(view) = item.downcast::<ChatView>() {
+                    view.update(cx, |view, cx| view.set_docked(false, window, cx));
+                }
+                self.save(cx);
+                if !self.has_chats(cx) {
+                    cx.emit(PanelEvent::Close);
+                }
+            }
+            pane::Event::ActivateItem { .. } => self.save(cx),
+            _ => {}
+        }
+    }
+
+    fn move_to_center(
+        &self,
+        item: Box<dyn ItemHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pane = self.pane.clone();
         let workspace = self.workspace.clone();
+        window.defer(cx, move |window, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.remove_item(item.item_id(), false, false, window, cx)
+            });
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace.add_item_to_active_pane(item, None, true, window, cx)
+                })
+                .log_err();
+        });
+    }
+
+    fn restore(
+        &mut self,
+        saved: SavedChats,
+        store: Entity<AgentStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let openings: Vec<_> = saved
+            .chats
+            .iter()
+            .map(|id| {
+                store.update(cx, |store, cx| {
+                    store.open_saved_session(id.clone().into(), cx)
+                })
+            })
+            .collect();
         self.restoring = true;
         cx.spawn_in(window, async move |this, cx| {
-            let session = opening.await.log_err();
+            let mut sessions = Vec::with_capacity(openings.len());
+            for opening in openings {
+                sessions.push(opening.await.log_err());
+            }
             this.update_in(cx, |this, window, cx| {
                 this.restoring = false;
-                if let Some(session) = session {
-                    let shown_in_tab = workspace.upgrade().is_some_and(|workspace| {
-                        workspace
-                            .read(cx)
-                            .items_of_type::<ChatView>(cx)
-                            .any(|view| {
+                let workspace = this.workspace.clone();
+                let mut active = None;
+                if let Some(center) = workspace.upgrade().filter(|_| agent_chat_enabled(cx)) {
+                    let project = center.read(cx).project().clone();
+                    for (index, session) in sessions.into_iter().enumerate() {
+                        let Some(session) = session else {
+                            continue;
+                        };
+                        let shown_in_tab =
+                            center.read(cx).items_of_type::<ChatView>(cx).any(|view| {
                                 let view = view.read(cx);
                                 view.session() == &session && !view.is_subagent()
-                            })
-                    });
-                    if this.chat.is_none() && !shown_in_tab && agent_chat_enabled(cx) {
+                            });
+                        if shown_in_tab || chat_in_pane(&this.pane, &session, cx).is_some() {
+                            continue;
+                        }
                         let kind = session.read(cx).kind();
                         store.update(cx, |store, cx| store.update_agent_if_due(kind, cx));
                         let view = cx.new(|cx| {
-                            ChatView::new(session, store, project, workspace, window, cx)
+                            ChatView::new(
+                                session,
+                                store.clone(),
+                                project.clone(),
+                                workspace.clone(),
+                                window,
+                                cx,
+                            )
                         });
                         view.update(cx, |view, cx| view.set_docked(true, window, cx));
-                        this.set_chat(Some(view), cx);
+                        this.pane.update(cx, |pane, cx| {
+                            pane.add_item(Box::new(view), false, false, None, window, cx);
+                            if index == saved.active {
+                                active = Some(pane.items_len() - 1);
+                            }
+                        });
                     }
                 }
-                if this.chat.is_none() {
-                    this.save(cx);
+                if let Some(active) = active {
+                    this.pane.update(cx, |pane, cx| {
+                        pane.activate_item(active, false, false, window, cx)
+                    });
+                }
+                this.save(cx);
+                if !this.has_chats(cx) {
                     cx.emit(PanelEvent::Close);
                 }
             })
@@ -332,173 +543,79 @@ impl ChatPanel {
         .detach();
     }
 
-    pub(crate) fn chat(&self) -> Option<&Entity<ChatView>> {
-        self.chat.as_ref().map(|chat| &chat.view)
+    pub(crate) fn pane(&self) -> &Entity<Pane> {
+        &self.pane
     }
 
-    pub(crate) fn set_chat(
-        &mut self,
-        view: Option<Entity<ChatView>>,
-        cx: &mut Context<Self>,
-    ) -> Option<Entity<ChatView>> {
-        let chat = view.map(|view| DockedChat {
-            _events: cx.subscribe(&view, |this, _, event: &ItemEvent, cx| match event {
-                ItemEvent::CloseItem => {
-                    this.clear(cx);
-                }
-                ItemEvent::UpdateTab => cx.notify(),
-                _ => {}
-            }),
-            view,
-        });
-        let previous = std::mem::replace(&mut self.chat, chat).map(|chat| chat.view);
-        self.save(cx);
-        cx.notify();
-        previous
+    pub(crate) fn has_chats(&self, cx: &App) -> bool {
+        self.pane.read(cx).items_len() > 0
     }
 
-    pub(crate) fn clear(&mut self, cx: &mut Context<Self>) -> Option<Entity<ChatView>> {
-        let view = self.set_chat(None, cx)?;
-        cx.emit(PanelEvent::Close);
-        Some(view)
+    pub(crate) fn active_chat(&self, cx: &App) -> Option<Entity<ChatView>> {
+        self.pane.read(cx).active_item()?.downcast::<ChatView>()
+    }
+
+    fn saved_chats(&self, cx: &App) -> SavedChats {
+        let pane = self.pane.read(cx);
+        SavedChats {
+            chats: pane
+                .items_of_type::<ChatView>()
+                .map(|view| view.read(cx).session().read(cx).metadata().id.clone())
+                .collect(),
+            active: pane.active_item_index(),
+        }
     }
 
     fn save(&self, cx: &App) {
-        let Some(workspace_id) = self.workspace_id else {
+        if self.restoring {
+            return;
+        }
+        let Some(workspace_id) = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).database_id())
+        else {
             return;
         };
-        let key = saved_chat_key(workspace_id);
-        let chat_id = self
-            .chat()
-            .map(|view| view.read(cx).session().read(cx).metadata().id.clone());
+        let key = saved_chats_key(workspace_id);
+        let saved = self.saved_chats(cx);
+        let value = (!saved.chats.is_empty())
+            .then(|| serde_json::to_string(&saved).log_err())
+            .flatten();
         let db = KeyValueStore::global(cx);
         db::write_and_log(cx, move || async move {
-            match chat_id {
-                Some(chat_id) => db.write_kvp(key, chat_id).await,
+            match value {
+                Some(value) => db.write_kvp(key, value).await,
                 None => db.delete_kvp(key).await,
             }
         });
-    }
-
-    fn new_chat_menu(&self) -> impl IntoElement {
-        let workspace = self.workspace.clone();
-        PopoverMenu::new("chat-panel-new-chat")
-            .trigger(HeaderButton::new(
-                "chat-panel-new-chat-trigger",
-                IconName::Plus,
-                t!("New Chat"),
-            ))
-            .anchor(gpui::Anchor::TopRight)
-            .menu(move |window, cx| {
-                let workspace = workspace.clone();
-                let agents = AgentChatSettings::get_global(cx).agents().to_vec();
-                Some(ContextMenu::build(window, cx, move |menu, _, _| {
-                    agents.into_iter().fold(menu, |menu, kind| {
-                        let workspace = workspace.clone();
-                        menu.entry(kind.label(), None, move |window, cx| {
-                            workspace
-                                .update(cx, |workspace, cx| {
-                                    new_chat_in_panel(workspace, kind, window, cx)
-                                })
-                                .log_err();
-                        })
-                    })
-                }))
-            })
-    }
-
-    fn render_header(&self, cx: &Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let (icon, title) = match self.chat() {
-            Some(view) => {
-                let view = view.read(cx);
-                (
-                    Some(agent_icon(view.session().read(cx).kind())),
-                    view.title(cx),
-                )
-            }
-            None => (None, t!("Chat")),
-        };
-        h_flex()
-            .flex_none()
-            .gap(px(4.))
-            .px(px(8.))
-            .pt(px(8.))
-            .pb(px(4.))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(HEADER_CONTROL_SIZE))
-                    .gap(px(8.))
-                    .px(px(8.))
-                    .text_size(ui(13.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(colors.text.opacity(0.8))
-                    .children(icon.map(|icon| icon.size(IconSize::Small)))
-                    .child(div().min_w_0().truncate().child(title)),
-            )
-            .child(self.new_chat_menu())
-            .when(self.chat.is_some(), |this| {
-                this.child(
-                    HeaderButton::new(
-                        "chat-panel-open-in-tab",
-                        IconName::Maximize,
-                        t!("Open in Tab"),
-                    )
-                    .on_click({
-                        let workspace = self.workspace.clone();
-                        move |_, window, cx| {
-                            let workspace = workspace.clone();
-                            window.defer(cx, move |window, cx| {
-                                workspace
-                                    .update(cx, |workspace, cx| {
-                                        move_chat_to_tab(workspace, window, cx)
-                                    })
-                                    .log_err();
-                            });
-                        }
-                    }),
-                )
-            })
-            .child(
-                HeaderButton::new("chat-panel-close", IconName::Close, t!("Close"))
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(PanelEvent::Close))),
-            )
     }
 }
 
 impl EventEmitter<PanelEvent> for ChatPanel {}
 
 impl Focusable for ChatPanel {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.pane.focus_handle(cx)
     }
 }
 
 impl Render for ChatPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .id("chat-panel")
-            .key_context("ChatPanel")
-            .track_focus(&self.focus_handle)
+        let root = cx
+            .try_global::<PaneSearchBarCallbacks>()
+            .map(|callbacks| (callbacks.wrap_div_with_search_actions)(div(), self.pane.clone()))
+            .unwrap_or_else(div);
+        root.key_context("ChatPanel")
             .size_full()
             .bg(cx.theme().colors().editor_background)
-            .child(self.render_header(cx))
-            .child(div().flex_1().min_h_0().children(self.chat().cloned()))
+            .child(self.pane.clone())
     }
 }
 
 impl Panel for ChatPanel {
     fn persistent_name() -> &'static str {
         "Chat Panel"
-    }
-
-    fn activation_focus_handle(&self, cx: &App) -> FocusHandle {
-        match self.chat() {
-            Some(view) => view.focus_handle(cx),
-            None => self.focus_handle.clone(),
-        }
     }
 
     fn panel_key() -> &'static str {
@@ -550,12 +667,16 @@ impl Panel for ChatPanel {
         9
     }
 
+    fn pane(&self) -> Option<Entity<Pane>> {
+        Some(self.pane.clone())
+    }
+
     fn enabled(&self, cx: &App) -> bool {
-        agent_chat_enabled(cx) && (self.chat.is_some() || self.restoring)
+        agent_chat_enabled(cx) && (self.has_chats(cx) || self.restoring)
     }
 
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
-        let empty = self.chat.is_none() && !self.restoring;
+        let empty = !self.has_chats(cx) && !self.restoring;
         if active && (empty || !agent_chat_enabled(cx)) {
             cx.emit(PanelEvent::Close);
         }
@@ -593,7 +714,8 @@ mod tests {
         let workspace = multi_workspace.read_with(cx, |multi, _| multi.workspace().clone());
         let panel = workspace.update_in(cx, |workspace, window, cx| {
             let weak_workspace = cx.entity().downgrade();
-            let panel = cx.new(|cx| ChatPanel::new(weak_workspace, None, cx));
+            let project = workspace.project().clone();
+            let panel = cx.new(|cx| ChatPanel::new(weak_workspace, project, window, cx));
             workspace.add_panel(panel.clone(), window, cx);
             panel
         });
@@ -609,10 +731,14 @@ mod tests {
         )
     }
 
-    fn open_tab(setup: &Setup, cx: &mut VisualTestContext) -> Entity<ChatView> {
-        let session = setup.store.update(cx, |store, cx| {
+    fn new_session(setup: &Setup, cx: &mut VisualTestContext) -> Entity<AgentSession> {
+        setup.store.update(cx, |store, cx| {
             store.create_session(AgentKind::Claude, setup.directory.path().to_path_buf(), cx)
-        });
+        })
+    }
+
+    fn open_tab(setup: &Setup, cx: &mut VisualTestContext) -> Entity<ChatView> {
+        let session = new_session(setup, cx);
         setup.workspace.update_in(cx, |workspace, window, cx| {
             let weak_workspace = cx.entity().downgrade();
             let (store, project) = (setup.store.clone(), setup.project.clone());
@@ -623,97 +749,38 @@ mod tests {
         })
     }
 
+    fn dock(setup: &Setup, view: &Entity<ChatView>, cx: &mut VisualTestContext) {
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_panel(workspace, view.clone(), window, cx)
+        });
+        cx.run_until_parked();
+    }
+
+    fn undock(setup: &Setup, view: &Entity<ChatView>, cx: &mut VisualTestContext) {
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_tab(workspace, view.clone(), window, cx)
+        });
+        cx.run_until_parked();
+    }
+
     fn tabs(setup: &Setup, cx: &mut VisualTestContext) -> Vec<Entity<ChatView>> {
         setup.workspace.read_with(cx, |workspace, cx| {
             workspace.items_of_type::<ChatView>(cx).collect()
         })
     }
 
-    fn docked(setup: &Setup, cx: &mut VisualTestContext) -> Option<Entity<ChatView>> {
-        setup.panel.read_with(cx, |panel, _| panel.chat().cloned())
-    }
-
-    #[gpui::test]
-    async fn moving_chats_between_tabs_and_the_panel(cx: &mut TestAppContext) {
-        let (setup, cx) = setup(cx).await;
-        let first = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, first.clone(), window, cx)
-        });
-        cx.run_until_parked();
-        assert!(tabs(&setup, cx).is_empty());
-        assert_eq!(docked(&setup, cx), Some(first.clone()));
-        assert!(first.read_with(cx, |view, _| view.is_docked()));
-        let found = setup.workspace.read_with(cx, |workspace, cx| {
-            chat_view_for(workspace, first.read(cx).session(), cx)
-        });
-        assert_eq!(found, Some(first.clone()));
-
-        let second = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, second.clone(), window, cx)
-        });
-        cx.run_until_parked();
-        assert_eq!(tabs(&setup, cx), std::slice::from_ref(&first));
-        assert_eq!(docked(&setup, cx), Some(second.clone()));
-        assert!(!first.read_with(cx, |view, _| view.is_docked()));
-
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_tab(workspace, window, cx)
-        });
-        cx.run_until_parked();
-        assert_eq!(docked(&setup, cx), None);
-        assert_eq!(tabs(&setup, cx).len(), 2);
-        assert!(!second.read_with(cx, |view, _| view.is_docked()));
-    }
-
-    #[gpui::test]
-    async fn the_chat_moves_itself_to_the_panel(cx: &mut TestAppContext) {
-        let (setup, cx) = setup(cx).await;
-        let chat = open_tab(&setup, cx);
-        chat.update_in(cx, |chat, window, cx| {
-            chat.move_to_panel(&MoveChatToPanel, window, cx)
-        });
-        cx.run_until_parked();
-        assert!(tabs(&setup, cx).is_empty());
-        assert_eq!(docked(&setup, cx), Some(chat));
-    }
-
-    #[gpui::test]
-    async fn deleting_the_docked_chat_empties_the_panel(cx: &mut TestAppContext) {
-        let (setup, cx) = setup(cx).await;
-        let chat = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, chat.clone(), window, cx)
-        });
-        cx.run_until_parked();
-        let id = chat.read_with(cx, |chat, cx| chat.session().read(cx).metadata().id.clone());
-        setup
-            .store
-            .update(cx, |store, cx| store.delete_session(&id, cx));
-        cx.run_until_parked();
-        assert_eq!(docked(&setup, cx), None);
-        assert!(tabs(&setup, cx).is_empty());
-    }
-
-    #[gpui::test]
-    async fn closing_agent_chats_empties_the_panel(cx: &mut TestAppContext) {
-        let (setup, cx) = setup(cx).await;
-        let chat = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, chat, window, cx)
-        });
-        cx.run_until_parked();
-        cx.update(|_, cx| cx.defer(crate::close_agent_chats));
-        cx.run_until_parked();
-        assert_eq!(docked(&setup, cx), None);
-        assert!(tabs(&setup, cx).is_empty());
-    }
-
-    fn new_session(setup: &Setup, cx: &mut VisualTestContext) -> Entity<AgentSession> {
-        setup.store.update(cx, |store, cx| {
-            store.create_session(AgentKind::Claude, setup.directory.path().to_path_buf(), cx)
+    fn docked(setup: &Setup, cx: &mut VisualTestContext) -> Vec<Entity<ChatView>> {
+        setup.panel.read_with(cx, |panel, cx| {
+            panel.pane.read(cx).items_of_type::<ChatView>().collect()
         })
+    }
+
+    fn active(setup: &Setup, cx: &mut VisualTestContext) -> Option<Entity<ChatView>> {
+        setup.panel.read_with(cx, |panel, cx| panel.active_chat(cx))
+    }
+
+    fn is_docked(view: &Entity<ChatView>, cx: &mut VisualTestContext) -> bool {
+        view.read_with(cx, |view, _| view.is_docked())
     }
 
     fn panel_open(setup: &Setup, cx: &mut VisualTestContext) -> bool {
@@ -723,25 +790,131 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn picking_a_chat_while_the_panel_shows_one_swaps_it_in(cx: &mut TestAppContext) {
+    async fn chats_move_between_tabs_and_panel_tabs(cx: &mut TestAppContext) {
         let (setup, cx) = setup(cx).await;
         let first = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, first.clone(), window, cx)
+        let second = open_tab(&setup, cx);
+        dock(&setup, &first, cx);
+        dock(&setup, &second, cx);
+        assert!(tabs(&setup, cx).is_empty());
+        assert_eq!(docked(&setup, cx), vec![first.clone(), second.clone()]);
+        assert_eq!(active(&setup, cx), Some(second.clone()));
+        assert!(is_docked(&first, cx) && is_docked(&second, cx));
+        assert!(panel_open(&setup, cx));
+        let found = setup.workspace.read_with(cx, |workspace, cx| {
+            chat_view_for(workspace, first.read(cx).session(), cx)
+        });
+        assert_eq!(found, Some(first.clone()));
+
+        undock(&setup, &first, cx);
+        assert_eq!(tabs(&setup, cx), vec![first.clone()]);
+        assert_eq!(docked(&setup, cx), vec![second.clone()]);
+        assert!(!is_docked(&first, cx));
+        assert!(panel_open(&setup, cx));
+
+        undock(&setup, &second, cx);
+        assert!(docked(&setup, cx).is_empty());
+        assert_eq!(tabs(&setup, cx).len(), 2);
+        assert!(!panel_open(&setup, cx));
+    }
+
+    #[gpui::test]
+    async fn the_chat_moves_itself_both_ways(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let chat = open_tab(&setup, cx);
+        chat.update_in(cx, |chat, window, cx| {
+            chat.move_to_panel(&MoveChatToPanel, window, cx)
         });
         cx.run_until_parked();
-        assert!(panel_open(&setup, cx));
+        assert!(tabs(&setup, cx).is_empty());
+        assert_eq!(docked(&setup, cx), vec![chat.clone()]);
+
+        chat.update_in(cx, |chat, window, cx| {
+            chat.move_to_tab(&MoveChatToTab, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(tabs(&setup, cx), vec![chat.clone()]);
+        assert!(docked(&setup, cx).is_empty());
+    }
+
+    #[gpui::test]
+    async fn the_docked_flag_follows_the_pane_a_chat_is_dragged_into(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let chat = open_tab(&setup, cx);
+        let center = setup
+            .workspace
+            .read_with(cx, |workspace, _| workspace.active_pane().clone());
+        let panel_pane = setup.panel.read_with(cx, |panel, _| panel.pane.clone());
+        cx.update(|window, cx| {
+            workspace::move_item(&center, &panel_pane, chat.entity_id(), 0, true, window, cx)
+        });
+        cx.run_until_parked();
+        assert!(is_docked(&chat, cx));
+        assert_eq!(docked(&setup, cx), vec![chat.clone()]);
+
+        cx.update(|window, cx| {
+            workspace::move_item(&panel_pane, &center, chat.entity_id(), 0, true, window, cx)
+        });
+        cx.run_until_parked();
+        assert!(!is_docked(&chat, cx));
+        assert_eq!(tabs(&setup, cx), vec![chat]);
+        assert!(!panel_open(&setup, cx));
+    }
+
+    #[gpui::test]
+    async fn deleting_a_docked_chat_closes_only_its_tab(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let kept = open_tab(&setup, cx);
+        let deleted = open_tab(&setup, cx);
+        dock(&setup, &kept, cx);
+        dock(&setup, &deleted, cx);
+        let id = deleted.read_with(cx, |chat, cx| chat.session().read(cx).metadata().id.clone());
+        setup
+            .store
+            .update(cx, |store, cx| store.delete_session(&id, cx));
+        cx.run_until_parked();
+        assert_eq!(docked(&setup, cx), vec![kept]);
+        assert!(tabs(&setup, cx).is_empty());
+    }
+
+    #[gpui::test]
+    async fn closing_agent_chats_empties_the_panel(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let first = open_tab(&setup, cx);
+        let second = open_tab(&setup, cx);
+        dock(&setup, &first, cx);
+        dock(&setup, &second, cx);
+        cx.update(|_, cx| cx.defer(crate::close_agent_chats));
+        cx.run_until_parked();
+        assert!(docked(&setup, cx).is_empty());
+        assert!(tabs(&setup, cx).is_empty());
+        assert!(!panel_open(&setup, cx));
+    }
+
+    #[gpui::test]
+    async fn picking_a_chat_opens_it_as_a_panel_tab(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let first = open_tab(&setup, cx);
+        dock(&setup, &first, cx);
 
         let unopened = new_session(&setup, cx);
         setup.workspace.update_in(cx, |workspace, window, cx| {
             show_chat_in_panel(workspace, unopened.clone(), setup.store.clone(), window, cx)
         });
         cx.run_until_parked();
-        let docked_session =
-            docked(&setup, cx).map(|view| view.read_with(cx, |view, _| view.session().clone()));
-        assert_eq!(docked_session, Some(unopened));
-        assert!(tabs(&setup, cx).is_empty());
-        assert!(!first.read_with(cx, |view, _| view.is_docked()));
+        let sessions: Vec<_> = docked(&setup, cx)
+            .iter()
+            .map(|view| view.read_with(cx, |view, _| view.session().clone()))
+            .collect();
+        let first_session = first.read_with(cx, |view, _| view.session().clone());
+        assert_eq!(sessions, vec![first_session.clone(), unopened.clone()]);
+
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            show_chat_in_panel(workspace, first_session, setup.store.clone(), window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(docked(&setup, cx).len(), 2);
+        assert_eq!(active(&setup, cx), Some(first.clone()));
 
         let tab = open_tab(&setup, cx);
         let tab_session = tab.read_with(cx, |view, _| view.session().clone());
@@ -749,8 +922,31 @@ mod tests {
             show_chat_in_panel(workspace, tab_session, setup.store.clone(), window, cx)
         });
         cx.run_until_parked();
-        assert_eq!(docked(&setup, cx), Some(tab));
+        assert_eq!(docked(&setup, cx).len(), 3);
+        assert_eq!(active(&setup, cx), Some(tab));
         assert!(tabs(&setup, cx).is_empty());
+    }
+
+    #[gpui::test]
+    async fn closing_the_last_panel_tab_closes_the_panel(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let chat = open_tab(&setup, cx);
+        dock(&setup, &chat, cx);
+        let panel_pane = setup.panel.read_with(cx, |panel, _| panel.pane.clone());
+        panel_pane
+            .update_in(cx, |pane, window, cx| {
+                pane.close_item_by_id(chat.entity_id(), workspace::SaveIntent::Skip, window, cx)
+            })
+            .await
+            .expect("chat closes");
+        cx.run_until_parked();
+        assert!(docked(&setup, cx).is_empty());
+        assert!(!panel_open(&setup, cx));
+        assert!(
+            !setup
+                .panel
+                .read_with(cx, |panel, cx| Panel::enabled(panel, cx))
+        );
     }
 
     fn toggle_panel(setup: &Setup, cx: &mut VisualTestContext) {
@@ -768,10 +964,7 @@ mod tests {
         assert!(!panel_open(&setup, cx));
 
         let chat = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, chat, window, cx)
-        });
-        cx.run_until_parked();
+        dock(&setup, &chat, cx);
         assert!(panel_open(&setup, cx));
         setup.workspace.update_in(cx, |workspace, window, cx| {
             workspace.close_panel::<ChatPanel>(window, cx)
@@ -782,10 +975,7 @@ mod tests {
         cx.run_until_parked();
         assert!(panel_open(&setup, cx));
 
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_tab(workspace, window, cx)
-        });
-        cx.run_until_parked();
+        undock(&setup, &chat, cx);
         assert!(!panel_open(&setup, cx));
         toggle_panel(&setup, cx);
         cx.run_until_parked();
@@ -803,10 +993,7 @@ mod tests {
         assert!(!opens_in_panel(cx));
 
         let chat = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, chat, window, cx)
-        });
-        cx.run_until_parked();
+        dock(&setup, &chat, cx);
         assert!(opens_in_panel(cx));
 
         setup.workspace.update_in(cx, |workspace, window, cx| {
@@ -814,21 +1001,14 @@ mod tests {
         });
         assert!(opens_in_panel(cx));
 
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_tab(workspace, window, cx)
-        });
-        cx.run_until_parked();
+        undock(&setup, &chat, cx);
         assert!(!opens_in_panel(cx));
     }
 
     #[gpui::test]
-    async fn the_swapped_out_chat_survives_when_its_split_closes(cx: &mut TestAppContext) {
+    async fn moving_the_only_tab_of_a_split_keeps_the_other_chats(cx: &mut TestAppContext) {
         let (setup, cx) = setup(cx).await;
-        let docked_first = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, docked_first.clone(), window, cx)
-        });
-        cx.run_until_parked();
+        let stays = open_tab(&setup, cx);
         let in_split = open_tab(&setup, cx);
         setup.workspace.update_in(cx, |workspace, window, cx| {
             workspace.split_item(
@@ -839,32 +1019,9 @@ mod tests {
             )
         });
         cx.run_until_parked();
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, in_split.clone(), window, cx)
-        });
-        cx.run_until_parked();
-        assert_eq!(docked(&setup, cx), Some(in_split));
-        assert_eq!(tabs(&setup, cx), std::slice::from_ref(&docked_first));
-    }
-
-    #[gpui::test]
-    async fn a_chat_with_unsent_text_moves_to_a_tab_instead_of_closing(cx: &mut TestAppContext) {
-        let (setup, cx) = setup(cx).await;
-        let typing = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, typing.clone(), window, cx)
-        });
-        cx.run_until_parked();
-        typing.update_in(cx, |chat, window, cx| {
-            chat.set_draft("half a thought", window, cx)
-        });
-        let other = new_session(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            show_chat_in_panel(workspace, other, setup.store.clone(), window, cx)
-        });
-        cx.run_until_parked();
-        assert_eq!(tabs(&setup, cx), std::slice::from_ref(&typing));
-        assert!(!typing.read_with(cx, |chat, _| chat.is_docked()));
+        dock(&setup, &in_split, cx);
+        assert_eq!(docked(&setup, cx), vec![in_split]);
+        assert_eq!(tabs(&setup, cx), vec![stays]);
     }
 
     #[gpui::test]
@@ -877,16 +1034,124 @@ mod tests {
         };
         assert!(!enabled(cx));
         let chat = open_tab(&setup, cx);
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_panel(workspace, chat, window, cx)
-        });
-        cx.run_until_parked();
+        dock(&setup, &chat, cx);
         assert!(enabled(cx));
-        setup.workspace.update_in(cx, |workspace, window, cx| {
-            move_chat_to_tab(workspace, window, cx)
-        });
-        cx.run_until_parked();
+        undock(&setup, &chat, cx);
         assert!(!enabled(cx));
         assert!(!panel_open(&setup, cx));
+    }
+
+    #[gpui::test]
+    async fn the_panel_remembers_its_tabs_and_the_active_one(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let first = open_tab(&setup, cx);
+        let second = open_tab(&setup, cx);
+        dock(&setup, &first, cx);
+        dock(&setup, &second, cx);
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            reveal_chat(workspace, &first, window, cx)
+        });
+        cx.run_until_parked();
+        let id = |view: &Entity<ChatView>, cx: &mut VisualTestContext| {
+            view.read_with(cx, |view, cx| view.session().read(cx).metadata().id.clone())
+        };
+        let expected = SavedChats {
+            chats: vec![id(&first, cx), id(&second, cx)],
+            active: 0,
+        };
+        let saved = setup.panel.read_with(cx, |panel, cx| panel.saved_chats(cx));
+        assert_eq!(saved, expected);
+        let encoded = serde_json::to_string(&saved).expect("saved chats encode");
+        assert_eq!(SavedChats::parse(&encoded), expected);
+    }
+
+    #[gpui::test]
+    async fn restoring_reopens_saved_tabs_except_ones_open_elsewhere(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let first = new_session(&setup, cx);
+        let second = new_session(&setup, cx);
+        let in_tab = open_tab(&setup, cx);
+        let id = |session: &Entity<AgentSession>, cx: &mut VisualTestContext| {
+            session.read_with(cx, |session, _| session.metadata().id.clone())
+        };
+        let in_tab_session = in_tab.read_with(cx, |view, _| view.session().clone());
+        let saved = SavedChats {
+            chats: vec![id(&first, cx), id(&in_tab_session, cx), id(&second, cx)],
+            active: 2,
+        };
+        setup.panel.update_in(cx, |panel, window, cx| {
+            panel.restore(saved, setup.store.clone(), window, cx)
+        });
+        cx.run_until_parked();
+        let restored: Vec<_> = docked(&setup, cx)
+            .iter()
+            .map(|view| view.read_with(cx, |view, _| view.session().clone()))
+            .collect();
+        assert_eq!(restored, vec![first, second.clone()]);
+        let active_session =
+            active(&setup, cx).map(|view| view.read_with(cx, |view, _| view.session().clone()));
+        assert_eq!(active_session, Some(second));
+        assert!(docked(&setup, cx).iter().all(|view| is_docked(view, cx)));
+        assert_eq!(tabs(&setup, cx), vec![in_tab]);
+    }
+
+    #[gpui::test]
+    async fn only_chat_tabs_can_be_dropped_into_the_panel(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let chat = open_tab(&setup, cx);
+        let center = setup
+            .workspace
+            .read_with(cx, |workspace, _| workspace.active_pane().clone());
+        let other = cx.new(workspace::item::test::TestItem::new);
+        let dragged = |item: Box<dyn workspace::ItemHandle>| DraggedTab {
+            pane: center.clone(),
+            item,
+            ix: 0,
+            detail: 0,
+            is_active: true,
+        };
+        let chat_tab = dragged(Box::new(chat));
+        let other_tab = dragged(Box::new(other));
+        cx.update(|window, cx| {
+            assert!(can_drop_in_panel(&chat_tab, window, cx));
+            assert!(!can_drop_in_panel(&other_tab, window, cx));
+            assert!(can_drop_in_panel(&ExternalPaths::default(), window, cx));
+            let entry = project::ProjectEntryId::from_usize(1);
+            assert!(!can_drop_in_panel(&entry, window, cx));
+        });
+    }
+
+    #[gpui::test]
+    async fn anything_but_a_chat_landing_in_the_panel_moves_to_the_center(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let chat = open_tab(&setup, cx);
+        dock(&setup, &chat, cx);
+        let file = cx.new(workspace::item::test::TestItem::new);
+        let panel_pane = setup.panel.read_with(cx, |panel, _| panel.pane.clone());
+        panel_pane.update_in(cx, |pane, window, cx| {
+            pane.add_item(Box::new(file.clone()), true, true, None, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(docked(&setup, cx), vec![chat]);
+        let in_center = setup.workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .active_pane()
+                .read(cx)
+                .index_for_item(&file)
+                .is_some()
+        });
+        assert!(in_center);
+        assert!(panel_open(&setup, cx));
+    }
+
+    #[test]
+    fn a_single_saved_chat_from_before_tabs_still_restores() {
+        assert_eq!(
+            SavedChats::parse("chat-1"),
+            SavedChats {
+                chats: vec!["chat-1".into()],
+                active: 0,
+            }
+        );
     }
 }

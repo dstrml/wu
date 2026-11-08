@@ -15,7 +15,7 @@ mod side_pane;
 mod todo_panel;
 
 use crate::{
-    AgentChatSettings, MoveChatToPanel, RenameChat, Send, Stop, SubmitAnswer,
+    AgentChatSettings, MoveChatToPanel, MoveChatToTab, RenameChat, Send, Stop, SubmitAnswer,
     chat_style::{
         Chip, accent, flavour_seed, flavour_word, format_elapsed, gradient_spinner, hairline, ink,
         mix, page, text_faint, ui, wash,
@@ -528,16 +528,6 @@ impl ChatView {
         self.docked
     }
 
-    pub(crate) fn has_draft(&self, cx: &App) -> bool {
-        !self.attachments.is_empty() || !self.composer.read(cx).text(cx).trim().is_empty()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_draft(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.composer
-            .update(cx, |composer, cx| composer.set_text(text, window, cx));
-    }
-
     pub(crate) fn set_docked(
         &mut self,
         docked: bool,
@@ -569,6 +559,29 @@ impl ChatView {
             workspace
                 .update(cx, |workspace, cx| {
                     crate::chat_panel::move_chat_to_panel(workspace, view, window, cx)
+                })
+                .log_err();
+        });
+    }
+
+    pub(crate) fn move_to_tab(
+        &mut self,
+        _: &MoveChatToTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.docked {
+            cx.propagate();
+            return;
+        }
+        let Some(view) = self.this.upgrade() else {
+            return;
+        };
+        let workspace = self.workspace.clone();
+        window.defer(cx, move |window, cx| {
+            workspace
+                .update(cx, |workspace, cx| {
+                    crate::chat_panel::move_chat_to_tab(workspace, view, window, cx)
                 })
                 .log_err();
         });
@@ -663,7 +676,7 @@ impl ChatView {
     }
 
     fn rename_chat(&mut self, _: &RenameChat, window: &mut Window, cx: &mut Context<Self>) {
-        if self.subagent.is_some() || self.docked || self.rename_editor.is_some() {
+        if self.subagent.is_some() || self.rename_editor.is_some() {
             return;
         }
         let title = self.title(cx);
@@ -3276,9 +3289,6 @@ impl ChatView {
     fn key_context(&self) -> KeyContext {
         let mut context = KeyContext::default();
         context.add("AgentChat");
-        if self.docked {
-            context.add("docked");
-        }
         context
     }
 
@@ -3410,6 +3420,7 @@ impl Render for ChatView {
             .on_action(cx.listener(Self::toggle_dictation))
             .on_action(cx.listener(Self::rename_chat))
             .on_action(cx.listener(Self::move_to_panel))
+            .on_action(cx.listener(Self::move_to_tab))
             .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, _, cx| {
                 this.dictation_key_up(event, cx)
             }));
@@ -3488,8 +3499,15 @@ impl Item for ChatView {
                         .ok();
                 }
             })
-            .on_action(move |action: &MoveChatToPanel, window, cx| {
-                this.update(cx, |this, cx| this.move_to_panel(action, window, cx))
+            .on_action({
+                let this = this.clone();
+                move |action: &MoveChatToPanel, window, cx| {
+                    this.update(cx, |this, cx| this.move_to_panel(action, window, cx))
+                        .ok();
+                }
+            })
+            .on_action(move |action: &MoveChatToTab, window, cx| {
+                this.update(cx, |this, cx| this.move_to_tab(action, window, cx))
                     .ok();
             })
             .child(
@@ -3558,10 +3576,12 @@ impl Item for ChatView {
         if self.subagent.is_some() {
             return Vec::new();
         }
-        vec![
-            (t!("Rename"), Box::new(RenameChat)),
-            (t!("Move to Side Panel"), Box::new(MoveChatToPanel)),
-        ]
+        let move_action: (SharedString, Box<dyn gpui::Action>) = if self.docked {
+            (t!("Open in Tab"), Box::new(MoveChatToTab))
+        } else {
+            (t!("Move to Side Panel"), Box::new(MoveChatToPanel))
+        };
+        vec![(t!("Rename"), Box::new(RenameChat)), move_action]
     }
 
     fn tab_icon(&self, _: &Window, cx: &App) -> Option<Icon> {
