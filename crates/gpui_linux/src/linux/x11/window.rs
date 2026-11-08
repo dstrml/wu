@@ -278,7 +278,7 @@ pub struct X11WindowState {
     hidden: bool,
     active: bool,
     hovered: bool,
-    pub(crate) force_render_after_recovery: bool,
+    force_render_after_recovery: bool,
     fullscreen: bool,
     client_side_decorations_supported: bool,
     decorations: WindowDecorations,
@@ -1174,9 +1174,13 @@ impl X11WindowStatePtr {
         }
     }
 
-    pub fn refresh(&self, request_frame_options: RequestFrameOptions) {
+    pub fn refresh(&self, mut request_frame_options: RequestFrameOptions) {
         let callback = self.callbacks.borrow_mut().request_frame.take();
         if let Some(mut fun) = callback {
+            // Expose events can present a frame before the refresh timer runs,
+            // so every frame request must rebuild stale atlas references after recovery.
+            request_frame_options.force_render |=
+                std::mem::take(&mut self.state.borrow_mut().force_render_after_recovery);
             fun(request_frame_options);
             self.callbacks.borrow_mut().request_frame = Some(fun);
         }

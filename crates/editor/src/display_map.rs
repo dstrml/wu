@@ -1406,6 +1406,7 @@ pub enum ChunkReplacement {
 pub struct HighlightedChunk<'a> {
     pub text: &'a str,
     pub style: Option<HighlightStyle>,
+    pub(crate) diagnostic_underline_severity: Option<lsp::DiagnosticSeverity>,
     pub is_tab: bool,
     pub is_inlay: bool,
     pub replacement: Option<ChunkReplacement>,
@@ -1419,6 +1420,7 @@ impl<'a> HighlightedChunk<'a> {
     ) -> impl Iterator<Item = Self> + 'a {
         let mut text = self.text;
         let style = self.style;
+        let diagnostic_underline_severity = self.diagnostic_underline_severity;
         let is_tab = self.is_tab;
         let renderer = self.replacement;
         let is_inlay = self.is_inlay;
@@ -1440,6 +1442,7 @@ impl<'a> HighlightedChunk<'a> {
                     return Some(HighlightedChunk {
                         text: prefix,
                         style,
+                        diagnostic_underline_severity,
                         is_tab,
                         is_inlay,
                         replacement: renderer.clone(),
@@ -1464,6 +1467,7 @@ impl<'a> HighlightedChunk<'a> {
                 return Some(HighlightedChunk {
                     text: invisible_text,
                     style: Some(invisible_style),
+                    diagnostic_underline_severity: None,
                     is_tab: false,
                     is_inlay,
                     replacement: match replacement(ch) {
@@ -1479,6 +1483,7 @@ impl<'a> HighlightedChunk<'a> {
             Some(HighlightedChunk {
                 text: remainder,
                 style,
+                diagnostic_underline_severity,
                 is_tab,
                 is_inlay,
                 replacement: renderer.clone(),
@@ -1508,6 +1513,30 @@ pub struct DisplaySnapshot {
 impl DisplaySnapshot {
     pub fn companion_snapshot(&self) -> Option<&DisplaySnapshot> {
         self.companion_display_snapshot.as_deref()
+    }
+
+    fn diagnostic_severity_is_visible(&self, severity: lsp::DiagnosticSeverity) -> bool {
+        self.diagnostics_max_severity
+            .into_lsp()
+            .is_some_and(|max_severity| severity <= max_severity)
+    }
+
+    pub(crate) fn diagnostic_underline_style(
+        &self,
+        severity: lsp::DiagnosticSeverity,
+        underline: bool,
+        is_unnecessary: bool,
+        editor_style: &EditorStyle,
+    ) -> Option<UnderlineStyle> {
+        (underline
+            && editor_style.show_underlines
+            && self.diagnostic_severity_is_visible(severity)
+            && !(is_unnecessary && severity > lsp::DiagnosticSeverity::WARNING))
+            .then(|| UnderlineStyle {
+                color: Some(diagnostic_style(severity, &editor_style.status)),
+                thickness: 1.0.into(),
+                wavy: true,
+            })
     }
 
     pub fn wrap_snapshot(&self) -> &WrapSnapshot {
@@ -1856,6 +1885,7 @@ impl DisplaySnapshot {
             // track the current underline style so that we can apply it to
             // inlay hints within the diagnostic's span
             let mut current_diagnostic_underline: Option<UnderlineStyle> = None;
+            let mut current_diagnostic_severity: Option<lsp::DiagnosticSeverity> = None;
 
             move |chunk| {
                 let syntax_highlight_style = chunk
@@ -1880,41 +1910,35 @@ impl DisplaySnapshot {
                     }
                 });
 
-                let diagnostic_highlight = if chunk.is_inlay {
-                    current_diagnostic_underline.map(|underline| HighlightStyle {
-                        underline: Some(underline),
-                        ..Default::default()
-                    })
-                } else {
-                    let highlight = chunk
-                        .diagnostic_severity
-                        .filter(|severity| {
-                            self.diagnostics_max_severity
-                                .into_lsp()
-                                .is_some_and(|max_severity| severity <= &max_severity)
-                        })
-                        .map(|severity| HighlightStyle {
-                            fade_out: chunk
-                                .is_unnecessary
-                                .then_some(editor_style.unnecessary_code_fade),
-                            underline: (chunk.underline
-                                && editor_style.show_underlines
-                                && !(chunk.is_unnecessary
-                                    && severity > lsp::DiagnosticSeverity::WARNING))
-                                .then(|| {
-                                    let diagnostic_color =
-                                        diagnostic_style(severity, &editor_style.status);
-                                    UnderlineStyle {
-                                        color: Some(diagnostic_color),
-                                        thickness: 1.0.into(),
-                                        wavy: true,
-                                    }
-                                }),
+                let (diagnostic_highlight, diagnostic_severity) = if chunk.is_inlay {
+                    (
+                        current_diagnostic_underline.map(|underline| HighlightStyle {
+                            underline: Some(underline),
                             ..Default::default()
-                        });
+                        }),
+                        current_diagnostic_severity,
+                    )
+                } else {
+                    let severity = chunk
+                        .diagnostic_severity
+                        .filter(|severity| self.diagnostic_severity_is_visible(*severity));
+                    let highlight = severity.map(|severity| HighlightStyle {
+                        fade_out: chunk
+                            .is_unnecessary
+                            .then_some(editor_style.unnecessary_code_fade),
+                        underline: self.diagnostic_underline_style(
+                            severity,
+                            chunk.underline,
+                            chunk.is_unnecessary,
+                            editor_style,
+                        ),
+                        ..Default::default()
+                    });
 
                     current_diagnostic_underline = highlight.as_ref().and_then(|h| h.underline);
-                    highlight
+                    current_diagnostic_severity =
+                        current_diagnostic_underline.and_then(|_| severity);
+                    (highlight, current_diagnostic_severity)
                 };
 
                 let style = [
@@ -1929,6 +1953,7 @@ impl DisplaySnapshot {
                 HighlightedChunk {
                     text: chunk.text,
                     style,
+                    diagnostic_underline_severity: diagnostic_severity,
                     is_tab: chunk.is_tab,
                     is_inlay: chunk.is_inlay,
                     replacement: chunk.renderer.map(ChunkReplacement::Renderer),
@@ -4466,6 +4491,7 @@ pub mod tests {
         let chunk = HighlightedChunk {
             text: pilot_emoji,
             style: None,
+            diagnostic_underline_severity: None,
             is_tab: false,
             is_inlay: false,
             replacement: None,
