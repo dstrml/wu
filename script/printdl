@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+curl -s "https://api.github.com/repos/dstrml/wu/releases?per_page=100" | jq '.[] | {tag: .tag_name, downloads: ([.assets[].download_count] | add)}'

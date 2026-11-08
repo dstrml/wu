@@ -58,8 +58,6 @@ Wu 的构建方式和 Zed 一样。请看 [Zed 开发文档](https://zed.dev/doc
 
 Wu 采用 GPL-3.0-or-later 许可证，标注的部分采用 Apache-2.0。请看 [LICENSE-GPL](./LICENSE-GPL) 和 [LICENSE-APACHE](./LICENSE-APACHE)。
 
-Wu 是 [Zed](https://github.com/zed-industries/zed) 的衍生作品，使用相同的许可证。
-
 ## 致谢
 
 感谢 Zed 团队打造了这样出色的编辑器，并把它开源。没有他们的工作，就不会有 Wu。

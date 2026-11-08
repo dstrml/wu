@@ -2642,9 +2642,21 @@ impl Element for MarkdownElement {
                         }
                         MarkdownTag::Table(alignments) => {
                             builder.table.start(alignments.clone(), range.clone());
+                            let table_bounds = Rc::new(Cell::new(None));
+                            builder.table.bounds = Some(table_bounds.clone());
 
                             let column_count = alignments.len();
-                            builder.push_div(div().flex(), range, markdown_end);
+                            builder.push_div(div().flex().relative(), range, markdown_end);
+                            builder.modify_current_div(|el| {
+                                el.child(
+                                    canvas(
+                                        move |bounds, _, _| table_bounds.set(Some(bounds)),
+                                        |_, _, _, _| {},
+                                    )
+                                    .absolute()
+                                    .size_full(),
+                                )
+                            });
                             if self.table_actions.is_some() {
                                 builder.push_div(
                                     div().flex().relative().min_w_0().group(TABLE_GROUP),
@@ -3259,6 +3271,7 @@ impl ParentElement for AnyDiv {
 struct TableState {
     alignments: Vec<Alignment>,
     range: Range<usize>,
+    bounds: Option<Rc<Cell<Option<Bounds<Pixels>>>>>,
     in_head: bool,
     row_index: usize,
     col_index: usize,
@@ -3296,6 +3309,7 @@ impl TableState {
 
     fn end(&mut self) {
         self.alignments.clear();
+        self.bounds = None;
         self.in_head = false;
         self.row_index = 0;
         self.col_index = 0;
@@ -3854,6 +3868,7 @@ impl MarkdownElementBuilder {
             text_align,
             highlights,
             code_chips: line.code_chips.into_iter().collect(),
+            table_bounds: self.table.bounds.clone(),
         });
         if rendered_line.highlights.is_empty() && rendered_line.code_chips.is_empty() {
             self.rendered_lines.push(rendered_line);
@@ -3961,6 +3976,7 @@ struct RenderedLine {
     highlights: SmallVec<[(Range<usize>, Hsla); 1]>,
     /// Inline code chip ranges intersecting this line, in rendered indices
     code_chips: SmallVec<[(Range<usize>, Hsla); 1]>,
+    table_bounds: Option<Rc<Cell<Option<Bounds<Pixels>>>>>,
 }
 
 impl RenderedLine {
@@ -4390,16 +4406,20 @@ impl RenderedText {
     }
 
     fn source_index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
+        if let Some(line) = self
+            .lines
+            .iter()
+            .find(|line| line.layout.bounds().contains(&position))
+            .or_else(|| self.nearest_table_cell(position))
+        {
+            return line.source_index_for_position(position);
+        }
+
         let mut lines = self.lines.iter().peekable();
         let mut fallback_line: Option<&Rc<RenderedLine>> = None;
 
         while let Some(line) = lines.next() {
             let line_bounds = line.layout.bounds();
-
-            // Exact match: position is within bounds (handles overlapping bounds like table columns)
-            if line_bounds.contains(&position) {
-                return line.source_index_for_position(position);
-            }
 
             // Track fallback for Y-coordinate based matching
             if position.y <= line_bounds.bottom() && fallback_line.is_none() {
@@ -4422,6 +4442,32 @@ impl RenderedText {
         }
 
         Err(self.lines.last().map_or(0, |line| line.source_end))
+    }
+
+    fn nearest_table_cell(&self, position: Point<Pixels>) -> Option<&Rc<RenderedLine>> {
+        let distance = |start: Pixels, end: Pixels, value: Pixels| {
+            (start - value).max(value - end).max(Pixels::ZERO)
+        };
+        self.lines
+            .iter()
+            .filter(|line| {
+                line.table_bounds
+                    .as_ref()
+                    .and_then(|bounds| bounds.get())
+                    .is_some_and(|bounds| bounds.contains(&position))
+            })
+            .map(|line| {
+                let bounds = line.layout.bounds();
+                let key = (
+                    distance(bounds.left(), bounds.right(), position.x),
+                    distance(bounds.top(), bounds.bottom(), position.y),
+                );
+                (key, line)
+            })
+            .min_by(|(left, _), (right, _)| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, line)| line)
     }
 
     fn position_for_source_index(&self, source_index: usize) -> Option<(Point<Pixels>, Pixels)> {
@@ -7172,5 +7218,91 @@ mod tests {
                 .expect("code block highlights must be computed during parse")
                 .clone()
         })
+    }
+
+    const WRAPPING_ROW_TABLE: &str = concat!(
+        "| File | Summary |\n",
+        "|---|---|\n",
+        "| main.rs | [Unwrap](https://example.com/unwrap) on user input can panic when the input is empty or has odd characters in it |\n",
+    );
+
+    fn open_table_window<'a>(
+        source: &str,
+        width: Pixels,
+        cx: &'a mut TestAppContext,
+    ) -> (RenderedText, &'a mut gpui::VisualTestContext) {
+        ensure_theme_initialized(cx);
+        let markdown = cx.new(|cx| Markdown::new(source.to_string().into(), None, None, cx));
+        cx.run_until_parked();
+        let rendered_text = Rc::new(RefCell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let rendered_text = rendered_text.clone();
+            move |_, _| MarkdownTestView {
+                markdown,
+                style: MarkdownStyle {
+                    table_cell_padding: point(px(12.), px(12.)),
+                    ..MarkdownStyle::default()
+                },
+                code_span_link: None,
+                rendered_text,
+            }
+        });
+        cx.simulate_resize(size(width, px(600.)));
+        cx.run_until_parked();
+        let rendered = rendered_text
+            .borrow()
+            .clone()
+            .expect("markdown should be rendered in the test view");
+        (rendered, cx)
+    }
+
+    fn line_with_text<'a>(rendered: &'a RenderedText, text: &str) -> &'a RenderedLine {
+        rendered
+            .lines
+            .iter()
+            .find(|line| line.layout.text().starts_with(text))
+            .expect("line should be rendered")
+    }
+
+    #[gpui::test]
+    fn test_link_on_the_first_row_of_a_wrapped_table_cell_is_clickable(cx: &mut TestAppContext) {
+        let (rendered, cx) = open_table_window(WRAPPING_ROW_TABLE, px(400.), cx);
+        let summary = line_with_text(&rendered, "Unwrap").layout.bounds();
+        let file = line_with_text(&rendered, "main.rs").layout.bounds();
+        assert!(
+            summary.top() < file.top(),
+            "the summary cell should wrap above its shorter neighbor"
+        );
+
+        cx.simulate_click(
+            point(summary.left() + px(4.), summary.top() + px(4.)),
+            Modifiers::default(),
+        );
+        assert_eq!(
+            cx.opened_url(),
+            Some("https://example.com/unwrap".to_string())
+        );
+    }
+
+    #[gpui::test]
+    fn test_table_cell_padding_maps_to_its_own_cell(cx: &mut TestAppContext) {
+        let source = "| a | b |\n|---|---|\n| one | two |\n| three | four |\n";
+        let (rendered, _) = open_table_window(source, px(800.), cx);
+        let two_start = source.find("two").expect("cell text");
+        let four_start = source.find("four").expect("cell text");
+
+        let two = line_with_text(&rendered, "two").layout.bounds();
+        let above_two = point(two.left() + px(2.), two.top() - px(6.));
+        let index = match rendered.source_index_for_position(above_two) {
+            Ok(index) | Err(index) => index,
+        };
+        assert_eq!(index, two_start);
+
+        let four = line_with_text(&rendered, "four").layout.bounds();
+        let below_four = point(four.right() - px(2.), four.bottom() + px(6.));
+        let index = match rendered.source_index_for_position(below_four) {
+            Ok(index) | Err(index) => index,
+        };
+        assert_eq!(index, four_start + "four".len());
     }
 }

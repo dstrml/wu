@@ -58,8 +58,6 @@ Wu builds the same way Zed does. See the [Zed development docs](https://zed.dev/
 
 Wu is licensed under GPL-3.0-or-later with Apache-2.0 components where marked. See [LICENSE-GPL](./LICENSE-GPL) and [LICENSE-APACHE](./LICENSE-APACHE).
 
-Wu is a derivative work of [Zed](https://github.com/zed-industries/zed) and shares the same licenses.
-
 ## Acknowledgements
 
 Thanks to the Zed team for building an excellent editor and releasing it as open source. Wu would not exist without their work.
