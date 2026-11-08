@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.2.0 - 2026-11-08
+
 - Add a side panel for agent chats.
 - Fix voice dictation UI in agent chat.
 - Fix window resize not persisting on Windows.
