@@ -102,6 +102,7 @@ pub struct MarkdownStyle {
     pub link_callback: Option<LinkStyleCallback>,
     pub rule_color: Hsla,
     pub block_quote_border_color: Hsla,
+    pub block_quote_border_width: Pixels,
     pub block_quote_kind_colors: BlockQuoteKindColors,
     pub syntax: Arc<SyntaxTheme>,
     pub selection_background_color: Hsla,
@@ -133,6 +134,7 @@ impl Default for MarkdownStyle {
             link_callback: None,
             rule_color: Default::default(),
             block_quote_border_color: Default::default(),
+            block_quote_border_width: px(4.),
             block_quote_kind_colors: Default::default(),
             syntax: Arc::new(SyntaxTheme::default()),
             selection_background_color: Default::default(),
@@ -1775,7 +1777,7 @@ impl MarkdownElement {
         let block_div = div()
             .pl_4()
             .mb(self.style.paragraph_spacing)
-            .border_l_4()
+            .border_l(self.style.block_quote_border_width)
             .border_color(border_color);
         let block_div = match header {
             Some(header) => block_div.child(header),

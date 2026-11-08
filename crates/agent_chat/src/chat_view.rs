@@ -972,6 +972,7 @@ impl ChatView {
         });
         style.rule_color = colors.border;
         style.block_quote_border_color = accent.opacity(0.6);
+        style.block_quote_border_width = px(2.);
         style.block_quote = TextStyleRefinement {
             color: Some(colors.text_muted),
             ..Default::default()

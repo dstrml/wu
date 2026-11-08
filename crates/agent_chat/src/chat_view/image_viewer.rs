@@ -3,14 +3,17 @@ use super::{
 };
 use crate::chat_style::ink;
 use gpui::{
-    AnyElement, Context, Image, ImageSource, IntoElement, MouseButton, ObjectFit, ParentElement,
-    Pixels, ScrollWheelEvent, SharedString, Styled, Window, deferred, div, hsla, img, px, relative,
+    AnyElement, App, Bounds, Context, DevicePixels, Image, ImageSource, ImgResourceLoader,
+    IntoElement, MouseButton, ObjectFit, ParentElement, Pixels, Point, ScrollWheelEvent,
+    SharedString, Size, Styled, Window, canvas, deferred, div, hsla, img, px, relative,
 };
 use i18n::t;
 use std::{
+    cell::Cell,
     fs::{File, OpenOptions},
     io::{ErrorKind, Write as _},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 use theme::ActiveTheme as _;
@@ -61,6 +64,39 @@ fn create_unused(directory: &Path, file_name: &str) -> std::io::Result<(PathBuf,
         }
     }
     Err(ErrorKind::AlreadyExists.into())
+}
+
+fn loaded_image_size(
+    source: &ImageSource,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<Size<DevicePixels>> {
+    let image = match source {
+        ImageSource::Resource(resource) => {
+            window.get_asset::<ImgResourceLoader>(resource, cx)?.ok()?
+        }
+        ImageSource::Image(image) => image.clone().get_render_image(window, cx)?,
+        ImageSource::Render(image) => image.clone(),
+        ImageSource::Custom(_) => return None,
+    };
+    Some(image.size(0))
+}
+
+fn object_fit(zoom: f32) -> ObjectFit {
+    if zoom > MIN_ZOOM {
+        ObjectFit::Contain
+    } else {
+        ObjectFit::ScaleDown
+    }
+}
+
+fn is_on_image(
+    object_fit: ObjectFit,
+    frame: Bounds<Pixels>,
+    image_size: Option<Size<DevicePixels>>,
+    position: Point<Pixels>,
+) -> bool {
+    image_size.is_some_and(|size| object_fit.get_bounds(frame, size).contains(&position))
 }
 
 impl ChatImage {
@@ -201,6 +237,7 @@ impl ChatView {
     pub(super) fn render_lightbox(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let lightbox = self.lightbox.as_ref()?;
         let zoom = lightbox.zoom;
+        let frame = Rc::new(Cell::new(None));
         let scrim_alpha = if cx.theme().appearance.is_light() {
             0.32 * (SCRIM_ALPHA / SCRIM_ALPHA_DARK_DEFAULT)
         } else {
@@ -256,17 +293,38 @@ impl ChatView {
                                     .w(relative(0.9 * zoom))
                                     .h(relative(0.85 * zoom))
                                     .flex_none()
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation()
+                                    .relative()
+                                    .debug_selector(|| "agent-lightbox-frame".into())
+                                    .on_mouse_down(MouseButton::Left, {
+                                        let frame = frame.clone();
+                                        let source = lightbox.source.clone();
+                                        move |event, window, cx| {
+                                            let on_image = frame.get().is_none_or(|frame| {
+                                                let size = loaded_image_size(&source, window, cx);
+                                                is_on_image(
+                                                    object_fit(zoom),
+                                                    frame,
+                                                    size,
+                                                    event.position,
+                                                )
+                                            });
+                                            if on_image {
+                                                cx.stop_propagation()
+                                            }
+                                        }
                                     })
+                                    .child(
+                                        canvas(
+                                            move |bounds, _, _| frame.set(Some(bounds)),
+                                            |_, _, _, _| {},
+                                        )
+                                        .absolute()
+                                        .size_full(),
+                                    )
                                     .child(
                                         img(lightbox.source.clone())
                                             .size_full()
-                                            .object_fit(if zoom > MIN_ZOOM {
-                                                ObjectFit::Contain
-                                            } else {
-                                                ObjectFit::ScaleDown
-                                            }),
+                                            .object_fit(object_fit(zoom)),
                                     ),
                             )
                             .child(
@@ -391,5 +449,61 @@ mod tests {
         assert!(saved("generated (3).png").is_none());
         let shown = view.read_with(cx, |view, _| view.copied.clone());
         assert_eq!(shown, Some(image.download_key()));
+    }
+
+    #[gpui::test]
+    async fn clicking_beside_the_image_closes_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| store.skip_plan_usage());
+        let project = project::Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let picture = directory.path().join("small.png");
+        image::RgbaImage::from_pixel(20, 20, image::Rgba([255, 0, 0, 255]))
+            .save(&picture)
+            .expect("write image");
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            ChatView::new(
+                session.clone(),
+                store.clone(),
+                project,
+                WeakEntity::new_invalid(),
+                window,
+                cx,
+            )
+        });
+        cx.simulate_resize(gpui::size(px(800.), px(600.)));
+        let is_open = |cx: &mut gpui::VisualTestContext| {
+            view.read_with(cx, |view, _| view.lightbox.is_some())
+        };
+        let open = |cx: &mut gpui::VisualTestContext| {
+            view.update_in(cx, |view, window, cx| {
+                view.open_image(picture.clone(), window, cx)
+            });
+            for _ in 0..3 {
+                cx.run_until_parked();
+                cx.update(|window, _| window.refresh());
+            }
+            cx.run_until_parked();
+        };
+
+        open(cx);
+        let frame = cx
+            .debug_bounds("agent-lightbox-frame")
+            .expect("image frame is drawn");
+        cx.simulate_click(frame.center(), gpui::Modifiers::none());
+        assert!(is_open(cx), "a click on the image keeps it open");
+
+        cx.simulate_click(
+            frame.origin + gpui::point(px(10.), px(10.)),
+            gpui::Modifiers::none(),
+        );
+        assert!(!is_open(cx), "a click beside a small image closes it");
     }
 }
