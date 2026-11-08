@@ -95,6 +95,7 @@ impl ChatView {
             .px(px(7.))
             .gap(px(5.))
             .text_size(ui(11.))
+            .whitespace_nowrap()
             .child(
                 div()
                     .size(px(6.))
