@@ -612,6 +612,7 @@ fn init_renderers(cx: &mut App) {
         .add_basic_renderer::<settings::IconThemeName>(render_icon_theme_picker)
         .add_dropdown_renderer::<settings::BufferLineHeightDiscriminants>()
         .add_dropdown_renderer::<settings::GitGutterWidthDiscriminants>()
+        .add_dropdown_renderer::<settings::ProjectPanelTitleTooltipDelayDiscriminants>()
         .add_dropdown_renderer::<settings::AutosaveSettingDiscriminants>()
         .add_dropdown_renderer::<settings::WorkingDirectoryDiscriminants>()
         .add_dropdown_renderer::<settings::IncludeIgnoredContent>()

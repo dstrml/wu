@@ -62,7 +62,7 @@ use collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map};
 use futures::{
     AsyncWriteExt, Future, FutureExt, StreamExt,
     channel::oneshot,
-    future::{Either, Shared, join_all, select},
+    future::{Shared, join_all},
     select, select_biased,
     stream::FuturesUnordered,
 };
@@ -174,6 +174,10 @@ pub use worktree::{
 const SERVER_LAUNCHING_BEFORE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SERVER_PROGRESS_THROTTLE_TIMEOUT: Duration = Duration::from_millis(100);
 const WORKSPACE_DIAGNOSTICS_TOKEN_START: &str = "id:";
+const WORKSPACE_DIAGNOSTICS_REPULL_DELAY: Duration = Duration::from_secs(2);
+const CROSS_BUFFER_DIAGNOSTICS_PULL_DELAY: Duration = Duration::from_millis(100);
+const DOCUMENT_DIAGNOSTICS_RETRIGGER_LIMIT: usize = 3;
+const DOCUMENT_DIAGNOSTICS_RETRIGGER_DELAY: Duration = Duration::from_millis(100);
 const SERVER_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_PROMPT_REQUEST_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -331,6 +335,7 @@ pub struct LocalLspStore {
     >,
     buffer_snapshots: HashMap<BufferId, HashMap<LanguageServerId, Vec<LspBufferSnapshot>>>, // buffer_id -> server_id -> vec of snapshots
     _subscription: gpui::Subscription,
+    _binary_status_task: Task<()>,
     lsp_tree: LanguageServerTree,
     registered_buffers: HashMap<BufferId, usize>,
     buffers_opened_in_servers: HashMap<BufferId, HashSet<LanguageServerId>>,
@@ -411,6 +416,14 @@ impl LocalLspStore {
             }
             new_language_server_id
         }
+    }
+
+    fn update_binary_status(&self, server_name: LanguageServerName, status: BinaryStatus) {
+        self.languages.update_lsp_binary_status_for_entity(
+            self.weak.entity_id(),
+            server_name,
+            status,
+        );
     }
 
     fn start_language_server(
@@ -676,8 +689,7 @@ impl LocalLspStore {
         };
 
         if update_binary_status {
-            self.languages
-                .update_lsp_binary_status(adapter.name(), BinaryStatus::Starting);
+            self.update_binary_status(adapter.name(), BinaryStatus::Starting);
         }
 
         self.language_servers.insert(server_id, state);
@@ -705,7 +717,6 @@ impl LocalLspStore {
             && let Some(path) = settings.path.as_ref().map(PathBuf::from)
         {
             let settings = settings.clone();
-            let languages = self.languages.clone();
             return cx.background_spawn(async move {
                 if let Some(mut wait_until_worktree_trust) = wait_until_worktree_trust {
                     let already_trusted =  *wait_until_worktree_trust.borrow();
@@ -724,8 +735,7 @@ impl LocalLspStore {
                             adapter.name(),
                         );
                     }
-                    languages
-                        .update_lsp_binary_status(adapter.name(), BinaryStatus::Starting);
+                    delegate.update_status(adapter.name(), BinaryStatus::Starting);
                 }
                 let mut env = delegate.shell_env().await;
                 env.extend(settings.env.unwrap_or_default());
@@ -746,7 +756,6 @@ impl LocalLspStore {
         #[cfg(any(test, feature = "test-support"))]
         if !adapter.adapter.is_extension() && self.languages.has_fake_lsp_server(&adapter.name) {
             let language_server_name = adapter.name.clone();
-            let languages = self.languages.clone();
             return cx.spawn(async move |_| {
                 if let Some(mut wait_until_worktree_trust) = wait_until_worktree_trust {
                     let already_trusted = *wait_until_worktree_trust.borrow();
@@ -763,7 +772,7 @@ impl LocalLspStore {
                             "Worktree {worktree_abs_path:?} is trusted, starting language server {language_server_name}",
                         );
                     }
-                    languages.update_lsp_binary_status(
+                    delegate.update_status(
                         language_server_name.clone(),
                         BinaryStatus::Starting,
                     );
@@ -1408,6 +1417,16 @@ impl LocalLspStore {
             self.language_server_ids_for_project_path(worktree_path, language, cx)
         } else {
             Vec::new()
+        }
+    }
+
+    fn server_pulls_workspace_diagnostics(&self, server_id: LanguageServerId) -> bool {
+        match self.language_servers.get(&server_id) {
+            Some(LanguageServerState::Running {
+                workspace_diagnostics_refresh_tasks,
+                ..
+            }) => !workspace_diagnostics_refresh_tasks.is_empty(),
+            _ => false,
         }
     }
 
@@ -3216,16 +3235,16 @@ impl LocalLspStore {
         buffer: &Entity<Buffer>,
         old_file: &File,
         cx: &mut App,
-    ) {
+    ) -> Vec<LanguageServerId> {
         let old_path = match old_file.as_local() {
             Some(local) => local.abs_path(cx),
-            None => return,
+            None => return Vec::new(),
         };
 
         let Ok(file_url) = lsp::Uri::from_file_path(old_path.as_path()) else {
-            return;
+            return Vec::new();
         };
-        self.unregister_buffer_from_language_servers(buffer, &file_url, cx);
+        self.unregister_buffer_from_language_servers(buffer, &file_url, cx)
     }
 
     pub(crate) fn unregister_buffer_from_language_servers(
@@ -3233,19 +3252,42 @@ impl LocalLspStore {
         buffer: &Entity<Buffer>,
         file_url: &lsp::Uri,
         cx: &mut App,
-    ) {
+    ) -> Vec<LanguageServerId> {
+        let abs_path = file_url.to_file_path().ok();
         buffer.update(cx, |buffer, cx| {
-            let mut snapshots = self.buffer_snapshots.remove(&buffer.remote_id());
+            let buffer_id = buffer.remote_id();
+            let mut snapshots = self.buffer_snapshots.remove(&buffer_id);
 
+            let mut detached_servers = Vec::new();
             for (_, language_server) in self.language_servers_for_buffer(buffer, cx) {
+                let server_id = language_server.server_id();
                 if snapshots
                     .as_mut()
-                    .is_some_and(|map| map.remove(&language_server.server_id()).is_some())
+                    .is_some_and(|map| map.remove(&server_id).is_some())
                 {
                     language_server.unregister_buffer(file_url.clone());
+                    detached_servers.push(server_id);
                 }
             }
-        });
+
+            for &server_id in &detached_servers {
+                buffer.set_completion_triggers(server_id, Default::default(), cx);
+                if let Some(opened_in_servers) = self.buffers_opened_in_servers.get_mut(&buffer_id)
+                {
+                    opened_in_servers.remove(&server_id);
+                }
+                if let Some(abs_path) = &abs_path
+                    && let Some(result_ids) =
+                        self.buffer_pull_diagnostics_result_ids.get_mut(&server_id)
+                {
+                    for result_ids in result_ids.values_mut() {
+                        result_ids.remove(abs_path);
+                    }
+                }
+            }
+
+            detached_servers
+        })
     }
 
     fn buffer_snapshot_for_lsp_version(
@@ -4455,7 +4497,9 @@ impl BufferLspData {
 #[derive(Debug)]
 pub enum LspStoreEvent {
     LanguageServerAdded(LanguageServerId, LanguageServerName, Option<WorktreeId>),
+    SupplementaryLanguageServerAdded(LanguageServerId, LanguageServerName),
     LanguageServerRemoved(LanguageServerId),
+    SupplementaryLanguageServerRemoved(LanguageServerId),
     LanguageServerUpdate {
         language_server_id: LanguageServerId,
         name: Option<LanguageServerName>,
@@ -4575,6 +4619,18 @@ fn should_log_lsp_request_failure(message: &str) -> bool {
     !(message.ends_with("content modified") || message.ends_with("server cancelled the request"))
 }
 
+fn should_log_lsp_response_error(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<lsp::ResponseError>()
+        .is_none_or(|response_error| !response_error.is_request_denied())
+}
+
+fn lsp_pull_cancelled_with_retrigger(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<lsp::ResponseError>()
+        .is_some_and(|response_error| response_error.should_retrigger())
+}
+
 impl LspStore {
     pub fn init(client: &AnyProtoClient) {
         client.add_entity_request_handler(Self::handle_lsp_query);
@@ -4691,7 +4747,7 @@ impl LspStore {
             .detach();
         cx.observe_global::<SettingsStore>(Self::on_settings_changed)
             .detach();
-        subscribe_to_binary_statuses(&languages, cx).detach();
+        let binary_status_task = subscribe_to_binary_statuses(&languages, cx);
 
         let _maintain_workspace_config = {
             let (sender, receiver) = watch::channel();
@@ -4728,6 +4784,7 @@ impl LspStore {
                         .unwrap()
                         .shutdown_language_servers_on_quit()
                 }),
+                _binary_status_task: binary_status_task,
                 lsp_tree: LanguageServerTree::new(
                     manifest_tree,
                     languages.clone(),
@@ -4796,7 +4853,6 @@ impl LspStore {
             .detach();
         cx.subscribe(&worktree_store, Self::on_worktree_store_event)
             .detach();
-        subscribe_to_binary_statuses(&languages, cx).detach();
         let _maintain_workspace_config = {
             let (sender, receiver) = watch::channel();
             (Self::maintain_workspace_config(receiver, cx), sender)
@@ -4822,7 +4878,7 @@ impl LspStore {
             active_entry: None,
 
             _maintain_workspace_config,
-            _maintain_buffer_languages: Self::maintain_buffer_languages(languages.clone(), cx),
+            _maintain_buffer_languages: Self::maintain_buffer_languages(languages, cx),
         }
     }
 
@@ -5056,7 +5112,14 @@ impl LspStore {
 
     fn background_diagnostics_worker(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
-            while let Ok(Some(task)) = this.update(cx, |this, cx| this.refresh_next_buffer(cx)) {
+            loop {
+                cx.background_executor()
+                    .timer(CROSS_BUFFER_DIAGNOSTICS_PULL_DELAY)
+                    .await;
+                let Ok(Some(task)) = this.update(cx, |this, cx| this.refresh_next_buffer(cx))
+                else {
+                    return;
+                };
                 task.await.log_err();
             }
         })
@@ -5135,46 +5198,27 @@ impl LspStore {
                                 );
                             }
 
-                            let diagnostic_updates = local
+                            // Closing the buffer does not change which servers are relevant
+                            // to its path, so pushed diagnostics stay: a running server may
+                            // still describe the file. Pulled document diagnostics need an
+                            // open document to be refreshed, so they are dropped, except for
+                            // servers whose workspace pull still owns the path's verdict.
+                            let servers_to_clear = local
                                 .language_servers
-                                .iter()
-                                .filter_map(|(server_id, state)| {
-                                    let supports_workspace_diagnostics = match state {
-                                        LanguageServerState::Running {
-                                            workspace_diagnostics_refresh_tasks,
-                                            ..
-                                        } => !workspace_diagnostics_refresh_tasks.is_empty(),
-                                        _ => false,
-                                    };
-                                    if supports_workspace_diagnostics {
-                                        None
-                                    } else {
-                                        Some(*server_id)
-                                    }
-                                })
-                                .map(|server_id| DocumentDiagnosticsUpdate {
-                                    diagnostics: DocumentDiagnostics {
-                                        document_abs_path: buffer_abs_path.clone(),
-                                        version: None,
-                                        diagnostics: Vec::new(),
-                                    },
-                                    result_id: None,
-                                    registration_id: None,
-                                    server_id,
-                                    disk_based_sources: Cow::Borrowed(&[]),
+                                .keys()
+                                .copied()
+                                .filter(|server_id| {
+                                    !local.server_pulls_workspace_diagnostics(*server_id)
                                 })
                                 .collect::<Vec<_>>();
-
-                            lsp_store
-                                .merge_diagnostic_entries(
-                                    diagnostic_updates,
-                                    |_, diagnostic, _| {
-                                        diagnostic.source_kind != DiagnosticSourceKind::Pulled
-                                    },
-                                    cx,
-                                )
-                                .context("Clearing diagnostics for the closed buffer")
-                                .log_err();
+                            lsp_store.clear_path_diagnostics_for_servers(
+                                buffer_abs_path,
+                                servers_to_clear,
+                                |_, diagnostic, _| {
+                                    diagnostic.source_kind != DiagnosticSourceKind::Pulled
+                                },
+                                cx,
+                            );
                         }
                     }
                 })
@@ -5236,23 +5280,25 @@ impl LspStore {
                                 for buffer in buffer_store.buffers() {
                                     if let Some(f) = File::from_dyn(buffer.read(cx).file()).cloned()
                                     {
+                                        // Detach before the language is unassigned: the
+                                        // detachment resolves the buffer's servers through
+                                        // its current language, and with the language gone
+                                        // it skips didClose and leaks the per-server state
+                                        // while still dropping the snapshots.
+                                        if let Some(local) = this.as_local_mut()
+                                            && local
+                                                .registered_buffers
+                                                .contains_key(&buffer.read(cx).remote_id())
+                                            && let Some(file_url) =
+                                                file_path_to_lsp_url(&f.abs_path(cx)).log_err()
+                                        {
+                                            local.unregister_buffer_from_language_servers(
+                                                &buffer, &file_url, cx,
+                                            );
+                                        }
                                         buffer.update(cx, |buffer, cx| {
                                             buffer.set_language_async(None, cx)
                                         });
-                                        if let Some(local) = this.as_local_mut() {
-                                            local.reset_buffer(&buffer, &f, cx);
-
-                                            if local
-                                                .registered_buffers
-                                                .contains_key(&buffer.read(cx).remote_id())
-                                                && let Some(file_url) =
-                                                    file_path_to_lsp_url(&f.abs_path(cx)).log_err()
-                                            {
-                                                local.unregister_buffer_from_language_servers(
-                                                    &buffer, &file_url, cx,
-                                                );
-                                            }
-                                        }
                                     }
                                 }
                             });
@@ -5432,13 +5478,17 @@ impl LspStore {
         let buffer = buffer_entity.read(cx);
         let buffer_file = buffer.file().cloned();
         let buffer_id = buffer.remote_id();
+        let mut detached_servers = Vec::new();
+        let mut detached_abs_path = None;
         if let Some(local_store) = self.as_local_mut()
             && local_store.registered_buffers.contains_key(&buffer_id)
             && let Some(abs_path) =
                 File::from_dyn(buffer_file.as_ref()).map(|file| file.abs_path(cx))
             && let Some(file_url) = file_path_to_lsp_url(&abs_path).log_err()
         {
-            local_store.unregister_buffer_from_language_servers(buffer_entity, &file_url, cx);
+            detached_servers =
+                local_store.unregister_buffer_from_language_servers(buffer_entity, &file_url, cx);
+            detached_abs_path = Some(abs_path);
         }
         buffer_entity.update(cx, |buffer, cx| {
             if buffer
@@ -5468,6 +5518,41 @@ impl LspStore {
         } else {
             None
         };
+
+        // A detached server keeps running and may legitimately re-publish for this path,
+        // since publishes are applied by path with no regard for registration. So only
+        // drop what it already said: clear the (path, server) diagnostics everywhere,
+        // exempting servers whose workspace-diagnostics pull owns the verdict, mirroring
+        // the buffer-close path. Anything a live server still asserts comes back on its
+        // next publish; a verdict from a server that stopped tracking the file has no
+        // other way to ever go away.
+        if let Some(abs_path) = detached_abs_path
+            && !detached_servers.is_empty()
+        {
+            let servers_to_clear = if let Some(local) = self.as_local() {
+                let reattached_servers = buffer_entity.update(cx, |buffer, cx| {
+                    local.language_server_ids_for_buffer(buffer, cx)
+                });
+                detached_servers
+                    .into_iter()
+                    .filter(|server_id| !reattached_servers.contains(server_id))
+                    .filter(|server_id| !local.server_pulls_workspace_diagnostics(*server_id))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            if let Some(lsp_data) = self.lsp_data.get_mut(&buffer_id) {
+                for server_id in &servers_to_clear {
+                    lsp_data.remove_server_data(*server_id);
+                }
+            }
+            self.clear_path_diagnostics_for_servers(
+                abs_path,
+                servers_to_clear,
+                |_, _, _| false,
+                cx,
+            );
+        }
 
         if settings.prettier.allowed
             && let Some(prettier_plugins) = prettier_store::prettier_plugins_for_language(&settings)
@@ -5793,20 +5878,23 @@ impl LspStore {
             let result = lsp_request.await.into_response();
 
             let response = result.map_err(|err| {
-                let message = format!(
-                    "{} via {} failed: {}",
-                    request.display_name(),
-                    language_server.name(),
-                    err
-                );
-                if should_log_lsp_request_failure(&message) {
-                    log::warn!("{message}");
+                if should_log_lsp_response_error(&err) {
+                    let message = format!(
+                        "{} via {} failed: {}",
+                        request.display_name(),
+                        language_server.name(),
+                        err
+                    );
+                    if should_log_lsp_request_failure(&message) {
+                        log::warn!("{message}");
+                    }
                 }
-                anyhow::anyhow!(lsp_request_failure_message(
+                let context = lsp_request_failure_message(
                     request.display_name(),
                     &language_server.name(),
-                    &err
-                ))
+                    &err,
+                );
+                err.context(context)
             })?;
 
             request
@@ -8356,17 +8444,32 @@ impl LspStore {
         buffer: Entity<Buffer>,
         cx: &mut Context<Self>,
     ) -> Task<anyhow::Result<()>> {
-        let diagnostics = self.pull_diagnostics(buffer, cx);
+        let mut diagnostics_task = self.pull_diagnostics(buffer.clone(), cx);
         cx.spawn(async move |lsp_store, cx| {
-            let diagnostics = match diagnostics.await {
-                Ok(Some(diagnostics)) => diagnostics,
-                Ok(None) => return Ok(()),
-                Err(error) if should_log_lsp_request_failure(&format!("{error:#}")) => {
-                    return Err(error).context("pulling diagnostics");
+            let mut retriggers_left = DOCUMENT_DIAGNOSTICS_RETRIGGER_LIMIT;
+            let diagnostics = loop {
+                match diagnostics_task.await {
+                    Ok(Some(diagnostics)) => break diagnostics,
+                    Ok(None) => return Ok(()),
+                    Err(error)
+                        if retriggers_left > 0 && lsp_pull_cancelled_with_retrigger(&error) =>
+                    {
+                        retriggers_left -= 1;
+                        cx.background_executor()
+                            .timer(DOCUMENT_DIAGNOSTICS_RETRIGGER_DELAY)
+                            .await;
+                        diagnostics_task = lsp_store.update(cx, |lsp_store, cx| {
+                            lsp_store.pull_diagnostics(buffer.clone(), cx)
+                        })?;
+                    }
+                    Err(error)
+                        if should_log_lsp_response_error(&error)
+                            && should_log_lsp_request_failure(&format!("{error:#}")) =>
+                    {
+                        return Err(error).context("pulling diagnostics");
+                    }
+                    Err(_) => return Ok(()),
                 }
-                // This is a weird way to suppress diagnostic failures on server side cancellation,
-                // we should actually retry the request here?
-                Err(_) => return Ok(()),
             };
             lsp_store.update(cx, |lsp_store, cx| {
                 if lsp_store.as_local().is_none() {
@@ -9217,6 +9320,20 @@ impl LspStore {
         changes: &UpdatedEntriesSet,
         cx: &mut Context<Self>,
     ) {
+        // A removed path takes its stored diagnostics with it, or reopening a file
+        // recreated at the same path replays them from the worktree store via
+        // initialize_buffer, showing verdicts about content that no longer exists.
+        if let Some(local) = self.as_local_mut()
+            && let Some(diagnostics_for_tree) = local.diagnostics.get_mut(&worktree_id)
+        {
+            for (path, _, _) in changes
+                .iter()
+                .filter(|(_, _, change)| *change == PathChange::Removed)
+            {
+                diagnostics_for_tree.remove(path);
+            }
+        }
+
         let Some(summaries_for_tree) = self.diagnostic_summaries.get_mut(&worktree_id) else {
             return;
         };
@@ -9364,6 +9481,38 @@ impl LspStore {
         Ok(())
     }
 
+    // A path's diagnostics are dropped per server, through the same merge machinery that
+    // applies them: buffer sets, worktree diagnostics, summaries, downstream propagation
+    // and the DiagnosticsUpdated event all follow from one call.
+    fn clear_path_diagnostics_for_servers(
+        &mut self,
+        abs_path: PathBuf,
+        server_ids: Vec<LanguageServerId>,
+        retain_diagnostic: impl Fn(&lsp::Uri, &Diagnostic, &App) -> bool + Clone,
+        cx: &mut Context<Self>,
+    ) {
+        if server_ids.is_empty() {
+            return;
+        }
+        let diagnostic_updates = server_ids
+            .into_iter()
+            .map(|server_id| DocumentDiagnosticsUpdate {
+                diagnostics: DocumentDiagnostics {
+                    document_abs_path: abs_path.clone(),
+                    version: None,
+                    diagnostics: Vec::new(),
+                },
+                result_id: None,
+                registration_id: None,
+                server_id,
+                disk_based_sources: Cow::Borrowed(&[]),
+            })
+            .collect::<Vec<_>>();
+        self.merge_diagnostic_entries(diagnostic_updates, retain_diagnostic, cx)
+            .context("clearing path diagnostics")
+            .log_err();
+    }
+
     pub fn merge_diagnostic_entries<'a>(
         &mut self,
         diagnostic_updates: Vec<DocumentDiagnosticsUpdate<'a, DocumentDiagnostics>>,
@@ -9379,7 +9528,7 @@ impl LspStore {
                 self.worktree_store.read(cx).find_worktree(abs_path, cx)
             else {
                 log::warn!("skipping diagnostics update, no worktree found for path {abs_path:?}");
-                return Ok(());
+                continue;
             };
 
             let worktree_id = worktree.read(cx).id();
@@ -9848,7 +9997,9 @@ impl LspStore {
                 match response_result {
                     Ok(response) => responses.push((server_id, response)),
                     // rust-analyzer likes to error with this when its still loading up
-                    Err(e) if format!("{e:#}").ends_with("content modified") => (),
+                    Err(e)
+                        if !should_log_lsp_response_error(&e)
+                            || !should_log_lsp_request_failure(&format!("{e:#}")) => {}
                     Err(e) => log::error!("Error handling response for request {request:?}: {e:#}"),
                 }
             }
@@ -10895,6 +11046,19 @@ impl LspStore {
             .map(|(key, value)| (*key, value))
     }
 
+    fn should_forward_untagged_binary_status(&self, server_name: &LanguageServerName) -> bool {
+        self.as_local().is_some_and(|local| {
+            local
+                .language_server_ids
+                .keys()
+                .any(|seed| &seed.name == server_name)
+                || self
+                    .language_server_statuses
+                    .values()
+                    .any(|status| &status.name == server_name)
+        })
+    }
+
     #[cfg(feature = "test-support")]
     pub fn has_language_server_seed_for_worktree(&self, worktree_id: WorktreeId) -> bool {
         self.as_local().is_some_and(|local| {
@@ -11085,12 +11249,12 @@ impl LspStore {
                 );
             }
             lsp::ProgressParamsValue::WorkspaceDiagnostic(report) => {
-                let registration_id = match progress_params.token {
-                    lsp::NumberOrString::Number(_) => None,
-                    lsp::NumberOrString::String(token) => token
-                        .split_once(WORKSPACE_DIAGNOSTICS_TOKEN_START)
-                        .map(|(_, id)| id.to_owned()),
+                let lsp::NumberOrString::String(token) = progress_params.token else {
+                    return;
                 };
+                let registration_id = token
+                    .split_once(WORKSPACE_DIAGNOSTICS_TOKEN_START)
+                    .map(|(_, id)| id.to_owned());
                 if let Some(LanguageServerState::Running {
                     workspace_diagnostics_refresh_tasks,
                     ..
@@ -11099,6 +11263,8 @@ impl LspStore {
                     .and_then(|local| local.language_servers.get_mut(&language_server_id))
                     && let Some(workspace_diagnostics) =
                         workspace_diagnostics_refresh_tasks.get_mut(&registration_id)
+                    && workspace_diagnostics.current_request_token.as_deref()
+                        == Some(token.as_str())
                 {
                     workspace_diagnostics.progress_tx.try_send(()).ok();
                     self.apply_workspace_diagnostic_report(
@@ -12058,17 +12224,18 @@ impl LspStore {
 
         if let Some(name) = name {
             log::info!("stopping language server {name}");
-            self.languages
-                .update_lsp_binary_status(name.clone(), BinaryStatus::Stopping);
+            if let Some(local) = self.as_local() {
+                local.update_binary_status(name.clone(), BinaryStatus::Stopping);
+            }
             cx.notify();
 
             return cx.spawn(async move |lsp_store, cx| {
                 Self::shutdown_language_server(server_state, name.clone(), cx).await;
                 lsp_store
                     .update(cx, |lsp_store, cx| {
-                        lsp_store
-                            .languages
-                            .update_lsp_binary_status(name, BinaryStatus::Stopped);
+                        if let Some(local) = lsp_store.as_local() {
+                            local.update_binary_status(name, BinaryStatus::Stopped);
+                        }
                         cx.emit(LspStoreEvent::LanguageServerRemoved(server_id));
                         cx.notify();
                     })
@@ -12619,9 +12786,7 @@ impl LspStore {
                 simulate_disk_based_diagnostics_completion: None,
             },
         );
-        local
-            .languages
-            .update_lsp_binary_status(adapter.name(), BinaryStatus::None);
+        local.update_binary_status(adapter.name(), BinaryStatus::None);
         if let Some(file_ops_caps) = language_server
             .capabilities()
             .workspace
@@ -12919,8 +13084,19 @@ impl LspStore {
             local
                 .supplementary_language_servers
                 .insert(id, (name.clone(), server));
-            cx.emit(LspStoreEvent::LanguageServerAdded(id, name, None));
+            cx.emit(LspStoreEvent::SupplementaryLanguageServerAdded(id, name));
         }
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn register_supplementary_language_server_for_test(
+        &mut self,
+        id: LanguageServerId,
+        name: LanguageServerName,
+        server: Arc<LanguageServer>,
+        cx: &mut Context<Self>,
+    ) {
+        self.register_supplementary_language_server(id, name, server, cx);
     }
 
     fn unregister_supplementary_language_server(
@@ -12930,19 +13106,17 @@ impl LspStore {
     ) {
         if let Some(local) = self.as_local_mut() {
             local.supplementary_language_servers.remove(&id);
-            cx.emit(LspStoreEvent::LanguageServerRemoved(id));
+            cx.emit(LspStoreEvent::SupplementaryLanguageServerRemoved(id));
         }
     }
 
-    pub(crate) fn supplementary_language_servers(
-        &self,
-    ) -> impl '_ + Iterator<Item = (LanguageServerId, LanguageServerName)> {
-        self.as_local().into_iter().flat_map(|local| {
-            local
-                .supplementary_language_servers
-                .iter()
-                .map(|(id, (name, _))| (*id, name.clone()))
-        })
+    #[cfg(feature = "test-support")]
+    pub fn unregister_supplementary_language_server_for_test(
+        &mut self,
+        id: LanguageServerId,
+        cx: &mut Context<Self>,
+    ) {
+        self.unregister_supplementary_language_server(id, cx);
     }
 
     pub fn language_server_adapter_for_id(
@@ -13341,6 +13515,27 @@ impl LspStore {
     /// Gets all result_ids for a workspace diagnostics pull request.
     /// First, it tries to find buffer's result_id retrieved via the diagnostics pull; if it fails, it falls back to the workspace disagnostics pull result_id.
     /// The latter is supposed to be of lower priority as we keep on pulling diagnostics for open buffers eagerly.
+    fn set_workspace_refresh_token(
+        &mut self,
+        server_id: LanguageServerId,
+        registration_id: &Option<String>,
+        token: Option<String>,
+    ) {
+        if let Some(workspace_diagnostics) = self
+            .as_local_mut()
+            .and_then(|local| local.language_servers.get_mut(&server_id))
+            .and_then(|state| match state {
+                LanguageServerState::Running {
+                    workspace_diagnostics_refresh_tasks,
+                    ..
+                } => workspace_diagnostics_refresh_tasks.get_mut(registration_id),
+                _ => None,
+            })
+        {
+            workspace_diagnostics.current_request_token = token;
+        }
+    }
+
     pub fn result_ids_for_workspace_refresh(
         &self,
         server_id: LanguageServerId,
@@ -13453,7 +13648,20 @@ impl LspStore {
             return;
         };
         for server_id in languages_servers {
-            let _ = self.pull_document_diagnostics_for_server(server_id, Some(buffer_id), cx);
+            let inter_file_dependencies = self.as_local().is_some_and(|local| {
+                local
+                    .language_server_dynamic_registrations
+                    .get(&server_id)
+                    .is_some_and(|registrations| {
+                        registrations
+                            .diagnostics
+                            .iter()
+                            .any(|(_, options)| diagnostics_inter_file_dependencies(options))
+                    })
+            });
+            if inter_file_dependencies {
+                let _ = self.pull_document_diagnostics_for_server(server_id, Some(buffer_id), cx);
+            }
         }
     }
 
@@ -13759,7 +13967,9 @@ impl LspStore {
                         match server_task.await {
                             Ok(response) => responses.push((server_id, response)),
                             // rust-analyzer likes to error with this when its still loading up
-                            Err(e) if format!("{e:#}").ends_with("content modified") => (),
+                            Err(e)
+                                if !should_log_lsp_response_error(&e)
+                                    || !should_log_lsp_request_failure(&format!("{e:#}")) => {}
                             Err(e) => log::error!(
                                 "Error handling response for request {request:?}: {e:#}"
                             ),
@@ -14052,11 +14262,19 @@ fn subscribe_to_binary_statuses(
     languages: &Arc<LanguageRegistry>,
     cx: &mut Context<'_, LspStore>,
 ) -> Task<()> {
-    let mut server_statuses = languages.language_server_binary_statuses();
+    let (mut server_statuses, subscription) = languages.language_server_binary_statuses();
     cx.spawn(async move |lsp_store, cx| {
-        while let Some((server_name, binary_status)) = server_statuses.next().await {
+        let _subscription = subscription;
+        while let Some((source, server_name, binary_status)) = server_statuses.next().await {
             if lsp_store
-                .update(cx, |_, cx| {
+                .update(cx, |lsp_store, cx| {
+                    if source.is_some_and(|source| source != cx.entity_id())
+                        || source.is_none()
+                            && !lsp_store.should_forward_untagged_binary_status(&server_name)
+                    {
+                        return;
+                    }
+
                     let mut message = None;
                     let binary_status = match binary_status {
                         BinaryStatus::None => proto::ServerBinaryStatus::None,
@@ -14105,7 +14323,7 @@ fn lsp_workspace_diagnostics_refresh(
     let registration_id_shared = registration_id.as_ref().map(SharedString::from);
 
     let (progress_tx, mut progress_rx) = mpsc::channel(1);
-    let (mut refresh_tx, mut refresh_rx) = mpsc::channel::<Option<oneshot::Sender<bool>>>(1);
+    let (mut refresh_tx, mut refresh_rx) = mpsc::channel::<Option<oneshot::Sender<bool>>>(8);
     refresh_tx.try_send(None).ok();
 
     let request_timeout = ProjectSettings::get_global(cx)
@@ -14123,6 +14341,7 @@ fn lsp_workspace_diagnostics_refresh(
     let workspace_query_language_server = cx.spawn(async move |lsp_store, cx| {
         let mut attempts = 0;
         let max_attempts = 50;
+        let retries_after_exhaustion = 3;
         let mut requests = 0;
 
         loop {
@@ -14130,14 +14349,22 @@ fn lsp_workspace_diagnostics_refresh(
                 return;
             };
             let mut completion_txs = completion_tx.into_iter().collect::<Vec<_>>();
+            let mut queued_completion_txs = Vec::<oneshot::Sender<bool>>::new();
 
             'request: loop {
                 requests += 1;
                 if attempts > max_attempts {
                     log::error!(
-                        "Failed to pull workspace diagnostics {max_attempts} times, aborting"
+                        "Failed to pull workspace diagnostics {max_attempts} times, pausing until the next refresh"
                     );
-                    return;
+                    for tx in completion_txs
+                        .drain(..)
+                        .chain(queued_completion_txs.drain(..))
+                    {
+                        tx.send(false).ok();
+                    }
+                    attempts = max_attempts + 1 - retries_after_exhaustion;
+                    break 'request;
                 }
                 let backoff_millis = (50 * (1 << attempts)).clamp(30, 1000);
                 cx.background_executor()
@@ -14147,11 +14374,26 @@ fn lsp_workspace_diagnostics_refresh(
 
                 // Absorb refresh requests that queued up in the meantime, so their
                 // waiters are resolved by this attempt instead of waiting behind it.
+                completion_txs.append(&mut queued_completion_txs);
                 while let Ok(queued_refresh) = refresh_rx.try_recv() {
                     completion_txs.extend(queued_refresh);
                 }
 
+                let token = if let Some(registration_id) = &registration_id {
+                    format!(
+                        "workspace/diagnostic/{}/{requests}/{WORKSPACE_DIAGNOSTICS_TOKEN_START}{registration_id}",
+                        server.server_id(),
+                    )
+                } else {
+                    format!("workspace/diagnostic/{}/{requests}", server.server_id())
+                };
+
                 let Ok(previous_result_ids) = lsp_store.update(cx, |lsp_store, _| {
+                    lsp_store.set_workspace_refresh_token(
+                        server.server_id(),
+                        &registration_id,
+                        Some(token.clone()),
+                    );
                     lsp_store
                         .result_ids_for_workspace_refresh(server.server_id(), &registration_id_shared)
                         .into_iter()
@@ -14167,60 +14409,77 @@ fn lsp_workspace_diagnostics_refresh(
                     return;
                 };
 
-                let token = if let Some(registration_id) = &registration_id {
-                    format!(
-                        "workspace/diagnostic/{}/{requests}/{WORKSPACE_DIAGNOSTICS_TOKEN_START}{registration_id}",
-                        server.server_id(),
-                    )
-                } else {
-                    format!("workspace/diagnostic/{}/{requests}", server.server_id())
-                };
-
                 progress_rx.try_recv().ok();
-                // Restart the timeout whenever a partial result arrives: streaming
-                // servers may legitimately take longer than a single timeout period,
-                // but a server that stops streaming without completing the request
-                // should still time out instead of hanging forever.
-                let timer = async {
+                let mut refresh_requested = false;
+                let mut request = pin!(
+                    server
+                        .request::<lsp::WorkspaceDiagnosticRequest>(
+                            lsp::WorkspaceDiagnosticParams {
+                                previous_result_ids,
+                                identifier: identifier.clone(),
+                                work_done_progress_params: Default::default(),
+                                partial_result_params: lsp::PartialResultParams {
+                                    partial_result_token: Some(lsp::ProgressToken::String(token)),
+                                },
+                            },
+                            Duration::MAX,
+                        )
+                        .fuse()
+                );
+                let response_result = 'response: loop {
+                    let mut inactivity_timer = pin!(server.request_timer(timeout).fuse());
                     loop {
-                        let timer = pin!(server.request_timer(timeout).fuse());
-                        let progress = pin!(progress_rx.recv().fuse());
-                        match select(timer, progress).await {
-                            Either::Left((message, ..)) => break message,
-                            Either::Right((Some(()), ..)) => {}
-                            Either::Right((None, timer)) => break timer.await,
+                        let mut progress = pin!(progress_rx.recv().fuse());
+                        let mut refresh = pin!(refresh_rx.recv().fuse());
+                        select_biased! {
+                            response = request => break 'response response,
+                            new_progress = progress => match new_progress {
+                                Some(()) => continue 'response,
+                                None => return,
+                            },
+                            new_refresh = refresh => match new_refresh {
+                                Some(completion_tx) => {
+                                    refresh_requested = true;
+                                    queued_completion_txs.extend(completion_tx);
+                                }
+                                None => return,
+                            },
+                            _ = inactivity_timer => {
+                                // Release everyone waiting on this refresh (e.g. the agent's
+                                // diagnostics tool), including waiters that queued up while the
+                                // request was in flight, so they can fall back to cached
+                                // diagnostics instead of waiting through every retry.
+                                for tx in completion_txs
+                                    .drain(..)
+                                    .chain(queued_completion_txs.drain(..))
+                                {
+                                    tx.send(false).ok();
+                                }
+                                continue 'response;
+                            }
                         }
                     }
                 };
-                let response_result = server
-                    .request_with_timer::<lsp::WorkspaceDiagnosticRequest, _>(
-                        lsp::WorkspaceDiagnosticParams {
-                            previous_result_ids,
-                            identifier: identifier.clone(),
-                            work_done_progress_params: Default::default(),
-                            partial_result_params: lsp::PartialResultParams {
-                                partial_result_token: Some(lsp::ProgressToken::String(token)),
-                            },
-                        },
-                        timer,
-                    )
-                    .await;
+                if lsp_store
+                    .update(cx, |lsp_store, _| {
+                        lsp_store.set_workspace_refresh_token(
+                            server.server_id(),
+                            &registration_id,
+                            None,
+                        );
+                    })
+                    .is_err()
+                {
+                    return;
+                }
 
                 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnostic_refresh
                 // >  If a server closes a workspace diagnostic pull request the client should re-trigger the request.
                 match response_result {
                     ConnectionResult::Timeout => {
-                        log::error!("Timeout during workspace diagnostics pull");
-                        // Release everyone waiting on this refresh (e.g. the agent's
-                        // diagnostics tool), including waiters that queued up while the
-                        // request was in flight, so they can fall back to cached
-                        // diagnostics instead of waiting through every retry.
-                        while let Ok(queued_refresh) = refresh_rx.try_recv() {
-                            completion_txs.extend(queued_refresh);
-                        }
-                        for tx in completion_txs.drain(..) {
-                            tx.send(false).ok();
-                        }
+                        debug_panic!(
+                            "Unexpected workspace diagnostics pull timeout without a request timer"
+                        );
                         continue 'request;
                     }
                     ConnectionResult::ConnectionReset => {
@@ -14228,11 +14487,23 @@ fn lsp_workspace_diagnostics_refresh(
                         continue 'request;
                     }
                     ConnectionResult::Result(Err(e)) => {
-                        log::error!("Error during workspace diagnostics pull: {e:#}");
-                        for tx in completion_txs.drain(..) {
-                            tx.send(false).ok();
+                        if lsp_pull_cancelled_with_retrigger(&e) {
+                            attempts = 0;
+                        } else {
+                            if should_log_lsp_response_error(&e) {
+                                log::error!("Error during workspace diagnostics pull: {e:#}");
+                            } else {
+                                log::debug!("Workspace diagnostics pull denied: {e:#}");
+                            }
+                            for tx in completion_txs.drain(..) {
+                                tx.send(false).ok();
+                            }
+                            if refresh_requested {
+                                continue 'request;
+                            }
+                            debug_assert!(queued_completion_txs.is_empty());
+                            break 'request;
                         }
-                        break 'request;
                     }
                     ConnectionResult::Result(Ok(pulled_diagnostics)) => {
                         attempts = 0;
@@ -14252,9 +14523,26 @@ fn lsp_workspace_diagnostics_refresh(
                         for tx in completion_txs.drain(..) {
                             tx.send(true).ok();
                         }
-                        break 'request;
                     }
                 }
+
+                if refresh_requested {
+                    continue 'request;
+                }
+                let mut repull_timer = pin!(
+                    cx.background_executor()
+                        .timer(WORKSPACE_DIAGNOSTICS_REPULL_DELAY)
+                        .fuse()
+                );
+                let mut refresh = pin!(refresh_rx.recv().fuse());
+                select_biased! {
+                    new_refresh = refresh => match new_refresh {
+                        Some(completion_tx) => completion_txs.extend(completion_tx),
+                        None => return,
+                    },
+                    _ = repull_timer => {}
+                }
+                continue 'request;
             }
         }
     });
@@ -14262,8 +14550,22 @@ fn lsp_workspace_diagnostics_refresh(
     Some(WorkspaceRefreshTask {
         refresh_tx,
         progress_tx,
+        current_request_token: None,
         task: workspace_query_language_server,
     })
+}
+
+fn diagnostics_inter_file_dependencies(options: &DiagnosticServerCapabilities) -> bool {
+    match options {
+        lsp::DiagnosticServerCapabilities::Options(diagnostic_options) => {
+            diagnostic_options.inter_file_dependencies
+        }
+        lsp::DiagnosticServerCapabilities::RegistrationOptions(registration_options) => {
+            registration_options
+                .diagnostic_options
+                .inter_file_dependencies
+        }
+    }
 }
 
 fn buffer_diagnostic_identifier(options: &DiagnosticServerCapabilities) -> Option<SharedString> {
@@ -14795,6 +15097,7 @@ impl LanguageServerLogType {
 pub struct WorkspaceRefreshTask {
     refresh_tx: mpsc::Sender<Option<oneshot::Sender<bool>>>,
     progress_tx: mpsc::Sender<()>,
+    current_request_token: Option<String>,
     #[allow(dead_code)]
     task: Task<()>,
 }
@@ -15245,9 +15548,16 @@ impl LspAdapterDelegate for LocalLspAdapterDelegate {
         Ok(())
     }
 
+    fn status_source_id(&self) -> gpui::EntityId {
+        self.lsp_store.entity_id()
+    }
+
     fn update_status(&self, server_name: LanguageServerName, status: language::BinaryStatus) {
-        self.language_registry
-            .update_lsp_binary_status(server_name, status);
+        self.language_registry.update_lsp_binary_status_for_entity(
+            self.status_source_id(),
+            server_name,
+            status,
+        );
     }
 
     fn registered_lsp_adapters(&self) -> Vec<Arc<dyn LspAdapter>> {
@@ -15440,11 +15750,11 @@ pub fn ensure_uniform_list_compatible_label(label: &mut CodeLabel) {
         offset_map[idx] = new_idx;
 
         match c {
-            '\n' if last_char_was_space => {
+            '\r' | '\n' if last_char_was_space => {
                 newlines_removed = true;
             }
             '\t' | ' ' if last_char_was_space => {}
-            '\n' if !last_char_was_space => {
+            '\r' | '\n' if !last_char_was_space => {
                 new_text.push(' ');
                 new_idx += 1;
                 last_char_was_space = true;
@@ -15571,5 +15881,50 @@ mod tests {
             "Get diagnostics via rust-analyzer failed: Server reset the connection"
         ));
         assert!(should_log_lsp_request_failure("something else entirely"));
+    }
+
+    #[test]
+    fn lsp_pull_cancelled_with_retrigger_follows_the_spec() {
+        assert!(lsp_pull_cancelled_with_retrigger(&server_cancellation(
+            None
+        )));
+        assert!(lsp_pull_cancelled_with_retrigger(&server_cancellation(
+            Some(serde_json::json!({ "retriggerRequest": true }))
+        )));
+        assert!(!lsp_pull_cancelled_with_retrigger(&server_cancellation(
+            Some(serde_json::json!({ "retriggerRequest": false }))
+        )));
+        assert!(lsp_pull_cancelled_with_retrigger(
+            &server_cancellation(None).context("pulling diagnostics")
+        ));
+        assert!(!lsp_pull_cancelled_with_retrigger(&anyhow::Error::new(
+            lsp::ResponseError::new(lsp::ResponseErrorCode::RequestFailed, "request failed")
+        )));
+        assert!(!lsp_pull_cancelled_with_retrigger(&anyhow::anyhow!(
+            "server cancelled the request"
+        )));
+    }
+
+    #[test]
+    fn should_log_lsp_response_error_suppresses_denied_requests() {
+        assert!(!should_log_lsp_response_error(&server_cancellation(None)));
+        assert!(!should_log_lsp_response_error(&anyhow::Error::new(
+            lsp::ResponseError::new(
+                lsp::ResponseErrorCode::ContentModified,
+                "content changed meanwhile",
+            )
+        )));
+        assert!(should_log_lsp_response_error(&anyhow::Error::new(
+            lsp::ResponseError::new(lsp::ResponseErrorCode::RequestFailed, "request failed")
+        )));
+        assert!(should_log_lsp_response_error(&anyhow::anyhow!(
+            "something else entirely"
+        )));
+    }
+
+    fn server_cancellation(data: Option<serde_json::Value>) -> anyhow::Error {
+        let mut response_error = lsp::ResponseError::server_cancelled();
+        response_error.data = data;
+        anyhow::Error::new(response_error)
     }
 }

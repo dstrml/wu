@@ -1577,16 +1577,6 @@ impl Editor {
 
         let selection_anchors = self.selections.disjoint_anchors_arc();
 
-        if self.focus_handle.is_focused(window) {
-            self.buffer.update(cx, |buffer, cx| {
-                buffer.set_active_selections(
-                    &selection_anchors,
-                    self.selections.line_mode(),
-                    self.cursor_shape,
-                    cx,
-                )
-            });
-        }
         let display_map = self
             .display_map
             .update(cx, |display_map, cx| display_map.snapshot(cx));
