@@ -4,13 +4,13 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Add a side panel for agent chats.
 - Fix voice dictation UI in agent chat.
 - Fix window resize not persisting on Windows.
 - Inter at 350 weight is now the new interface font.
-- Bring in improvements and bug fixes from Zed 1.22.
+- Bring in improvements and bug fixes from Zed v1.22.
 - Fix background command indicator wrapping onto the next line.
 - Fix thought process getting nested under two headers when there's nothing else in the group.
-- Add a side panel for agent chats.
 
 ## 1.1.19 - 2026-11-07
 
