@@ -382,7 +382,6 @@ impl ChatView {
                     .pl(px(4.))
                     .pr(px(10.))
                     .gap(px(4.))
-                    .children(self.render_move_to_panel(cx))
                     .when(kind.has_plan_usage(), |this| {
                         this.child(
                             PopoverMenu::new(SharedString::from(format!(
@@ -423,7 +422,8 @@ impl ChatView {
                         .anchor(Anchor::BottomRight)
                         .attach(Anchor::TopRight)
                         .offset(point(px(0.), px(-6.))),
-                    ),
+                    )
+                    .children(self.render_move_to_panel(cx)),
             )
     }
 
