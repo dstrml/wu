@@ -102,6 +102,8 @@ const CHIP_CARD_HEIGHT: f32 = 30.;
 const CHIP_HEADER_HEIGHT: f32 = CHIP_CARD_HEIGHT - 2.;
 const CHIPS_TOP_PAD: f32 = 2.;
 const TOOL_GROUP_HEADER_HEIGHT: f32 = 26.;
+const GROUP_CHEVRON_WIDTH: f32 = 22.;
+const GROUP_HEADER_GAP: f32 = 6.;
 const TOOL_TEXT_SIZE: f32 = 12.;
 const THOUGHT_BODY_SIZE: f32 = 15.;
 const THOUGHT_CODE_SIZE: f32 = 14.;
@@ -1738,7 +1740,7 @@ impl ChatView {
         h_flex()
             .id(id)
             .relative()
-            .gap(px(6.))
+            .gap(px(GROUP_HEADER_GAP))
             .pr(px(4.))
             .h(px(TOOL_GROUP_HEADER_HEIGHT))
             .cursor_pointer()
@@ -1747,14 +1749,19 @@ impl ChatView {
             .text_color(muted)
             .hover(|style| style.text_color(text))
             .child(
-                div().w(px(22.)).h(px(TOOL_LINE_HEIGHT)).flex_none().relative().child(
-                    icon(IconName::AgentArrowDown, 14.)
-                        .absolute()
-                        .left(px(TREE_TRUNK_X - 7.))
-                        .top(px(2.))
-                        .with_transformation(Transformation::rotate(radians(rotation)))
-                        .text_color(muted),
-                ),
+                div()
+                    .w(px(GROUP_CHEVRON_WIDTH))
+                    .h(px(TOOL_LINE_HEIGHT))
+                    .flex_none()
+                    .relative()
+                    .child(
+                        icon(IconName::AgentArrowDown, 14.)
+                            .absolute()
+                            .left(px(TREE_TRUNK_X - 7.))
+                            .top(px(2.))
+                            .with_transformation(Transformation::rotate(radians(rotation)))
+                            .text_color(muted),
+                    ),
             )
             .child(
                 div()
@@ -2263,6 +2270,28 @@ impl ChatView {
                 }
             }));
 
+        if let [index] = items
+            && let Entry::Thinking(markdown) = &entries[*index]
+        {
+            return v_flex()
+                .w_full()
+                .child(header)
+                .when(open, |this| {
+                    this.child(
+                        div()
+                            .pl(px(GROUP_CHEVRON_WIDTH + GROUP_HEADER_GAP))
+                            .pb(px(6.))
+                            .child(
+                                MarkdownElement::new(
+                                    markdown.clone(),
+                                    Self::thought_style(window, cx),
+                                )
+                                .code_block_renderer(plain_code_block_renderer()),
+                            ),
+                    )
+                })
+                .into_any_element();
+        }
         let row_count = items.len();
         v_flex()
             .w_full()
