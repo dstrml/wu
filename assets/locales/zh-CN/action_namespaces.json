@@ -30,6 +30,7 @@
   "keystroke_input": "按键输入",
   "language_selector": "语言选择器",
   "line_ending_selector": "换行符选择器",
+  "lsp_command_selector": "语言服务器命令选择器",
   "lsp_tool": "语言服务器工具",
   "markdown": "Markdown",
   "menu": "菜单",

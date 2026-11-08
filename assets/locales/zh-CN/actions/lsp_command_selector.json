@@ -1,0 +1,8 @@
+{
+  "lsp_command_selector::Toggle": {
+    "name": "切换语言服务器命令选择器"
+  },
+  "lsp_command_selector::ToggleArgumentsFocus": {
+    "name": "切换参数输入框焦点"
+  }
+}

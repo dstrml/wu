@@ -1057,11 +1057,12 @@ fn appearance_page() -> SettingsPage {
                     pick: |settings_content| {
                         settings_content
                             .markdown_preview
-                            .as_ref()?
-                            .font_family
                             .as_ref()
+                            .and_then(|preview| preview.font_family.as_ref())
+                            .or(settings_content.theme.markdown_preview_font_family.as_ref())
                     },
                     write: |settings_content, value, _| {
+                        settings_content.theme.markdown_preview_font_family = None;
                         settings_content
                             .markdown_preview
                             .get_or_insert_default()
@@ -1081,11 +1082,15 @@ fn appearance_page() -> SettingsPage {
                     pick: |settings_content| {
                         settings_content
                             .markdown_preview
-                            .as_ref()?
-                            .code_font_family
                             .as_ref()
+                            .and_then(|preview| preview.code_font_family.as_ref())
+                            .or(settings_content
+                                .theme
+                                .markdown_preview_code_font_family
+                                .as_ref())
                     },
                     write: |settings_content, value, _| {
+                        settings_content.theme.markdown_preview_code_font_family = None;
                         settings_content
                             .markdown_preview
                             .get_or_insert_default()
@@ -1107,9 +1112,11 @@ fn appearance_page() -> SettingsPage {
                             .markdown_preview
                             .as_ref()
                             .and_then(|preview| preview.font_size.as_ref())
+                            .or(settings_content.theme.markdown_preview_font_size.as_ref())
                             .or(settings_content.theme.buffer_font_size.as_ref())
                     },
                     write: |settings_content, value, _| {
+                        settings_content.theme.markdown_preview_font_size = None;
                         settings_content
                             .markdown_preview
                             .get_or_insert_default()

@@ -62,6 +62,7 @@ fn reset_persisted_font_size(settings: &mut settings::SettingsContent) {
     if let Some(markdown_preview) = settings.markdown_preview.as_mut() {
         markdown_preview.font_size = None;
     }
+    settings.theme.markdown_preview_font_size = None;
 }
 
 pub struct MarkdownPreviewView {
@@ -2298,6 +2299,18 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&updated).unwrap(),
             json!({"markdown_preview": {"open_markdown_files_in_preview": true}})
+        );
+
+        let updated = cx
+            .global::<settings::SettingsStore>()
+            .new_text_for_update(
+                r#"{"markdown_preview_font_size":18,"buffer_font_size":14}"#.into(),
+                reset_persisted_font_size,
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&updated).unwrap(),
+            json!({"buffer_font_size": 14})
         );
     }
 

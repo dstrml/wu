@@ -211,15 +211,12 @@ pub struct ThemeSettingsContent {
     pub buffer_font_features: Option<FontFeaturesContent>,
     pub git_commit_buffer_font_size: Option<FontSize>,
     /// Moved to `markdown_preview.font_family`. Still read so existing settings keep working.
-    #[serde(skip_serializing)]
     #[schemars(skip)]
     pub markdown_preview_font_family: Option<FontFamilyName>,
     /// Moved to `markdown_preview.code_font_family`.
-    #[serde(skip_serializing)]
     #[schemars(skip)]
     pub markdown_preview_code_font_family: Option<FontFamilyName>,
     /// Moved to `markdown_preview.font_size`.
-    #[serde(skip_serializing)]
     #[schemars(skip)]
     pub markdown_preview_font_size: Option<FontSize>,
     /// Moved to `markdown_preview.theme`.

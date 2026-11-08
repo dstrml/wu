@@ -71,6 +71,10 @@
     "name": "打开",
     "description": "在编辑器中打开所选文件。"
   },
+  "project_panel::OpenContextMenu": {
+    "name": "打开上下文菜单",
+    "description": "打开所选条目的上下文菜单。"
+  },
   "project_panel::OpenMarkdownPreview": {
     "name": "打开 Markdown 预览",
     "description": "打开所选文件的 Markdown 预览。"

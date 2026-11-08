@@ -1044,20 +1044,22 @@ mod tests {
     #[test]
     fn all_font_names_tracks_available_families() -> Result<()> {
         let text_system = gpui::TextSystem::new(Arc::new(
-            CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"),
+            CosmicTextSystem::new_without_system_fonts("Inter"),
         ));
         assert!(text_system.all_font_names().is_empty());
 
         text_system.add_fonts(vec![Cow::Borrowed(include_bytes!(
-            "../../../assets/fonts/lilex/Lilex-Regular.ttf"
+            "../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"
         ))])?;
-        assert_eq!(text_system.all_font_names(), ["Lilex"]);
+        assert_eq!(text_system.all_font_names(), ["JetBrains Mono"]);
 
         text_system.add_fonts(vec![
-            Cow::Borrowed(IBM_PLEX),
-            Cow::Borrowed(include_bytes!("../../../assets/fonts/lilex/Lilex-Bold.ttf")),
+            Cow::Borrowed(INTER),
+            Cow::Borrowed(include_bytes!(
+                "../../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf"
+            )),
         ])?;
-        assert_eq!(text_system.all_font_names(), ["IBM Plex Sans", "Lilex"]);
+        assert_eq!(text_system.all_font_names(), ["Inter", "JetBrains Mono"]);
         Ok(())
     }
 

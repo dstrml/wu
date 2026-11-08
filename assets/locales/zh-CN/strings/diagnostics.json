@@ -25,6 +25,8 @@
   "Show 1 warning": "显示 1 个警告",
   "Show {count} warnings": "显示 {count} 个警告",
   "Stop Diagnostics Update": "停止更新诊断",
+  "back": "返回",
+  "hint": "提示",
   "{count} errors": "{count} 个错误",
   "{count} warnings": "{count} 个警告"
 }

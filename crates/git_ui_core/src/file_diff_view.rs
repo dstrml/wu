@@ -11,6 +11,7 @@ use gpui::{
     App, AppContext as _, AsyncApp, Context, Empty, Entity, EventEmitter, FocusHandle, Focusable,
     Font, IntoElement, Render, Task, WeakEntity, Window,
 };
+use i18n::t;
 use language::{Buffer, HighlightedText, Point};
 use project::{Project, ProjectPath};
 use settings::Settings;
@@ -135,7 +136,7 @@ impl FileDiffView {
                 .read(cx)
                 .snapshot()
                 .resolve_file_path(include_root, cx)
-                .unwrap_or_else(|| MultiBuffer::DEFAULT_TITLE.to_string())
+                .unwrap_or_else(|| t!("untitled").to_string())
         };
         let old_path = breadcrumb_path(&old_buffer);
         let new_path = breadcrumb_path(&new_buffer);

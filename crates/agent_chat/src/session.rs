@@ -2568,14 +2568,20 @@ impl AgentStore {
         store
     }
 
+    fn has_agent_working_unattended(&self, cx: &App) -> bool {
+        self.live.values().any(|session| {
+            session.read(cx).agent_activity() == Some(workspace::AgentActivity::Working)
+        })
+    }
+
     fn update_idle_sleep_guard(&mut self, cx: &mut Context<Self>) {
-        let keep_awake =
-            AgentChatSettings::get_global(cx).prevent_idle_sleep && self.working_count(cx) > 0;
+        let keep_awake = AgentChatSettings::get_global(cx).prevent_idle_sleep
+            && self.has_agent_working_unattended(cx);
         if keep_awake == self.idle_sleep_guard.is_some() {
             return;
         }
         self.idle_sleep_guard = keep_awake.then(|| {
-            let guard = cx.prevent_idle_sleep("An agent is working");
+            let guard = cx.prevent_idle_sleep(&t!("An agent is working"));
             cx.spawn(async move |_, _| match guard.await {
                 Ok(_guard) => futures::future::pending::<()>().await,
                 Err(error) => log::warn!("Failed to keep the computer awake: {error:#}"),
@@ -4654,6 +4660,23 @@ done
         assert_eq!(cx.active_idle_sleep_preventions(), 0);
 
         update_chat_settings(cx, |settings| settings.prevent_idle_sleep = Some(true));
+        cx.run_until_parked();
+        assert_eq!(cx.active_idle_sleep_preventions(), 1);
+
+        session.update(cx, |session, cx| {
+            session.pending_questions.push(PendingQuestion {
+                questions: Vec::new(),
+                responder: None,
+            });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.active_idle_sleep_preventions(), 0);
+
+        session.update(cx, |session, cx| {
+            session.pending_questions.clear();
+            cx.notify();
+        });
         cx.run_until_parked();
         assert_eq!(cx.active_idle_sleep_preventions(), 1);
 
