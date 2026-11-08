@@ -694,7 +694,11 @@ impl AgentPanel {
 
     fn active_chat_id(&self, cx: &App) -> Option<String> {
         let workspace = self.workspace.upgrade()?;
-        let view = workspace.read(cx).active_item(cx)?.downcast::<ChatView>()?;
+        let workspace = workspace.read(cx);
+        let view = workspace
+            .active_item(cx)
+            .and_then(|item| item.downcast::<ChatView>())
+            .or_else(|| crate::chat_panel::visible_chat(workspace, cx))?;
         let id = view.read(cx).session().read(cx).metadata().id.clone();
         Some(id)
     }

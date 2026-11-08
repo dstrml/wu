@@ -214,9 +214,8 @@ fn close_agent_chats(cx: &mut App) {
                         }
                         workspace.close_panel::<AgentPanel>(window, cx);
                         if let Some(panel) = workspace.panel::<ChatPanel>(cx) {
-                            panel.update(cx, |panel, cx| panel.set_chat(None, cx));
+                            panel.update(cx, |panel, cx| panel.clear(cx));
                         }
-                        workspace.close_panel::<ChatPanel>(window, cx);
                         for pane in workspace.panes().to_vec() {
                             pane.update(cx, |pane, cx| {
                                 let chats: collections::HashSet<EntityId> = pane

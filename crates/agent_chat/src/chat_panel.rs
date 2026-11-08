@@ -54,6 +54,13 @@ fn remember_where_chats_open(in_panel: bool, cx: &mut App) {
     });
 }
 
+pub(crate) fn visible_chat(workspace: &Workspace, cx: &App) -> Option<Entity<ChatView>> {
+    if !panel_is_visible(workspace, cx) {
+        return None;
+    }
+    workspace.panel::<ChatPanel>(cx)?.read(cx).chat().cloned()
+}
+
 pub(crate) fn should_open_in_panel(workspace: &Workspace, cx: &App) -> bool {
     opens_in_panel(cx) && workspace.panel::<ChatPanel>(cx).is_some()
 }
@@ -140,6 +147,27 @@ fn dock_chat(
         return;
     };
     remember_where_chats_open(true, cx);
+    let source = workspace.panes().iter().find_map(|pane| {
+        let index = pane.read(cx).index_for_item(&view)?;
+        Some((pane.clone(), index))
+    });
+    let previous = panel
+        .read(cx)
+        .chat()
+        .cloned()
+        .filter(|previous| *previous != view);
+    if let Some(previous) = previous {
+        previous.update(cx, |previous, cx| previous.set_docked(false, window, cx));
+        if previous_to_tab || previous.read(cx).has_draft(cx) {
+            let item = Box::new(previous);
+            match &source {
+                Some((pane, index)) => {
+                    workspace.add_item(pane.clone(), item, Some(*index), false, false, window, cx)
+                }
+                None => workspace.add_item_to_active_pane(item, None, false, window, cx),
+            }
+        }
+    }
     for pane in workspace.panes().to_vec() {
         pane.update(cx, |pane, cx| {
             if pane.index_for_item(&view).is_some() {
@@ -147,15 +175,15 @@ fn dock_chat(
             }
         });
     }
-    let previous = panel.update(cx, |panel, cx| panel.set_chat(Some(view.clone()), cx));
+    let workspace_id = workspace.database_id();
+    panel.update(cx, |panel, cx| {
+        panel.workspace_id = workspace_id;
+        panel.set_chat(Some(view.clone()), cx);
+    });
     view.update(cx, |view, cx| view.set_docked(true, window, cx));
-    if let Some(previous) = previous.filter(|previous| *previous != view) {
-        previous.update(cx, |previous, cx| previous.set_docked(false, window, cx));
-        if previous_to_tab {
-            workspace.add_item_to_active_pane(Box::new(previous), None, false, window, cx);
-        }
-    }
-    workspace.focus_panel::<ChatPanel>(window, cx);
+    cx.defer_in(window, |workspace, window, cx| {
+        workspace.focus_panel::<ChatPanel>(window, cx);
+    });
 }
 
 pub(crate) fn move_chat_to_tab(
@@ -166,12 +194,15 @@ pub(crate) fn move_chat_to_tab(
     let Some(panel) = workspace.panel::<ChatPanel>(cx) else {
         return;
     };
-    let Some(view) = panel.update(cx, |panel, cx| panel.set_chat(None, cx)) else {
+    let workspace_id = workspace.database_id();
+    let Some(view) = panel.update(cx, |panel, cx| {
+        panel.workspace_id = workspace_id;
+        panel.clear(cx)
+    }) else {
         return;
     };
     remember_where_chats_open(false, cx);
     view.update(cx, |view, cx| view.set_docked(false, window, cx));
-    workspace.close_panel::<ChatPanel>(window, cx);
     workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
 }
 
@@ -189,7 +220,7 @@ fn new_chat_in_panel(
     let project = workspace.project().clone();
     let weak_workspace = cx.entity().downgrade();
     let view = cx.new(|cx| ChatView::new(session, store, project, weak_workspace, window, cx));
-    move_chat_to_panel(workspace, view, window, cx);
+    dock_chat(workspace, view, false, window, cx);
 }
 
 fn saved_chat_key(workspace_id: WorkspaceId) -> String {
@@ -276,7 +307,10 @@ impl ChatPanel {
                         workspace
                             .read(cx)
                             .items_of_type::<ChatView>(cx)
-                            .any(|view| view.read(cx).session() == &session)
+                            .any(|view| {
+                                let view = view.read(cx);
+                                view.session() == &session && !view.is_subagent()
+                            })
                     });
                     if this.chat.is_none() && !shown_in_tab && agent_chat_enabled(cx) {
                         let kind = session.read(cx).kind();
@@ -289,6 +323,7 @@ impl ChatPanel {
                     }
                 }
                 if this.chat.is_none() {
+                    this.save(cx);
                     cx.emit(PanelEvent::Close);
                 }
             })
@@ -309,8 +344,7 @@ impl ChatPanel {
         let chat = view.map(|view| DockedChat {
             _events: cx.subscribe(&view, |this, _, event: &ItemEvent, cx| match event {
                 ItemEvent::CloseItem => {
-                    this.set_chat(None, cx);
-                    cx.emit(PanelEvent::Close);
+                    this.clear(cx);
                 }
                 ItemEvent::UpdateTab => cx.notify(),
                 _ => {}
@@ -321,6 +355,12 @@ impl ChatPanel {
         self.save(cx);
         cx.notify();
         previous
+    }
+
+    pub(crate) fn clear(&mut self, cx: &mut Context<Self>) -> Option<Entity<ChatView>> {
+        let view = self.set_chat(None, cx)?;
+        cx.emit(PanelEvent::Close);
+        Some(view)
     }
 
     fn save(&self, cx: &App) {
@@ -406,8 +446,18 @@ impl ChatPanel {
                         IconName::Maximize,
                         t!("Open in Tab"),
                     )
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(MoveChatToTab.boxed_clone(), cx)
+                    .on_click({
+                        let workspace = self.workspace.clone();
+                        move |_, window, cx| {
+                            let workspace = workspace.clone();
+                            window.defer(cx, move |window, cx| {
+                                workspace
+                                    .update(cx, |workspace, cx| {
+                                        move_chat_to_tab(workspace, window, cx)
+                                    })
+                                    .log_err();
+                            });
+                        }
                     }),
                 )
             })
@@ -501,7 +551,7 @@ impl Panel for ChatPanel {
     }
 
     fn enabled(&self, cx: &App) -> bool {
-        agent_chat_enabled(cx)
+        agent_chat_enabled(cx) && (self.chat.is_some() || self.restoring)
     }
 
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
@@ -769,5 +819,74 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(!opens_in_panel(cx));
+    }
+
+    #[gpui::test]
+    async fn the_swapped_out_chat_survives_when_its_split_closes(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let docked_first = open_tab(&setup, cx);
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_panel(workspace, docked_first.clone(), window, cx)
+        });
+        cx.run_until_parked();
+        let in_split = open_tab(&setup, cx);
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            workspace.split_item(
+                workspace::SplitDirection::Right,
+                Box::new(in_split.clone()),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_panel(workspace, in_split.clone(), window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(docked(&setup, cx), Some(in_split));
+        assert_eq!(tabs(&setup, cx), std::slice::from_ref(&docked_first));
+    }
+
+    #[gpui::test]
+    async fn a_chat_with_unsent_text_moves_to_a_tab_instead_of_closing(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let typing = open_tab(&setup, cx);
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_panel(workspace, typing.clone(), window, cx)
+        });
+        cx.run_until_parked();
+        typing.update_in(cx, |chat, window, cx| {
+            chat.set_draft("half a thought", window, cx)
+        });
+        let other = new_session(&setup, cx);
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            show_chat_in_panel(workspace, other, setup.store.clone(), window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(tabs(&setup, cx), std::slice::from_ref(&typing));
+        assert!(!typing.read_with(cx, |chat, _| chat.is_docked()));
+    }
+
+    #[gpui::test]
+    async fn an_empty_panel_is_disabled_so_its_dock_moves_on(cx: &mut TestAppContext) {
+        let (setup, cx) = setup(cx).await;
+        let enabled = |cx: &mut VisualTestContext| {
+            setup
+                .panel
+                .read_with(cx, |panel, cx| Panel::enabled(panel, cx))
+        };
+        assert!(!enabled(cx));
+        let chat = open_tab(&setup, cx);
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_panel(workspace, chat, window, cx)
+        });
+        cx.run_until_parked();
+        assert!(enabled(cx));
+        setup.workspace.update_in(cx, |workspace, window, cx| {
+            move_chat_to_tab(workspace, window, cx)
+        });
+        cx.run_until_parked();
+        assert!(!enabled(cx));
+        assert!(!panel_open(&setup, cx));
     }
 }

@@ -788,7 +788,7 @@ impl<T: Item> ItemHandle for Entity<T> {
 
         if old_item_pane.is_none() {
             let mut pending_autosave = DelayedDebouncedEditAction::new();
-            let mut event_subscription = Some(cx.subscribe_in(
+            let event_subscription = cx.subscribe_in(
                 self,
                 window,
                 move |workspace, item: &Entity<T>, event, window, cx| {
@@ -890,9 +890,9 @@ impl<T: Item> ItemHandle for Entity<T> {
                         }
                     });
                 },
-            ));
+            );
 
-            cx.on_focus_out(
+            let focus_out_subscription = cx.on_focus_out(
                 &self.read(cx).focus_handle(cx),
                 window,
                 move |workspace, _event, window, cx| {
@@ -926,16 +926,23 @@ impl<T: Item> ItemHandle for Entity<T> {
                         });
                     }
                 },
-            )
-            .detach();
+            );
 
             let item_id = self.item_id();
             workspace.update_item_dirty_state(self, window, cx);
-            cx.observe_release_in(self, window, move |workspace, _, _, _| {
-                workspace.panes_by_item.remove(&item_id);
-                event_subscription.take();
-            })
-            .detach();
+            let release_subscription =
+                cx.observe_release_in(self, window, move |workspace, _, _, _| {
+                    workspace.panes_by_item.remove(&item_id);
+                    workspace.item_subscriptions.remove(&item_id);
+                });
+            workspace.item_subscriptions.insert(
+                item_id,
+                vec![
+                    event_subscription,
+                    focus_out_subscription,
+                    release_subscription,
+                ],
+            );
         }
 
         cx.defer_in(window, |workspace, window, cx| {

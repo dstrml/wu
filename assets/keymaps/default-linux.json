@@ -1298,7 +1298,7 @@
     },
   },
   {
-    "context": "AgentChat",
+    "context": "AgentChat && !docked",
     "bindings": {
       "find": "buffer_search::Deploy",
       "ctrl-f": "buffer_search::Deploy",

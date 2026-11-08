@@ -526,6 +526,16 @@ impl ChatView {
         self.docked
     }
 
+    pub(crate) fn has_draft(&self, cx: &App) -> bool {
+        !self.attachments.is_empty() || !self.composer.read(cx).text(cx).trim().is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_draft(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |composer, cx| composer.set_text(text, window, cx));
+    }
+
     pub(crate) fn set_docked(
         &mut self,
         docked: bool,
@@ -546,6 +556,7 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) {
         if self.subagent.is_some() || self.docked {
+            cx.propagate();
             return;
         }
         let Some(view) = self.this.upgrade() else {
@@ -650,7 +661,7 @@ impl ChatView {
     }
 
     fn rename_chat(&mut self, _: &RenameChat, window: &mut Window, cx: &mut Context<Self>) {
-        if self.subagent.is_some() || self.rename_editor.is_some() {
+        if self.subagent.is_some() || self.docked || self.rename_editor.is_some() {
             return;
         }
         let title = self.title(cx);
@@ -3233,6 +3244,15 @@ fn column(content: impl IntoElement, gutter: f32) -> impl IntoElement {
 }
 
 impl ChatView {
+    fn key_context(&self) -> KeyContext {
+        let mut context = KeyContext::default();
+        context.add("AgentChat");
+        if self.docked {
+            context.add("docked");
+        }
+        context
+    }
+
     fn gutter(&self) -> f32 {
         if self.docked { SPACE_LG } else { SIDE_GUTTER }
     }
@@ -3333,7 +3353,7 @@ impl Render for ChatView {
             .map(|pending| pending.id().to_string());
         let drop_highlight = cx.theme().colors().drop_target_background;
         let root = v_flex()
-            .key_context("AgentChat")
+            .key_context(self.key_context())
             .relative()
             .size_full()
             .when(self.side_pane.is_none(), |root| {

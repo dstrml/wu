@@ -1465,6 +1465,7 @@ pub struct Workspace {
     right_dock: Entity<Dock>,
     panes: Vec<Entity<Pane>>,
     panes_by_item: HashMap<EntityId, WeakEntity<Pane>>,
+    item_subscriptions: HashMap<EntityId, Vec<Subscription>>,
     active_pane: Entity<Pane>,
     last_active_center_pane: Option<WeakEntity<Pane>>,
     status_bar: Entity<StatusBar>,
@@ -1897,6 +1898,7 @@ impl Workspace {
             center,
             panes: vec![center_pane.clone()],
             panes_by_item: Default::default(),
+            item_subscriptions: Default::default(),
             active_pane: center_pane.clone(),
             last_active_center_pane: Some(center_pane.downgrade()),
             status_bar,
@@ -5679,6 +5681,7 @@ impl Workspace {
                     && entry.get().entity_id() == pane.entity_id()
                 {
                     entry.remove();
+                    self.item_subscriptions.remove(&item.item_id());
                 }
                 cx.emit(Event::ItemRemoved {
                     item_id: item.item_id(),
@@ -5831,6 +5834,7 @@ impl Workspace {
             self.force_remove_pane(&pane, &focus_on, window, cx);
             for removed_item in pane.read(cx).items() {
                 self.panes_by_item.remove(&removed_item.item_id());
+                self.item_subscriptions.remove(&removed_item.item_id());
             }
 
             cx.notify();
@@ -11171,6 +11175,38 @@ mod tests {
         fs.set_branch_name(Path::new(path!("/root1/.git")), Some("other"));
         cx.executor().run_until_parked();
         assert_eq!(cx.window_title().as_deref(), Some("root1 — a.txt"));
+    }
+
+    #[gpui::test]
+    async fn test_item_listeners_go_away_when_the_item_leaves_its_pane(cx: &mut TestAppContext) {
+        init_test(cx);
+        let project = Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let item = cx.new(TestItem::new);
+        let listened = |cx: &mut VisualTestContext| {
+            workspace.read_with(cx, |workspace, _| {
+                workspace
+                    .item_subscriptions
+                    .get(&item.entity_id())
+                    .map(Vec::len)
+            })
+        };
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        for _ in 0..2 {
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace.add_item_to_active_pane(Box::new(item.clone()), None, true, window, cx)
+            });
+            cx.run_until_parked();
+            assert_eq!(listened(cx), Some(3));
+
+            pane.update_in(cx, |pane, window, cx| {
+                pane.remove_item(item.entity_id(), false, false, window, cx)
+            });
+            cx.run_until_parked();
+            assert_eq!(listened(cx), None);
+        }
     }
 
     #[gpui::test]
