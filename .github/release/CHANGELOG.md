@@ -8,6 +8,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Allow multiple tabs inside the agent chat side panel.
 - Reduce quoted text bar's width.
 - Close images in agent chat on background click.
+- Make agent thinking indicator animation look more like Wu.
 
 ## 1.2.0 - 2026-11-08
 

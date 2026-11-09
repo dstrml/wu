@@ -312,7 +312,7 @@ impl ChatView {
             DictationState::Transcribing(_) | DictationState::Downloading(_) => {
                 glass_accent(content, 0., cx).child(mono_spinner(
                     "agent-dictation-progress".into(),
-                    2.,
+                    11.,
                     ON_ACCENT,
                 ))
             }

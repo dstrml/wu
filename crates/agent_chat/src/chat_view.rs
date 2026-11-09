@@ -2091,7 +2091,7 @@ impl ChatView {
             .text_size(ui(11.))
             .child(gradient_spinner(
                 format!("agent-working-{}", cx.entity_id()).into(),
-                2.5,
+                14.,
             ))
             .child(
                 div()

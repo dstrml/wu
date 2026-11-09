@@ -225,9 +225,14 @@ impl RenderOnce for Chip {
     }
 }
 
-const GSPIN_ROW_TINTS: [u32; 3] = [0xB6D3EF, 0xEDB185, 0xF888A0];
-const GSPIN_DIM: f32 = 0.1;
-const GRADIENT_SPIN_MS: u64 = 750;
+const GSPIN_TOP_TINT: u32 = 0xB6D3EF;
+const GSPIN_MIDDLE_TINT: u32 = 0xEDB185;
+const GSPIN_BOTTOM_TINT: u32 = 0xF888A0;
+const GSPIN_DIM: f32 = 0.3;
+const GRADIENT_SPIN_MS: u64 = 900;
+const LOGO_PATH: &str = "icons/wu_mark.svg";
+const LOGO_ASPECT: f32 = 628. / 644.;
+const LOGO_BANDS: usize = 6;
 
 fn lerp(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t
@@ -244,43 +249,68 @@ fn gspin_opacity(t: f32, dim: f32) -> f32 {
     }
 }
 
-fn gspin_cell_phase(row: usize, col: usize) -> f32 {
-    let centre = 1.0;
-    let max = 2.0 + centre;
-    let d = 2.0 - row as f32 + (col as f32 - centre).abs();
-    d / (max + 1.0)
+fn logo_band_phase(band: usize) -> f32 {
+    (LOGO_BANDS - 1 - band) as f32 / LOGO_BANDS as f32
 }
 
-pub(crate) fn gradient_spinner(id: SharedString, cell: f32) -> impl IntoElement {
-    spinner_grid(id, cell, GSPIN_ROW_TINTS.map(|tint| rgb(tint).into()))
+fn logo_band_tint(band: usize) -> Hsla {
+    let depth = band as f32 / (LOGO_BANDS - 1) as f32;
+    if depth < 0.5 {
+        mix(rgb(GSPIN_TOP_TINT).into(), rgb(GSPIN_MIDDLE_TINT).into(), depth * 2.)
+    } else {
+        mix(
+            rgb(GSPIN_MIDDLE_TINT).into(),
+            rgb(GSPIN_BOTTOM_TINT).into(),
+            depth * 2. - 1.,
+        )
+    }
 }
 
-pub(crate) fn mono_spinner(id: SharedString, cell: f32, tint: Hsla) -> impl IntoElement {
-    spinner_grid(id, cell, [tint; 3])
+pub(crate) fn gradient_spinner(id: SharedString, height: f32) -> impl IntoElement {
+    logo_spinner(id, height, logo_band_tint)
 }
 
-fn spinner_grid(id: SharedString, cell: f32, row_tints: [Hsla; 3]) -> impl IntoElement {
-    v_flex()
+pub(crate) fn mono_spinner(id: SharedString, height: f32, tint: Hsla) -> impl IntoElement {
+    logo_spinner(id, height, move |_| tint)
+}
+
+fn logo_spinner(
+    id: SharedString,
+    height: f32,
+    band_tint: impl Fn(usize) -> Hsla,
+) -> impl IntoElement {
+    let width = height * LOGO_ASPECT;
+    let band_height = height / LOGO_BANDS as f32;
+    div()
         .flex_none()
-        .gap(px(cell / 2.0))
-        .children((0..3).map(move |row| {
-            let id = id.clone();
-            h_flex()
-                .gap(px(cell / 2.0))
-                .children((0..3).map(move |col| {
-                    let phase = gspin_cell_phase(row, col);
-                    div()
-                        .size(px(cell))
-                        .rounded_full()
-                        .bg(row_tints[row])
-                        .with_animation(
-                            ElementId::Name(format!("{id}-{row}-{col}").into()),
-                            Animation::new(Duration::from_millis(GRADIENT_SPIN_MS)).repeat(),
-                            move |cell, delta| {
-                                cell.opacity(gspin_opacity(delta - phase, GSPIN_DIM))
-                            },
-                        )
-                }))
+        .relative()
+        .w(px(width))
+        .h(px(height))
+        .children((0..LOGO_BANDS).map(|band| {
+            let top = band as f32 * band_height;
+            let phase = logo_band_phase(band);
+            div()
+                .absolute()
+                .left_0()
+                .top(px(top))
+                .w(px(width))
+                .h(px(band_height))
+                .overflow_hidden()
+                .child(
+                    svg()
+                        .path(LOGO_PATH)
+                        .absolute()
+                        .left_0()
+                        .top(px(-top))
+                        .w(px(width))
+                        .h(px(height))
+                        .text_color(band_tint(band)),
+                )
+                .with_animation(
+                    ElementId::Name(format!("{id}-{band}").into()),
+                    Animation::new(Duration::from_millis(GRADIENT_SPIN_MS)).repeat(),
+                    move |band, delta| band.opacity(gspin_opacity(delta - phase, GSPIN_DIM)),
+                )
         }))
 }
 
@@ -360,8 +390,11 @@ mod tests {
     }
 
     #[test]
-    fn spinner_wave_rises_from_the_bottom_row() {
-        assert!(gspin_cell_phase(2, 1) < gspin_cell_phase(0, 1));
+    fn spinner_wave_rises_from_the_chin_to_the_antler_tips() {
+        assert_eq!(logo_band_phase(LOGO_BANDS - 1), 0.0);
+        assert!(logo_band_phase(LOGO_BANDS - 1) < logo_band_phase(0));
+        assert_eq!(logo_band_tint(0), rgb(GSPIN_TOP_TINT).into());
+        assert_eq!(logo_band_tint(LOGO_BANDS - 1), rgb(GSPIN_BOTTOM_TINT).into());
         assert_eq!(gspin_opacity(0.0, GSPIN_DIM), 1.0);
         assert_eq!(gspin_opacity(0.6, GSPIN_DIM), GSPIN_DIM);
     }

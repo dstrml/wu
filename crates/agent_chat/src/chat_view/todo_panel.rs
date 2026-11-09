@@ -404,7 +404,7 @@ fn status_glyph(index: usize, status: TodoStatus, live: bool, cx: &App) -> AnyEl
             icon(IconName::AgentCheck, px(12.), cx.theme().status().success).into_any_element()
         }
         TodoStatus::InProgress if live => {
-            gradient_spinner(format!("agent-todo-active-{index}").into(), 2.5).into_any_element()
+            gradient_spinner(format!("agent-todo-active-{index}").into(), 12.).into_any_element()
         }
         TodoStatus::InProgress => div()
             .size(px(10.))
