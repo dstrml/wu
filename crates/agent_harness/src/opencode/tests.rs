@@ -1119,6 +1119,19 @@ fn missing_connected_list_falls_back_to_the_full_catalog() {
 }
 
 #[test]
+fn models_keep_the_order_opencode_lists_them_in() {
+    let providers: ProviderCatalog = serde_json::from_str(
+        r#"{"all": [{"id": "p", "models": {"zeta": {"name": "Zeta"}, "alpha": {"name": "Alpha"}}}]}"#,
+    )
+    .unwrap();
+    let ids: Vec<String> = models_from_providers(&providers)
+        .into_iter()
+        .map(|model| model.id)
+        .collect();
+    assert_eq!(ids, ["p/zeta", "p/alpha"]);
+}
+
+#[test]
 fn variants_only_ride_models_that_advertise_them() {
     let providers: ProviderCatalog = serde_json::from_value(json!({
         "all": [{

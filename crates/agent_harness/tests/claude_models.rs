@@ -28,6 +28,11 @@ async fn initialize_is_shared_and_curated_metadata_survives_the_live_union() {
     let catalog = harness.model_catalog(true).await.unwrap();
     assert_eq!(catalog.source, "live");
     assert_eq!(catalog.models[0].id, "claude-opus-5-5");
+    let ids: Vec<&str> = catalog.models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(
+        ids[..3],
+        ["claude-opus-5-5", "claude-fable-5-1", "gateway/new"]
+    );
     assert!(
         catalog.models.iter().all(|m| !m.id.ends_with("[1m]")),
         "context sizes fold into their base model"

@@ -195,6 +195,7 @@ pub(super) fn with_discovered_models(
         .ok_or_else(|| {
             crate::HarnessError::Protocol("Claude returned an empty model catalog".into())
         })?;
+    let mut ordered: Vec<Model> = Vec::new();
     let mut default = None;
     let mut valid = false;
     let mut sizes: Vec<(String, Vec<String>)> = Vec::new();
@@ -226,7 +227,11 @@ pub(super) fn with_discovered_models(
                 None => sizes.push((id.to_owned(), vec![size])),
             }
         }
-        if models.iter().any(|model| model.id == id) {
+        if ordered.iter().any(|model| model.id == id) {
+            continue;
+        }
+        if let Some(index) = models.iter().position(|model| model.id == id) {
+            ordered.push(models.remove(index));
             continue;
         }
         let mut ladder = Vec::new();
@@ -252,7 +257,7 @@ pub(super) fn with_discovered_models(
         if ladder.contains(&ReasoningLevel::XHigh) {
             ladder.extend([ReasoningLevel::Ultracode, ReasoningLevel::Ultrathink]);
         }
-        models.push(Model {
+        ordered.push(Model {
             id: id.into(),
             label: text("displayName").unwrap_or(id).into(),
             description: text("description").map(str::to_owned),
@@ -265,6 +270,8 @@ pub(super) fn with_discovered_models(
             "Claude returned an empty model catalog".into(),
         ));
     }
+    ordered.extend(models);
+    let mut models = ordered;
     for (base, found) in sizes {
         if let Some(model) = models.iter_mut().find(|model| model.id == base) {
             model

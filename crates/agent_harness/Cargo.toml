@@ -18,6 +18,7 @@ base64.workspace = true
 chrono.workspace = true
 futures.workspace = true
 i18n.workspace = true
+indexmap.workspace = true
 log.workspace = true
 reqwest.workspace = true
 semver.workspace = true

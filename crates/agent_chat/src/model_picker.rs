@@ -1262,7 +1262,7 @@ impl ModelPicker {
                     .min_w_0()
                     .truncate()
                     .text_size(ui(12.))
-                    .font_weight(FontWeight::MEDIUM)
+                    .font_weight(FontWeight::NORMAL)
                     .child(model.label.clone()),
             )
             .child(star)
@@ -1308,7 +1308,7 @@ impl ModelPicker {
         let label = div()
             .truncate()
             .text_size(ui(12.5))
-            .font_weight(FontWeight::MEDIUM)
+            .font_weight(FontWeight::NORMAL)
             .text_color(colors.text)
             .child(model.label.clone());
         let body = if two_line {

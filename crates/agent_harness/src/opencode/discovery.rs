@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::{Model, ModelOption, ModelOptionChoice, ReasoningLevel, Skill, SlashCommand};
@@ -53,7 +54,7 @@ pub(super) struct ProviderCatalog {
 pub(super) struct Provider {
     pub(super) id: Option<String>,
     pub(super) name: Option<String>,
-    pub(super) models: Option<BTreeMap<String, ProviderModel>>,
+    pub(super) models: Option<IndexMap<String, ProviderModel>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -88,27 +89,23 @@ pub(super) fn models_from_providers(providers: &ProviderCatalog) -> Vec<Model> {
         let Some(models) = &provider.models else {
             continue;
         };
-        let mut provider_models: Vec<Model> = models
-            .iter()
-            .map(|(model_id, model)| {
-                let mut levels: Vec<ReasoningLevel> = model
-                    .variants
-                    .iter()
-                    .flat_map(|variants| variants.keys())
-                    .filter_map(|key| variant_to_level(key))
-                    .collect();
-                levels.sort();
-                levels.dedup();
-                Model {
-                    id: format!("{provider_id}/{model_id}"),
-                    label: model.name.as_deref().unwrap_or(model_id).to_owned(),
-                    description: Some(provider_name.to_owned()),
-                    reasoning_levels: levels,
-                    options: Vec::new(),
-                }
-            })
-            .collect();
-        provider_models.sort_by(|a, b| a.label.cmp(&b.label));
+        let provider_models = models.iter().map(|(model_id, model)| {
+            let mut levels: Vec<ReasoningLevel> = model
+                .variants
+                .iter()
+                .flat_map(|variants| variants.keys())
+                .filter_map(|key| variant_to_level(key))
+                .collect();
+            levels.sort();
+            levels.dedup();
+            Model {
+                id: format!("{provider_id}/{model_id}"),
+                label: model.name.as_deref().unwrap_or(model_id).to_owned(),
+                description: Some(provider_name.to_owned()),
+                reasoning_levels: levels,
+                options: Vec::new(),
+            }
+        });
         result.extend(provider_models);
     }
     result
