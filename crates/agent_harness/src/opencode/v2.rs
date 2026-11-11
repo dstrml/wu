@@ -41,6 +41,9 @@ pub(super) fn normalize_v2_frame_with_session_models(
 ) -> Vec<Value> {
     let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
     let data = event.get("data").cloned().unwrap_or(Value::Null);
+    if kind == "form.created" {
+        return form_created(&data);
+    }
     let session_id = str_field(&data, "sessionID");
     if session_id.is_empty() {
         return Vec::new();
@@ -250,6 +253,10 @@ pub(super) fn normalize_v2_frame_with_session_models(
                 }
             }
         })],
+        "form.replied" | "form.cancelled" => vec![json!({
+            "type": if kind == "form.replied" { "question.replied" } else { "question.rejected" },
+            "properties": { "sessionID": session(), "requestID": data.get("id") }
+        })],
         "permission.asked" => {
             if data.get("id").and_then(Value::as_str).is_none() {
                 return Vec::new();
@@ -261,6 +268,62 @@ pub(super) fn normalize_v2_frame_with_session_models(
         }
         _ => Vec::new(),
     }
+}
+
+fn form_created(data: &Value) -> Vec<Value> {
+    let form = data.get("form").unwrap_or(&Value::Null);
+    let id = str_field(form, "id");
+    let session_id = str_field(form, "sessionID");
+    if id.is_empty() || session_id.is_empty() {
+        return Vec::new();
+    }
+    let is_question = form.pointer("/metadata/kind").and_then(Value::as_str) == Some("question");
+    let questions = form
+        .get("fields")
+        .and_then(Value::as_array)
+        .filter(|_| is_question)
+        .and_then(|fields| {
+            fields
+                .iter()
+                .map(question_from_field)
+                .collect::<Option<Vec<_>>>()
+        })
+        .filter(|questions| !questions.is_empty());
+    match questions {
+        Some(questions) => vec![json!({
+            "type": "question.asked",
+            "properties": { "id": id, "sessionID": session_id, "questions": questions }
+        })],
+        None => vec![json!({
+            "type": "form.unsupported",
+            "properties": { "id": id, "sessionID": session_id }
+        })],
+    }
+}
+
+fn question_from_field(field: &Value) -> Option<Value> {
+    let key = field.get("key")?.as_str()?;
+    let multiple = match field.get("type")?.as_str()? {
+        "string" => false,
+        "multiselect" => true,
+        _ => return None,
+    };
+    let title = field.get("title").and_then(Value::as_str);
+    let question = field.get("description").and_then(Value::as_str).or(title)?;
+    let options = field.get("options").cloned().unwrap_or(json!([]));
+    let custom = field
+        .get("custom")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || options.as_array().is_none_or(Vec::is_empty);
+    Some(json!({
+        "key": key,
+        "header": title,
+        "question": question,
+        "options": options,
+        "multiple": multiple,
+        "custom": custom,
+    }))
 }
 
 // 2.x provider failures can carry an empty message; the type keeps the chip readable.

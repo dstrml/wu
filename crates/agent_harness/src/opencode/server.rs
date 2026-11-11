@@ -474,7 +474,16 @@ impl Server {
             Protocol::V1 => format!("/session/{session_id}"),
             Protocol::V2 => format!("/api/session/{session_id}"),
         };
-        let request = self.request(reqwest::Method::DELETE, &path);
+        self.delete(&path, directory, &[]).await
+    }
+
+    async fn delete(
+        &self,
+        path: &str,
+        directory: Option<&str>,
+        query: &[(&str, &str)],
+    ) -> Result<(), HarnessError> {
+        let request = self.request(reqwest::Method::DELETE, path).query(query);
         let response = self
             .scoped(request, directory)
             .await
@@ -695,6 +704,86 @@ impl Server {
                 )
                 .await
                 .map(|_| ())
+            }
+        }
+    }
+
+    pub(super) async fn reply_question(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        directory: Option<&str>,
+        questions: &[crate::UserInputQuestion],
+        answers: &[crate::UserInputAnswer],
+    ) -> Result<(), HarnessError> {
+        let labels = |question: &crate::UserInputQuestion| {
+            answers
+                .iter()
+                .find(|answer| answer.question_id == question.id)
+                .map(|answer| answer.labels.clone())
+                .unwrap_or_default()
+        };
+        match self.protocol().await {
+            Protocol::V1 => {
+                let ordered: Vec<Vec<String>> = questions.iter().map(labels).collect();
+                self.post_json(
+                    &format!("/question/{request_id}/reply"),
+                    directory,
+                    &json!({ "answers": ordered }),
+                )
+                .await?;
+            }
+            Protocol::V2 => {
+                let mut answer = serde_json::Map::new();
+                for question in questions {
+                    let mut chosen = labels(question);
+                    let value = if question.multi_select {
+                        json!(chosen)
+                    } else if chosen.is_empty() {
+                        continue;
+                    } else {
+                        json!(chosen.swap_remove(0))
+                    };
+                    answer.insert(question.id.clone(), value);
+                }
+                self.post_json(
+                    &format!("/api/session/{session_id}/form/{request_id}/reply"),
+                    directory,
+                    &json!({ "answer": answer }),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) async fn reject_question(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        directory: Option<&str>,
+        message: Option<&str>,
+    ) -> Result<(), HarnessError> {
+        match self.protocol().await {
+            Protocol::V1 => self
+                .post_json(
+                    &format!("/question/{request_id}/reject"),
+                    directory,
+                    &Value::Null,
+                )
+                .await
+                .map(|_| ()),
+            Protocol::V2 => {
+                let query: Vec<(&str, &str)> = message
+                    .map(|message| ("message", message))
+                    .into_iter()
+                    .collect();
+                self.delete(
+                    &format!("/api/session/{session_id}/form/{request_id}"),
+                    directory,
+                    &query,
+                )
+                .await
             }
         }
     }

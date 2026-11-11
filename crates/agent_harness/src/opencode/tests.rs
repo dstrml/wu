@@ -111,6 +111,8 @@ impl Default for Fixture {
     }
 }
 
+type HeldQuestions = Arc<std::sync::Mutex<Vec<tokio::sync::oneshot::Sender<Vec<UserInputAnswer>>>>>;
+
 struct TurnWire {
     bus: mpsc::UnboundedSender<Value>,
     posts: Arc<std::sync::Mutex<Vec<(String, Value)>>>,
@@ -121,6 +123,7 @@ struct TurnWire {
     _permission: tokio::sync::watch::Sender<crate::PermissionMode>,
     polls: Arc<std::sync::atomic::AtomicUsize>,
     command_failure_release: Option<tokio::sync::oneshot::Sender<()>>,
+    held_questions: HeldQuestions,
     server: tokio::task::JoinHandle<()>,
     run: tokio::task::JoinHandle<()>,
 }
@@ -208,6 +211,9 @@ impl TurnWire {
         let resume_failures = overrides["resumeFailures"].as_u64().unwrap_or(0) as usize;
         let resume_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let agents = overrides.get("agents").cloned();
+        let hold_questions = overrides["holdQuestions"].as_bool().unwrap_or(false);
+        let held_questions: HeldQuestions = Arc::default();
+        let held = held_questions.clone();
         let polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let server_polls = polls.clone();
         let (command_failure_release, command_failure_wait) = tokio::sync::oneshot::channel();
@@ -261,6 +267,11 @@ impl TurnWire {
                             serde_json::from_slice(&request[header_end..header_end + length])
                                 .unwrap_or(Value::Null),
                         ));
+                    } else if header.starts_with("DELETE ") {
+                        recorded
+                            .lock()
+                            .unwrap()
+                            .push((format!("DELETE {target}"), Value::Null));
                     }
                     let respond = |status: &str, body: &str| {
                         format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
@@ -409,8 +420,12 @@ impl TurnWire {
             event_tx,
             controls: RunControls {
                 request_input: Box::new(move |questions| {
-                    let answer = answer.expect("fixture must not ask for input");
                     let (tx, rx) = tokio::sync::oneshot::channel();
+                    if hold_questions {
+                        held.lock().unwrap().push(tx);
+                        return rx;
+                    }
+                    let answer = answer.expect("fixture must not ask for input");
                     tx.send(
                         questions
                             .into_iter()
@@ -459,6 +474,7 @@ impl TurnWire {
                 Some(NativeCommandReply::DelayedHttp404)
             )
             .then_some(command_failure_release),
+            held_questions,
             server,
             run,
         }
@@ -1415,6 +1431,233 @@ fn questions_map_to_input_panel_shape() {
     assert_eq!(questions[0].question, "Which color?");
     assert_eq!(questions[0].options, vec!["Red", "Blue"]);
     assert!(questions[0].multi_select);
+}
+
+#[test]
+fn v2_question_forms_become_questions_and_other_forms_are_flagged() {
+    let mut tools = HashMap::new();
+    let form = |kind: &str, fields: Value| {
+        json!({"id": "evt_1", "type": "form.created", "data": {"form": {
+            "id": "frm_1", "sessionID": "ses_1", "title": "Questions",
+            "metadata": {"kind": kind}, "fields": fields,
+        }}})
+    };
+    let question_fields = json!([
+        {"key": "q0", "type": "string", "title": "Color", "description": "Which color?",
+         "options": [{"value": "Red", "label": "Red"}, {"value": "Blue", "label": "Blue"}],
+         "custom": true},
+        {"key": "q1", "type": "multiselect", "title": "Sizes", "description": "Which sizes?",
+         "options": [{"value": "S", "label": "S"}]},
+    ]);
+    let out = normalize_v2_frame(form("question", question_fields.clone()), &mut tools);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0]["type"], "question.asked");
+    let questions = map_questions(&out[0]["properties"]);
+    assert_eq!(out[0]["properties"]["sessionID"], "ses_1");
+    assert_eq!(out[0]["properties"]["id"], "frm_1");
+    assert_eq!(questions.len(), 2);
+    assert_eq!(questions[0].id, "q0");
+    assert_eq!(questions[0].header, "Color");
+    assert_eq!(questions[0].question, "Which color?");
+    assert_eq!(questions[0].options, vec!["Red", "Blue"]);
+    assert!(!questions[0].multi_select);
+    assert!(questions[0].accepts_typed_answer);
+    assert_eq!(questions[1].id, "q1");
+    assert!(questions[1].multi_select);
+    assert!(!questions[1].accepts_typed_answer);
+
+    let unsupported =
+        json!([{"type": "form.unsupported", "properties": {"id": "frm_1", "sessionID": "ses_1"}}]);
+    assert_eq!(
+        normalize_v2_frame(form("websearch", question_fields), &mut tools),
+        unsupported.as_array().unwrap().clone()
+    );
+    assert_eq!(
+        normalize_v2_frame(
+            form(
+                "question",
+                json!([{"key": "q0", "type": "boolean", "title": "Sure?"}])
+            ),
+            &mut tools
+        ),
+        unsupported.as_array().unwrap().clone()
+    );
+    assert!(
+        normalize_v2_frame(
+            json!({"type": "form.created", "data": {"form": {"id": "frm_1"}}}),
+            &mut tools
+        )
+        .is_empty()
+    );
+    for (kind, settled) in [
+        ("form.replied", "question.replied"),
+        ("form.cancelled", "question.rejected"),
+    ] {
+        assert_eq!(
+            normalize_v2_frame(
+                json!({"type": kind, "data": {"id": "frm_1", "sessionID": "ses_1"}}),
+                &mut tools
+            ),
+            [json!({"type": settled, "properties": {"sessionID": "ses_1", "requestID": "frm_1"}})]
+        );
+    }
+}
+
+#[tokio::test]
+async fn questions_reply_on_each_protocol_route() {
+    for v2 in [false, true] {
+        let mut wire = TurnWire::start_fixture(Fixture {
+            v2,
+            version: "2.2.6",
+            answer: Some(true),
+            ..Fixture::default()
+        })
+        .await;
+        if v2 {
+            wire.request("/api/model").await;
+        }
+        wire.request(if v2 { "/prompt" } else { "/prompt_async" })
+            .await;
+        if v2 {
+            wire.v2(
+                "form.created",
+                json!({"form": {
+                    "id": "frm_1", "sessionID": "fixture", "title": "Questions",
+                    "metadata": {"kind": "question"},
+                    "fields": [
+                        {"key": "q0", "type": "string", "title": "Pick", "description": "Pick one",
+                         "options": [{"value": "Yes", "label": "Yes"}], "custom": true},
+                        {"key": "q1", "type": "multiselect", "title": "Many", "description": "Pick many",
+                         "options": [{"value": "Yes", "label": "Yes"}]},
+                    ],
+                }}),
+            );
+            let body = wire.posted("/api/session/fixture/form/frm_1/reply").await;
+            assert_eq!(body, json!({"answer": {"q0": "Yes", "q1": ["Yes"]}}));
+        } else {
+            wire.bus
+                .send(json!({"type": "question.asked", "properties": {
+                    "id": "que_1", "sessionID": "fixture",
+                    "questions": [{"question": "Pick one", "header": "Pick",
+                                   "options": [{"label": "Yes"}]}],
+                }}))
+                .unwrap();
+            let body = wire.posted("/question/que_1/reply").await;
+            assert_eq!(body, json!({"answers": [["Yes"]]}));
+        }
+    }
+}
+
+#[tokio::test]
+async fn questions_answered_elsewhere_stop_waiting_for_wu() {
+    for v2 in [false, true] {
+        let mut wire = TurnWire::start_config(v2, "2.2.6", json!({"holdQuestions": true})).await;
+        if v2 {
+            wire.request("/api/model").await;
+        }
+        wire.request(if v2 { "/prompt" } else { "/prompt_async" })
+            .await;
+        for id in ["que_other", "que_1"] {
+            if v2 {
+                wire.v2(
+                    "form.created",
+                    json!({"form": {
+                        "id": id, "sessionID": "fixture", "title": "Questions",
+                        "metadata": {"kind": "question"},
+                        "fields": [{"key": "q0", "type": "string", "description": "Pick one",
+                                    "options": [{"value": "A", "label": "A"}]}],
+                    }}),
+                );
+            } else {
+                wire.bus
+                    .send(json!({"type": "question.asked", "properties": {
+                        "id": id, "sessionID": "fixture",
+                        "questions": [{"question": "Pick one", "options": [{"label": "A"}]}],
+                    }}))
+                    .unwrap();
+            }
+        }
+        let held = wire.held_questions.clone();
+        let wait_for = |done: Box<dyn Fn(&[tokio::sync::oneshot::Sender<_>]) -> bool>| {
+            let held = held.clone();
+            tokio::time::timeout(Duration::from_secs(2), async move {
+                while !done(&held.lock().unwrap()) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+        };
+        wait_for(Box::new(|held| held.len() == 2)).await.unwrap();
+        if v2 {
+            wire.v2(
+                "form.cancelled",
+                json!({"id": "que_1", "sessionID": "fixture"}),
+            );
+        } else {
+            wire.bus
+                .send(json!({"type": "question.replied", "properties": {
+                    "sessionID": "fixture", "requestID": "que_1", "answers": [["A"]],
+                }}))
+                .unwrap();
+        }
+        wait_for(Box::new(|held| held[1].is_closed()))
+            .await
+            .expect("the answered question should stop waiting");
+        assert!(!held.lock().unwrap()[0].is_closed());
+        assert!(
+            !wire
+                .posts
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(path, _)| path.contains("que_1")),
+            "Wu answered a question that was already settled"
+        );
+    }
+}
+
+#[tokio::test]
+async fn v2_forms_wu_cannot_show_are_cancelled_with_a_reason() {
+    let mut wire = TurnWire::start_config(true, "2.2.6", json!({})).await;
+    wire.request("/api/model").await;
+    wire.request("/prompt").await;
+    for (id, owner) in [("frm_foreign", "foreign"), ("frm_own", "fixture")] {
+        wire.v2(
+            "form.created",
+            json!({"form": {
+                "id": id, "sessionID": owner, "title": "Search provider",
+                "metadata": {"kind": "websearch"},
+                "fields": [{"key": "provider", "type": "string"}],
+            }}),
+        );
+    }
+    let own = "DELETE /api/session/fixture/form/frm_own";
+    let cancelled = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some((path, _)) = wire
+                .posts
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(path, _)| path.starts_with(own))
+            {
+                return path.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("expected the form to be cancelled");
+    assert!(cancelled.contains("message=Wu+can"), "{cancelled}");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !wire
+            .posts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(path, _)| path.contains("frm_foreign")),
+        "a form from another session was cancelled"
+    );
 }
 
 #[test]

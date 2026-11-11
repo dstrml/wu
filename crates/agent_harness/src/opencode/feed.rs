@@ -444,7 +444,10 @@ pub(super) fn map_questions(properties: &Value) -> Vec<UserInputQuestion> {
         .enumerate()
         .filter_map(|(index, question)| {
             Some(UserInputQuestion {
-                id: format!("q{index}"),
+                id: question
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| format!("q{index}"), str::to_owned),
                 header: question
                     .get("header")
                     .and_then(Value::as_str)

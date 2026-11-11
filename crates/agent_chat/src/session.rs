@@ -773,6 +773,29 @@ impl PendingQuestion {
     }
 }
 
+async fn agent_stopped_waiting(
+    mut agent: tokio::sync::oneshot::Sender<Vec<UserInputAnswer>>,
+    chat: tokio::sync::oneshot::Receiver<Vec<UserInputAnswer>>,
+) -> bool {
+    let answered = {
+        let withdrawn = std::pin::pin!(agent.closed());
+        match futures::future::select(chat, withdrawn).await {
+            futures::future::Either::Left((answer, _)) => Some(answer),
+            futures::future::Either::Right(_) => None,
+        }
+    };
+    match answered {
+        Some(Ok(answers)) => {
+            if agent.send(answers).is_err() {
+                log::debug!("agent stopped waiting for an answer");
+            }
+            false
+        }
+        Some(Err(_)) => false,
+        None => true,
+    }
+}
+
 enum RunInput {
     Event(Result<AgentEvent, agent_harness::HarnessError>),
     Question {
@@ -1372,6 +1395,23 @@ impl AgentSession {
         cx.notify();
     }
 
+    fn drop_withdrawn_questions(&mut self, cx: &mut Context<Self>) {
+        let before = self.pending_questions.len();
+        self.pending_questions.retain(|pending| {
+            !pending
+                .responder
+                .as_ref()
+                .is_some_and(tokio::sync::oneshot::Sender::is_closed)
+        });
+        if self.pending_questions.len() == before {
+            return;
+        }
+        if self.pending_questions.is_empty() {
+            cx.dismiss_system_notification(&self.metadata.id);
+        }
+        cx.notify();
+    }
+
     fn apply_permission_now(&mut self, permission: PermissionMode, cx: &mut Context<Self>) {
         if let Some(run) = &self.run {
             run.permission.send_replace(permission);
@@ -1535,7 +1575,20 @@ impl AgentSession {
                     RunInput::Question {
                         questions,
                         responder,
-                    } => this.update(cx, |this, cx| this.push_question(questions, responder, cx)),
+                    } => {
+                        let (relay_tx, relay_rx) = tokio::sync::oneshot::channel();
+                        cx.spawn({
+                            let this = this.clone();
+                            async move |cx| {
+                                if agent_stopped_waiting(responder, relay_rx).await {
+                                    this.update(cx, |this, cx| this.drop_withdrawn_questions(cx))
+                                        .log_err();
+                                }
+                            }
+                        })
+                        .detach();
+                        this.update(cx, |this, cx| this.push_question(questions, relay_tx, cx))
+                    }
                     RunInput::Ended => break,
                 };
                 if update.is_err() {
@@ -4023,6 +4076,75 @@ pub(crate) mod tests {
                     .any(|entry| matches!(entry, Entry::Notice { is_error: true, .. })),
                 "the fixture reports an error unless both answers arrive"
             );
+        });
+    }
+
+    #[gpui::test]
+    async fn answers_reach_the_agent_and_withdrawals_are_reported(_cx: &mut TestAppContext) {
+        let answer = || {
+            vec![UserInputAnswer {
+                question_id: "q".into(),
+                labels: vec!["A".into()],
+            }]
+        };
+
+        let (agent_tx, agent_rx) = tokio::sync::oneshot::channel();
+        let (chat_tx, chat_rx) = tokio::sync::oneshot::channel();
+        chat_tx.send(answer()).unwrap();
+        assert!(!agent_stopped_waiting(agent_tx, chat_rx).await);
+        assert_eq!(agent_rx.await.unwrap(), answer());
+
+        let (agent_tx, agent_rx) = tokio::sync::oneshot::channel();
+        let (chat_tx, chat_rx) = tokio::sync::oneshot::channel::<Vec<UserInputAnswer>>();
+        drop(agent_rx);
+        assert!(agent_stopped_waiting(agent_tx, chat_rx).await);
+        assert!(chat_tx.is_closed());
+
+        let (agent_tx, agent_rx) = tokio::sync::oneshot::channel();
+        let (chat_tx, chat_rx) = tokio::sync::oneshot::channel();
+        drop(chat_tx);
+        assert!(!agent_stopped_waiting(agent_tx, chat_rx).await);
+        assert!(agent_rx.await.is_err());
+    }
+
+    #[gpui::test]
+    async fn withdrawn_questions_leave_the_picker(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Codex, directory.path().to_path_buf(), cx)
+        });
+        let pending = |id: &str, responder| PendingQuestion {
+            questions: vec![UserInputQuestion {
+                id: id.into(),
+                header: "Choice".into(),
+                question: "Pick one".into(),
+                options: vec!["A".into()],
+                multi_select: false,
+                prefill: None,
+                multiline: false,
+                accepts_typed_answer: false,
+            }],
+            responder,
+        };
+        let (withdrawn_tx, withdrawn_rx) = tokio::sync::oneshot::channel();
+        let (waiting_tx, _waiting_rx) = tokio::sync::oneshot::channel();
+        drop(withdrawn_rx);
+        session.update(cx, |session, cx| {
+            session
+                .pending_questions
+                .push(pending("withdrawn", Some(withdrawn_tx)));
+            session
+                .pending_questions
+                .push(pending("waiting", Some(waiting_tx)));
+            session.pending_questions.push(pending("local", None));
+            session.drop_withdrawn_questions(cx);
+            let ids: Vec<&str> = session
+                .pending_questions()
+                .iter()
+                .map(PendingQuestion::id)
+                .collect();
+            assert_eq!(ids, ["waiting", "local"]);
         });
     }
 

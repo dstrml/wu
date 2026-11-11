@@ -40,6 +40,7 @@ const RETRY_ABORT_ATTEMPT: u64 = 8;
 const DEFAULT_STALL_BOUND: Duration = Duration::from_secs(60);
 const STALL_ENV: &str = "WU_OPENCODE_STALL_MS";
 const COMMAND_CACHE_TTL: Duration = Duration::from_secs(10);
+const UNSUPPORTED_FORM_MESSAGE: &str = "Wu can't show this kind of form, so it was skipped.";
 pub const UNTITLED_CHAT: &str = n!("Untitled chat");
 
 fn stall_hint() -> i18n::SharedString {
@@ -1169,6 +1170,7 @@ async fn run_session(session: Session) {
     let mut steering_open = true;
     let mut interrupt_requested = false;
     let mut pending_usage: Option<AgentEvent> = None;
+    let mut asked_questions: HashMap<String, tokio::task::AbortHandle> = HashMap::new();
     let mut done_sent = false;
     // Only idle ends an abort, so unlike the stall bound this is not disarmed by activity.
     let mut abort_deadline: Option<tokio::time::Instant> = None;
@@ -1536,6 +1538,7 @@ async fn run_session(session: Session) {
                             turn: &mut turn,
                             pending_usage: &mut pending_usage,
                             context_windows: &context_windows,
+                            asked_questions: &mut asked_questions,
                         }).await;
                         match outcome {
                             BusOutcome::Continue => maybe_preempt!(),
@@ -1906,6 +1909,7 @@ struct BusContext<'a> {
     turn: &'a mut TurnState,
     pending_usage: &'a mut Option<AgentEvent>,
     context_windows: &'a HashMap<String, u64>,
+    asked_questions: &'a mut HashMap<String, tokio::task::AbortHandle>,
 }
 
 async fn settle_children(
@@ -1963,6 +1967,7 @@ async fn handle_bus_event(context: BusContext<'_>) -> BusOutcome {
         turn,
         pending_usage,
         context_windows,
+        asked_questions,
     } = context;
     // `/global/event` wraps the payload; a bare `/event` feed does not.
     let payload = event.get("payload").unwrap_or(event);
@@ -2359,11 +2364,11 @@ async fn handle_bus_event(context: BusContext<'_>) -> BusOutcome {
             BusOutcome::Continue
         }
         "question.asked" => {
-            if !event_session.is_some_and(|session| {
-                owns_session(session, session_id, children, unbound_children)
-            }) {
+            let Some(session) = event_session
+                .filter(|session| owns_session(session, session_id, children, unbound_children))
+            else {
                 return BusOutcome::Continue;
-            }
+            };
             let Some(request_id) = properties.get("id").and_then(Value::as_str) else {
                 return BusOutcome::Continue;
             };
@@ -2384,44 +2389,71 @@ async fn handle_bus_event(context: BusContext<'_>) -> BusOutcome {
             }
             let answer = (request_input)(questions.clone());
             let server = server.handle();
+            let session = session.to_owned();
             let directory = dir.map(str::to_owned);
             let request_id = request_id.to_owned();
+            let request_key = request_id.clone();
             let event_tx = event_tx.clone();
-            tokio::spawn(async move {
-                let reply = match answer.await {
+            let waiting = tokio::spawn(async move {
+                let directory = directory.as_deref();
+                let replied = match answer.await {
                     Ok(answers) => {
-                        let ordered: Vec<Vec<String>> = questions
-                            .iter()
-                            .map(|question| {
-                                answers
-                                    .iter()
-                                    .find(|answer| answer.question_id == question.id)
-                                    .map(|answer| answer.labels.clone())
-                                    .unwrap_or_default()
-                            })
-                            .collect();
                         server
-                            .post_json(
-                                &format!("/question/{request_id}/reply"),
-                                directory.as_deref(),
-                                &json!({ "answers": ordered }),
-                            )
+                            .reply_question(&session, &request_id, directory, &questions, &answers)
                             .await
                     }
-                    Err(_) => {
-                        server
-                            .post_json(
-                                &format!("/question/{request_id}/reject"),
-                                directory.as_deref(),
-                                &Value::Null,
-                            )
-                            .await
-                    }
+                    Err(_) => Err(HarnessError::Protocol("question dismissed".into())),
                 };
-                if let Err(error) = reply {
-                    tracing::debug!(target: "agent_harness::opencode", "question reply failed: {error}");
+                if let Err(error) = replied {
+                    tracing::debug!(target: "agent_harness::opencode", "dismissing question {request_id}: {error}");
+                    if let Err(error) = server
+                        .reject_question(&session, &request_id, directory, None)
+                        .await
+                    {
+                        tracing::debug!(target: "agent_harness::opencode", "question dismissal failed: {error}");
+                    }
                 }
                 send_final(&event_tx, AgentEvent::InputResolved { request_id }).await;
+            });
+            asked_questions.insert(request_key, waiting.abort_handle());
+            BusOutcome::Continue
+        }
+        "question.replied" | "question.rejected" => {
+            let Some(waiting) = properties
+                .get("requestID")
+                .and_then(Value::as_str)
+                .and_then(|request_id| asked_questions.remove(request_id))
+            else {
+                return BusOutcome::Continue;
+            };
+            waiting.abort();
+            BusOutcome::Continue
+        }
+        "form.unsupported" => {
+            let Some(session) = event_session
+                .filter(|session| owns_session(session, session_id, children, unbound_children))
+            else {
+                return BusOutcome::Continue;
+            };
+            let Some(request_id) = properties.get("id").and_then(Value::as_str) else {
+                return BusOutcome::Continue;
+            };
+            let server = server.handle();
+            let session = session.to_owned();
+            let directory = dir.map(str::to_owned);
+            let request_id = request_id.to_owned();
+            tokio::spawn(async move {
+                if let Err(error) = server
+                    .reject_question(
+                        &session,
+                        &request_id,
+                        directory.as_deref(),
+                        Some(UNSUPPORTED_FORM_MESSAGE),
+                    )
+                    .await
+                {
+                    tracing::debug!(target: "agent_harness::opencode", "form dismissal failed: {error}");
+                }
             });
             BusOutcome::Continue
         }
