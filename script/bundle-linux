@@ -89,7 +89,12 @@ if [[ ! "$lld_version" =~ LLD\ ([0-9]+)\. ]] || (( BASH_REMATCH[1] < 12 )); then
     echo "Bundling requires LLD 12 or newer for safe ICF; select a matching compiler with CC (e.g. CC=clang-18)." >&2
     exit 1
 fi
-cargo --config .cargo/bundle-config.toml rustc --release --target "${target_triple}" --package wu --bin wu -- -C linker="$CC" -C llvm-args=-addrsig -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=safe
+icf_args=()
+# On aarch64, ICF merges outlined helpers that split a GOT load across functions, so calls land on the wrong slot.
+if [[ "$(uname -m)" != "aarch64" ]]; then
+    icf_args=(-C llvm-args=-addrsig -C link-arg=-Wl,--icf=safe)
+fi
+cargo --config .cargo/bundle-config.toml rustc --release --target "${target_triple}" --package wu --bin wu -- -C linker="$CC" -C link-arg=-fuse-ld=lld ${icf_args[@]+"${icf_args[@]}"}
 cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package cli
 # Build remote_server in separate invocation to prevent feature unification from other crates
 # from influencing dynamic libraries required by it.

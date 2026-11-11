@@ -16,7 +16,7 @@ on:
       icf:
         description: Link with --icf=safe
         type: boolean
-        default: true
+        default: false
       opt_level:
         description: Opt level for crates not listed in bundle-config.toml
         type: choice
