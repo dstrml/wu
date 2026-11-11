@@ -14,7 +14,7 @@ use super::v2::{
     normalize_v2_frame_with_session_models,
 };
 use crate::HarnessError;
-use crate::process::{Child, Command, Stdio};
+use crate::process::{Child, Stdio};
 
 pub(super) const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub(super) const STARTUP_TIMEOUT_ENV: &str = "WU_OPENCODE_STARTUP_TIMEOUT_SECS";
@@ -192,7 +192,7 @@ impl Server {
             HarnessError::Protocol("no free localhost port for opencode serve".into())
         })?;
         let password = uuid::Uuid::new_v4().to_string();
-        let mut command = Command::new(executable);
+        let mut command = crate::process::command(executable);
         command
             .arg("serve")
             .arg("--port")

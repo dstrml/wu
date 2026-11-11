@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::process::{Command, Stdio};
+use crate::process::Stdio;
 
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -22,7 +22,7 @@ pub async fn update_cli(
     installed_after: impl FnOnce() -> Option<PathBuf> + Send,
 ) -> Result<UpdateOutcome, UpdateFailed> {
     let before = version_of(&executable).await;
-    let mut command = Command::new(&executable);
+    let mut command = crate::process::command(&executable);
     command
         .args(args)
         .current_dir(crate::executable::scratch_dir())

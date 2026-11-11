@@ -160,7 +160,7 @@ impl ClaudeHarness {
         request: &RunRequest,
         discovered: Option<&[crate::Model]>,
     ) -> Command {
-        let mut cmd = Command::new(exe);
+        let mut cmd = crate::process::command(exe);
         crate::compose_child_path(&mut cmd, exe);
         cmd.args([
             "--print",
@@ -238,7 +238,7 @@ impl ClaudeHarness {
 
     async fn probe_initialize(&self, cwd: Option<&std::path::Path>) -> Result<Value, HarnessError> {
         let exe = self.resolve_executable()?;
-        let mut cmd = Command::new(&exe);
+        let mut cmd = crate::process::command(&exe);
         cmd.current_dir(cwd.map_or_else(crate::executable::scratch_dir, std::path::Path::to_path_buf));
         crate::compose_child_path(&mut cmd, &exe);
         cmd.args([

@@ -22,7 +22,7 @@ use crate::{
 };
 
 use crate::jsonrpc::{Incoming, RpcClient};
-use crate::process::{Child, Command, Stdio};
+use crate::process::{Child, Stdio};
 use crate::{Harness, HarnessError, RunControls, SteerMessage};
 use catalog::{REASONING_LEVELS, sandbox_mode, sandbox_policy_value, static_models, to_effort};
 use normalize::{
@@ -137,7 +137,7 @@ impl CodexHarness {
         Fut: std::future::Future<Output = Result<T, HarnessError>>,
     {
         let exe = self.resolve_executable()?;
-        let mut cmd = Command::new(&exe);
+        let mut cmd = crate::process::command(&exe);
         cmd.arg("app-server");
         cmd.current_dir(cwd.map_or_else(crate::executable::scratch_dir, std::path::Path::to_path_buf));
         crate::compose_child_path(&mut cmd, &exe);
@@ -601,7 +601,7 @@ impl CodexHarness {
             return Err(command_with_extras_error());
         }
         let exe = self.resolve_executable()?;
-        let mut cmd = Command::new(&exe);
+        let mut cmd = crate::process::command(&exe);
         cmd.arg("app-server");
         if let Some(tokens) = request.auto_compact_tokens {
             cmd.arg("-c");
