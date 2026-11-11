@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.2.2 - 2026-11-11
+
 - Fix the Git panel going stale after running git commands outside Wu.
 - Fix new files ignoring the `line_ending` setting.
 - Fix a console window opening on Windows when an agent starts.
