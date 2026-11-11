@@ -1,0 +1,117 @@
+name: linux-arm-crash-test
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, tag or branch to build
+        required: true
+        default: v1.2.1
+      clang:
+        description: Clang and LLD version
+        type: choice
+        options:
+          - runner-default
+          - '18'
+        default: runner-default
+      icf:
+        description: Link with --icf=safe
+        type: boolean
+        default: true
+      opt_level:
+        description: Opt level for crates not listed in bundle-config.toml
+        type: choice
+        options:
+          - z
+          - '3'
+        default: z
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+jobs:
+  build_and_run:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 300
+    env:
+      INPUT_REF: ${{ inputs.ref }}
+      INPUT_CLANG: ${{ inputs.clang }}
+      INPUT_ICF: ${{ inputs.icf }}
+      INPUT_OPT_LEVEL: ${{ inputs.opt_level }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Install Linux dependencies
+        run: |
+          ./script/linux
+          sudo apt-get install -y gdb
+      - name: Install clang and LLD
+        if: inputs.clang != 'runner-default'
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/llvm.sh"
+          sudo bash "$RUNNER_TEMP/llvm.sh" "$INPUT_CLANG"
+          echo "CC=clang-$INPUT_CLANG" >> "$GITHUB_ENV"
+          echo "CXX=clang++-$INPUT_CLANG" >> "$GITHUB_ENV"
+      - name: Use the runner's clang
+        if: inputs.clang == 'runner-default'
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Use the stable release channel
+        run: echo stable > crates/wu/RELEASE_CHANNEL
+      - name: Generate licenses
+        run: script/generate-licenses
+      - name: Build wu like script/bundle-linux does
+        run: |
+          set -euxo pipefail
+          "$CC" --version
+          "$("$CC" -print-prog-name=ld.lld)" --version
+          config="$RUNNER_TEMP/bundle-config.toml"
+          cp .cargo/bundle-config.toml "$config"
+          if [ "$INPUT_OPT_LEVEL" != z ]; then
+            sed -i "s/^opt-level = \"z\"/opt-level = $INPUT_OPT_LEVEL/" "$config"
+          fi
+          cat "$config"
+          icf_args=()
+          if [ "$INPUT_ICF" = true ]; then
+            icf_args=(-C link-arg=-Wl,--icf=safe)
+          fi
+          export ZED_BUNDLE=true
+          export RELEASE_VERSION="$(script/get-crate-version wu)"
+          export RUSTFLAGS="-C link-arg=-fuse-ld=lld -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+          cargo --config "$config" rustc --release --target aarch64-unknown-linux-gnu --package wu --bin wu -- \
+            -C linker="$CC" -C llvm-args=-addrsig -C link-arg=-fuse-ld=lld "${icf_args[@]}"
+          readelf -p .comment target/aarch64-unknown-linux-gnu/release/wu
+      - name: Run wu and check for a crash
+        run: |
+          set +e -uo pipefail
+          binary="$PWD/target/aarch64-unknown-linux-gnu/release/wu"
+          home="$(mktemp -d)"
+          timeout 30 env -i HOME="$home" PATH=/usr/bin:/bin "$binary"
+          status=$?
+          find "$home" -name '*.log' -exec tail -n 40 {} \;
+          case "$status" in
+            124) result="no crash, still running after 30 seconds" ;;
+            139) result="crashed with SIGSEGV" ;;
+            *) result="exited with status $status" ;;
+          esac
+          echo "### $INPUT_REF, clang $INPUT_CLANG, icf $INPUT_ICF, opt-level $INPUT_OPT_LEVEL: $result" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 139 ]; then
+            exit 0
+          fi
+          crash_home="$(mktemp -d)"
+          timeout 120 env -i HOME="$crash_home" PATH=/usr/bin:/bin gdb -q -batch \
+            -ex 'set startup-with-shell off' \
+            -ex 'set pagination off' \
+            -ex 'handle SIGPIPE nostop noprint pass' \
+            -ex run \
+            -ex 'bt 60' \
+            -ex 'info registers pc x8 x19 x25 x30' \
+            --args "$binary" 2>&1 | tee "$RUNNER_TEMP/backtrace.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/backtrace.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
