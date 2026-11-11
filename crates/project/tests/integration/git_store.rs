@@ -784,6 +784,36 @@ mod git_traversal {
     }
 
     #[gpui::test]
+    async fn test_rescan_picks_up_changes_the_watcher_missed(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(path!("/root"), json!({".git": {}, "a.txt": "a"}))
+            .await;
+        let dot_git = Path::new(path!("/root/.git"));
+        fs.set_status_for_repo(dot_git, &[("a.txt", StatusCode::Modified.worktree())]);
+        let project = Project::test(fs.clone(), [path!("/root").as_ref()], cx).await;
+        cx.executor().run_until_parked();
+        let repository = project.read_with(cx, |project, cx| {
+            project
+                .active_repository(cx)
+                .expect("the root is a repository")
+        });
+        let changed_files = |cx: &TestAppContext| {
+            repository.read_with(cx, |repository, _| repository.cached_status().count())
+        };
+        assert_eq!(changed_files(cx), 1);
+
+        fs.pause_events();
+        fs.set_status_for_repo(dot_git, &[]);
+        cx.executor().run_until_parked();
+        assert_eq!(changed_files(cx), 1);
+
+        repository.update(cx, |repository, cx| repository.rescan(cx));
+        cx.executor().run_until_parked();
+        assert_eq!(changed_files(cx), 0);
+    }
+
+    #[gpui::test]
     async fn test_git_traversal_with_nested_repos(cx: &mut TestAppContext) {
         init_test(cx);
         let fs = FakeFs::new(cx.background_executor.clone());

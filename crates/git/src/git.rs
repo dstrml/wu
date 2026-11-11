@@ -145,6 +145,8 @@ actions!(
         AddToGitInfoExclude,
         /// Copies the current branch name to the clipboard.
         CopyBranchName,
+        /// Re-reads the git status of every repository in the project.
+        Refresh,
     ]
 );
 

@@ -40,7 +40,7 @@ use git::{
     Amend, Commit, Signoff, SkipHooks, ToggleStaged, repository::RepoPath, status::FileStatus,
 };
 use git::{
-    ExpandCommitEditor, GenerateCommitMessage, GitHostingProviderRegistry, GitRemote,
+    ExpandCommitEditor, GenerateCommitMessage, GitHostingProviderRegistry, GitRemote, Refresh,
     RestoreTrackedFiles, StageAll, StashAll, StashApply, StashPop, StashStaged, StashTracked,
     ToggleFillCommitEditor, TrashUntrackedFiles, UnstageAll, ViewFile, parse_git_remote_url,
 };
@@ -320,6 +320,8 @@ fn git_panel_context_menu(
     ContextMenu::build(window, cx, |context_menu, _, _| {
         context_menu
             .context(focus_handle.clone())
+            .action(t!("Refresh"), Refresh.boxed_clone())
+            .separator()
             .action_disabled_when(
                 !has_unstaged_changes,
                 t!("Stage All"),
@@ -10250,6 +10252,46 @@ mod tests {
             })
             .expect("fake repository should exist");
         assert_eq!(commit_count, 0);
+    }
+
+    #[gpui::test]
+    async fn test_refresh_and_window_focus_reread_git_state(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(path!("/project"), json!({".git": {}, "a.txt": "a"}))
+            .await;
+        let dot_git = Path::new(path!("/project/.git"));
+        fs.set_status_for_repo(dot_git, &[("a.txt", StatusCode::Modified.worktree())]);
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let mut cx = VisualTestContext::from_window(window_handle.into(), cx);
+        cx.run_until_parked();
+        let repository = project.read_with(&cx, |project, cx| {
+            project
+                .active_repository(cx)
+                .expect("the project is a repository")
+        });
+        let changed_files = |cx: &mut VisualTestContext| {
+            repository.read_with(cx, |repository, _| repository.cached_status().count())
+        };
+        assert_eq!(changed_files(&mut cx), 1);
+
+        fs.pause_events();
+        fs.set_status_for_repo(dot_git, &[]);
+        cx.run_until_parked();
+        assert_eq!(changed_files(&mut cx), 1);
+        cx.dispatch_action(git::Refresh);
+        cx.run_until_parked();
+        assert_eq!(changed_files(&mut cx), 0);
+
+        fs.set_status_for_repo(dot_git, &[("a.txt", StatusCode::Modified.worktree())]);
+        cx.run_until_parked();
+        assert_eq!(changed_files(&mut cx), 0);
+        cx.deactivate_window();
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        assert_eq!(changed_files(&mut cx), 1);
     }
 
     #[gpui::test]

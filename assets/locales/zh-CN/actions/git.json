@@ -158,6 +158,10 @@
     "name": "推送到指定远程仓库",
     "description": "将提交推送到指定的远程仓库。"
   },
+  "git::Refresh": {
+    "name": "刷新",
+    "description": "重新读取项目中所有仓库的 Git 状态。"
+  },
   "git::RenameBranch": {
     "name": "重命名分支",
     "description": "重命名 Git 分支。"

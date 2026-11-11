@@ -104,7 +104,7 @@ pub fn init(cx: &mut App) {
     })
     .detach();
 
-    cx.observe_new(|workspace: &mut Workspace, _, cx| {
+    cx.observe_new(|workspace: &mut Workspace, window, cx| {
         ProjectDiff::register(workspace, cx);
         staged_diff::StagedDiff::register(workspace, cx);
         unstaged_diff::UnstagedDiff::register(workspace, cx);
@@ -360,6 +360,29 @@ pub fn init(cx: &mut App) {
         workspace.register_action(|workspace, _: &git::CopyBranchName, _, cx| {
             copy_branch_name(workspace, cx);
         });
+        workspace.register_action(|workspace, _: &git::Refresh, _, cx| {
+            let repositories: Vec<_> = workspace
+                .project()
+                .read(cx)
+                .repositories(cx)
+                .values()
+                .cloned()
+                .collect();
+            for repository in repositories {
+                repository.update(cx, |repository, cx| repository.rescan(cx));
+            }
+        });
+        if let Some(window) = window {
+            cx.observe_window_activation(window, |workspace, window, cx| {
+                if !window.is_window_active() {
+                    return;
+                }
+                if let Some(repository) = workspace.project().read(cx).active_repository(cx) {
+                    repository.update(cx, |repository, cx| repository.rescan(cx));
+                }
+            })
+            .detach();
+        }
         workspace.register_action(show_ref_picker);
         workspace.register_action(
             |workspace, action: &DiffClipboardWithSelectionData, window, cx| {
