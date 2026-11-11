@@ -4,6 +4,10 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Fix new files ignoring the `line_ending` setting.
+- Fix a console window opening on Windows when an agent starts.
+- Fix OpenCode questions not showing a picker.
+- Fix Wu crashing on startup on ARM Linux.
 - List models in the model picker in the same order as the underlying agent.
 
 ## 1.2.1 - 2026-11-09

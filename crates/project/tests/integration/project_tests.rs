@@ -9077,7 +9077,11 @@ async fn test_line_ending_initialization_for_new_buffers(cx: &mut gpui::TestAppC
 
     for (line_ending_setting, expected_line_ending) in cases {
         let fs = FakeFs::new(cx.executor());
-        fs.insert_tree(path!("/dir"), json!({})).await;
+        fs.insert_tree(
+            path!("/dir"),
+            json!({"empty.txt": "", "single_line.txt": "one line"}),
+        )
+        .await;
 
         let project = Project::test(fs.clone(), [path!("/dir").as_ref()], cx).await;
         cx.update(|cx| {
@@ -9113,6 +9117,19 @@ async fn test_line_ending_initialization_for_new_buffers(cx: &mut gpui::TestAppC
         opened_missing_buffer.update(cx, |buffer, _| {
             assert_eq!(buffer.line_ending(), expected_line_ending);
         });
+
+        for existing in ["empty.txt", "single_line.txt"] {
+            let opened_existing_buffer = project
+                .update(cx, |project, cx| {
+                    project.open_local_buffer(PathBuf::from(path!("/dir")).join(existing), cx)
+                })
+                .await
+                .unwrap();
+            opened_existing_buffer.update(cx, |buffer, _| {
+                assert_eq!(buffer.line_ending(), expected_line_ending, "{existing}");
+                assert!(!buffer.is_dirty(), "{existing}");
+            });
+        }
     }
 }
 
