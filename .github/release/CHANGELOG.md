@@ -4,7 +4,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
-- Fix the Git panel going stale after running git commands outside Wu. It now refreshes when you switch back to Wu, and there's a Refresh action in its menu.
+- Fix the Git panel going stale after running git commands outside Wu.
 - Fix new files ignoring the `line_ending` setting.
 - Fix a console window opening on Windows when an agent starts.
 - Fix OpenCode questions not showing a picker.

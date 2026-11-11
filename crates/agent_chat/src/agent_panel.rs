@@ -637,50 +637,72 @@ impl AgentPanel {
         let colors = cx.theme().colors();
         let text = colors.text;
         let hover = colors.element_hover;
-        let muted = colors.text_muted.opacity(0.75);
-        let new_chat_row = |kind: AgentKind| {
+        let agents = AgentChatSettings::get_global(cx).agents();
+        let only_one = agents.len() == 1;
+        let new_chat_button = |kind: AgentKind| {
             let workspace = self.workspace.clone();
-            let group = SharedString::from(format!("agent-panel-empty-{}", kind.label()));
             h_flex()
-                .id(group.clone())
-                .group(group.clone())
-                .h(px(36.))
-                .gap(px(10.))
-                .px(px(SPACE_SM))
-                .rounded(px(6.))
+                .id(SharedString::from(format!(
+                    "agent-panel-empty-{}",
+                    kind.label()
+                )))
+                .w_full()
+                .h(px(32.))
+                .gap(px(SPACE_SM))
+                .px(px(10.))
+                .rounded(px(7.))
+                .border_1()
+                .border_color(ink(0.06, cx))
+                .bg(ink(0.04, cx))
                 .text_size(ui(13.))
-                .text_color(muted)
+                .text_color(text)
                 .cursor_pointer()
-                .hover(move |style| style.bg(hover).text_color(text))
+                .hover(move |style| style.bg(hover))
                 .on_click(move |_, window, cx| {
                     workspace
                         .update(cx, |workspace, cx| new_chat(workspace, kind, window, cx))
                         .log_err();
                 })
-                .child(
-                    glyph(IconName::Plus, 14., muted)
-                        .group_hover(group, move |style| style.text_color(text)),
-                )
-                .child(t!("New {agent} chat", agent = kind.label()))
+                .child(glyph(
+                    agent_logo(kind),
+                    16.,
+                    agent_tint(kind).unwrap_or(text),
+                ))
+                .child(if only_one {
+                    t!("New {agent} chat", agent = kind.label())
+                } else {
+                    kind.label().into()
+                })
         };
         v_flex()
-            .px(px(SPACE_SM))
-            .pt(px(LIST_PAD_TOP))
+            .size_full()
+            .items_center()
+            .justify_center()
+            .px(px(SPACE_SM * 2.))
+            .pb(px(40.))
+            .child(glyph(IconName::AgentChatRoundLine, 28., text_faint(cx)))
             .child(
                 div()
-                    .px(px(SPACE_SM))
-                    .pb(px(SPACE_SM))
-                    .text_size(ui(12.))
-                    .text_color(text_faint(cx))
-                    .child(t!("No chats in this project yet.")),
+                    .pt(px(10.))
+                    .text_size(ui(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(text)
+                    .child(t!("No chats yet")),
             )
             .child(
-                v_flex().gap(px(LIST_GAP)).children(
-                    AgentChatSettings::get_global(cx)
-                        .agents()
-                        .iter()
-                        .map(|kind| new_chat_row(*kind)),
-                ),
+                div()
+                    .pt(px(2.))
+                    .text_size(ui(12.))
+                    .text_color(text_faint(cx))
+                    .child(t!("Start one with an agent.")),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(px(220.))
+                    .pt(px(16.))
+                    .gap(px(6.))
+                    .children(agents.iter().map(|kind| new_chat_button(*kind))),
             )
     }
 
@@ -889,15 +911,8 @@ impl AgentPanel {
                 .text_color(subline)
                 .child(corner_body),
         );
-        let harness_icon = match session.kind {
-            AgentKind::Claude => IconName::AgentClaude,
-            AgentKind::Codex => IconName::AgentCodex,
-            AgentKind::Opencode => IconName::AgentOpencode,
-        };
-        let harness_tint: Option<Hsla> = match session.kind {
-            AgentKind::Claude => Some(rgb(CLAUDE_BRAND).into()),
-            AgentKind::Codex | AgentKind::Opencode => None,
-        };
+        let harness_icon = agent_logo(session.kind);
+        let harness_tint = agent_tint(session.kind);
         let title_content = match renaming {
             Some(field) => self.rename_field(&field.editor, cx),
             None => faded_label(
@@ -1319,6 +1334,21 @@ fn disclosure_chevron(open: bool, color: Hsla) -> impl IntoElement {
             percentage(if open { 0.25 } else { 0. }),
         )),
     )
+}
+
+fn agent_logo(kind: AgentKind) -> IconName {
+    match kind {
+        AgentKind::Claude => IconName::AgentClaude,
+        AgentKind::Codex => IconName::AgentCodex,
+        AgentKind::Opencode => IconName::AgentOpencode,
+    }
+}
+
+fn agent_tint(kind: AgentKind) -> Option<Hsla> {
+    match kind {
+        AgentKind::Claude => Some(rgb(CLAUDE_BRAND).into()),
+        AgentKind::Codex | AgentKind::Opencode => None,
+    }
 }
 
 pub(crate) fn glyph(icon: IconName, size: f32, color: Hsla) -> Svg {
