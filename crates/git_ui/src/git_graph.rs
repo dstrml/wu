@@ -68,8 +68,8 @@ use workspace::{
 const COMMIT_CIRCLE_RADIUS: Pixels = px(3.5);
 const COMMIT_CIRCLE_STROKE_WIDTH: Pixels = px(1.5);
 const LANE_WIDTH: Pixels = px(16.0);
-const LEFT_PADDING: Pixels = px(12.0);
-const LINE_WIDTH: Pixels = px(1.5);
+pub(crate) const LEFT_PADDING: Pixels = px(12.0);
+pub(crate) const LINE_WIDTH: Pixels = px(1.5);
 const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const COPIED_STATE_DURATION: Duration = Duration::from_secs(2);
 const COMMIT_TAG_LIST_WIDTH_IN_REMS: Rems = rems(10.);
@@ -797,9 +797,9 @@ impl LaneState {
     }
 }
 
-struct CommitEntry {
-    data: Arc<InitialGraphCommitData>,
-    lane: usize,
+pub(crate) struct CommitEntry {
+    pub(crate) data: Arc<InitialGraphCommitData>,
+    pub(crate) lane: usize,
     color_idx: usize,
 }
 
@@ -830,18 +830,60 @@ enum CommitLineSegment {
 }
 
 #[derive(Debug)]
-struct CommitLine {
+pub(crate) struct CommitLine {
     #[cfg(test)]
     child: Oid,
     #[cfg(test)]
     parent: Oid,
     child_column: usize,
-    full_interval: Range<usize>,
+    pub(crate) full_interval: Range<usize>,
     color_idx: usize,
     segments: SmallVec<[CommitLineSegment; 1]>,
 }
 
 impl CommitLine {
+    /// Whether the line leaves a merge commit towards its merged parent.
+    pub(crate) fn starts_with_merge(&self) -> bool {
+        matches!(
+            self.segments.first(),
+            Some(CommitLineSegment::Curve {
+                curve_kind: CurveKind::Merge,
+                ..
+            })
+        )
+    }
+
+    /// Column the line runs in between `row` and the row after it.
+    pub(crate) fn column_below_row(&self, row: usize) -> usize {
+        let mut column = self.child_column;
+        for segment in &self.segments {
+            match segment {
+                CommitLineSegment::Straight { to_row } => {
+                    if *to_row > row {
+                        break;
+                    }
+                }
+                CommitLineSegment::Curve {
+                    to_column,
+                    on_row,
+                    curve_kind,
+                } => {
+                    // A merge bends right below the merge commit; a checkout bends right
+                    // above the commit it joins.
+                    let bent = match curve_kind {
+                        CurveKind::Merge => *on_row <= row + 1,
+                        CurveKind::Checkout => *on_row <= row,
+                    };
+                    if !bent {
+                        break;
+                    }
+                    column = *to_column;
+                }
+            }
+        }
+        column
+    }
+
     fn get_first_visible_segment_idx(&self, first_visible_row: usize) -> Option<(usize, usize)> {
         if first_visible_row > self.full_interval.end {
             return None;
@@ -879,22 +921,22 @@ struct CommitLineKey {
     parent: Oid,
 }
 
-struct GraphData {
+pub(crate) struct GraphData {
     lane_states: SmallVec<[LaneState; 8]>,
     lane_colors: HashMap<ActiveLaneIdx, BranchColor>,
     parent_to_lanes: HashMap<Oid, SmallVec<[usize; 1]>>,
     next_color: BranchColor,
     accent_colors_count: usize,
-    commits: Vec<Rc<CommitEntry>>,
+    pub(crate) commits: Vec<Rc<CommitEntry>>,
     max_commit_count: AllCommitCount,
     max_lanes: usize,
-    lines: Vec<Rc<CommitLine>>,
+    pub(crate) lines: Vec<Rc<CommitLine>>,
     active_commit_lines: HashMap<CommitLineKey, usize>,
     active_commit_lines_by_parent: HashMap<Oid, SmallVec<[usize; 1]>>,
 }
 
 impl GraphData {
-    fn new(accent_colors_count: usize) -> Self {
+    pub(crate) fn new(accent_colors_count: usize) -> Self {
         GraphData {
             lane_states: SmallVec::default(),
             lane_colors: HashMap::default(),
@@ -942,7 +984,7 @@ impl GraphData {
         })
     }
 
-    fn add_commits(&mut self, commits: &[Arc<InitialGraphCommitData>]) {
+    pub(crate) fn add_commits(&mut self, commits: &[Arc<InitialGraphCommitData>]) {
         self.commits.reserve(commits.len());
         self.lines.reserve(commits.len() / 2);
 
@@ -1283,7 +1325,7 @@ fn draw_commit_circle(center_x: Pixels, center_y: Pixels, color: Hsla, window: &
 /// Paints commit lines for the rows starting at `first_visible_row`, `lane_width` apart. Lines
 /// sharing a `key` are painted together on one layer, in ascending key order, all in that key's
 /// color.
-fn paint_commit_lines<'a>(
+pub(crate) fn paint_commit_lines<'a>(
     bounds: Bounds<Pixels>,
     lines: impl IntoIterator<Item = (&'a CommitLine, usize, Hsla)>,
     first_visible_row: usize,
@@ -1885,7 +1927,7 @@ impl GitGraph {
 
     /// Extracts a ref name (branch, remote ref, or tag) from a decoration in
     /// git's `%D` format, returning `None` for a detached `HEAD`.
-    fn ref_name_from_decoration(decoration: &str) -> Option<SharedString> {
+    pub(crate) fn ref_name_from_decoration(decoration: &str) -> Option<SharedString> {
         let name = decoration
             .strip_prefix("tag: ")
             .or_else(|| decoration.strip_prefix("HEAD -> "))

@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Add a `git_panel.history_style` setting that shows the History tab as one line per commit with a branch graph.
+
 ## 1.2.2 - 2026-11-11
 
 - Fix the Git panel going stale after running git commands outside Wu.

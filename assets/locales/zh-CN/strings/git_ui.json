@@ -11,6 +11,7 @@
   "Add to .gitignore": "添加到 .gitignore",
   "All Branches": "所有分支",
   "All conflicts marked as resolved": "所有冲突均已标记为已解决",
+  "Also on the remote": "远程仓库中也有此分支",
   "Amend": "修正提交",
   "Amend Tracked": "修正提交已跟踪的更改",
   "Apply": "应用",

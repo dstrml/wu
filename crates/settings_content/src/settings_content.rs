@@ -677,6 +677,34 @@ pub struct GitPanelSettingsContent {
     ///
     /// Default: project_diff
     pub entry_primary_click_action: Option<GitPanelClickBehavior>,
+
+    /// How commits are shown in the Git panel's History tab.
+    ///
+    /// Default: detailed
+    pub history_style: Option<GitPanelHistoryStyle>,
+}
+
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum GitPanelHistoryStyle {
+    /// Two lines per commit, with the author's avatar, the date and the SHA.
+    #[default]
+    Detailed,
+    /// One line per commit, with a branch graph.
+    Graph,
 }
 
 #[derive(

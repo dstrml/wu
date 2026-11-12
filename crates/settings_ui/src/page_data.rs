@@ -5741,7 +5741,7 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
-    fn git_panel_section() -> [SettingsPageItem; 18] {
+    fn git_panel_section() -> [SettingsPageItem; 19] {
         [
             SettingsPageItem::SectionHeader(n!("Git Panel")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -5990,6 +5990,24 @@ fn panels_page() -> SettingsPage {
                             .git_panel
                             .get_or_insert_default()
                             .entry_primary_click_action = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("History Style"),
+                description: n!("How commits are shown in the Git panel's History tab."),
+                field: Box::new(SettingField {
+                    json_path: Some("git_panel.history_style"),
+                    pick: |settings_content| {
+                        settings_content.git_panel.as_ref()?.history_style.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .git_panel
+                            .get_or_insert_default()
+                            .history_style = value;
                     },
                 }),
                 metadata: None,
