@@ -1142,6 +1142,11 @@
     // Choices: project_diff, file_diff, view_file
     // Default: project_diff
     "entry_primary_click_action": "project_diff",
+    // How commits are shown in the Git panel's History tab.
+    //
+    // Choices: detailed, graph
+    // Default: detailed
+    "history_style": "detailed",
   },
   // Whether the screen sharing icon is shown in the os status bar.
   "show_call_status_icon": true,
