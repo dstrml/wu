@@ -1158,15 +1158,20 @@ impl SearchPanel {
                              label: &'static str,
                              action: &'static dyn Action,
                              enabled: bool| {
-            let focus_handle = query_focus_handle.clone();
             IconButton::new(id, icon)
                 .shape(IconButtonShape::Square)
                 .icon_size(IconSize::Small)
                 .disabled(!enabled)
-                .tooltip(move |_, cx| {
-                    Tooltip::for_action_in(i18n::translate(label), action, &focus_handle, cx)
+                .tooltip({
+                    let focus_handle = query_focus_handle.clone();
+                    move |_, cx| {
+                        Tooltip::for_action_in(i18n::translate(label), action, &focus_handle, cx)
+                    }
                 })
-                .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+                .on_click({
+                    let focus_handle = query_focus_handle.clone();
+                    move |_, window, cx| focus_handle.dispatch_action(action, window, cx)
+                })
         };
         let has_results = !self.files.is_empty();
         h_flex()
@@ -1679,8 +1684,9 @@ mod tests {
     use project::FakeFs;
     use serde_json::json;
     use settings::SettingsStore;
+    use std::path::PathBuf;
     use util::path;
-    use workspace::MultiWorkspace;
+    use workspace::{MultiWorkspace, OpenOptions};
 
     fn init_test(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -2044,6 +2050,51 @@ mod tests {
             let search_view = search_view.read(cx);
             assert_eq!(search_view.search_query_text(cx), "ONE");
             assert_eq!(search_view.get_matches(cx).len(), 7);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_toolbar_buttons_work_while_an_editor_has_focus(cx: &mut TestAppContext) {
+        let (_, workspace, panel, mut cx) = setup(cx).await;
+
+        workspace.update_in(&mut cx, |workspace, window, cx| {
+            workspace.open_panel::<SearchPanel>(window, cx);
+        });
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel
+                .query_editor
+                .update(cx, |editor, cx| editor.set_text("ONE", window, cx));
+            panel.search(SearchMode::Manual, cx);
+        });
+        cx.run_until_parked();
+
+        let editor = workspace
+            .update_in(&mut cx, |workspace, window, cx| {
+                workspace.open_abs_path(
+                    PathBuf::from(path!("/dir/one.rs")),
+                    OpenOptions::default(),
+                    window,
+                    cx,
+                )
+            })
+            .await
+            .unwrap()
+            .downcast::<Editor>()
+            .unwrap();
+        cx.focus(&editor);
+        cx.run_until_parked();
+
+        let collapse_all = cx
+            .debug_bounds("ICON-ListCollapse")
+            .expect("the Collapse All button should be visible");
+        cx.simulate_click(collapse_all.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, _| {
+            assert_eq!(panel.entries.len(), panel.files.len());
+        });
+        editor.update_in(&mut cx, |editor, window, cx| {
+            assert!(editor.focus_handle(cx).is_focused(window));
         });
     }
 

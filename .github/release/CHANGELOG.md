@@ -4,6 +4,9 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Add touchscreen support on Linux (Wayland).
+- Fix the search panel's action buttons doing nothing when out of focus.
+
 ## 1.2.2 - 2026-11-11
 
 - Fix the Git panel going stale after running git commands outside Wu.
