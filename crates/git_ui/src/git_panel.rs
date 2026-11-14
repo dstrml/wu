@@ -6390,10 +6390,6 @@ impl GitPanel {
     }
 
     fn render_repositories_section(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if matches!(self.git_access, Some(GitAccess::No)) {
-            return None;
-        }
-
         let git_store = self.project.read(cx).git_store().read(cx);
         if git_store.repositories().len() < 2 {
             return None;
@@ -6489,6 +6485,7 @@ impl GitPanel {
         h_flex()
             .id(ElementId::NamedInteger("repository".into(), snapshot.id.0))
             .debug_selector(|| format!("repository-row-{name}"))
+            .flex_none()
             .h(self.list_item_height())
             .w_full()
             .pl_5()
@@ -12642,9 +12639,15 @@ mod tests {
         });
         cx.run_until_parked();
 
+        panel.update(cx, |panel, cx| {
+            panel.git_access = Some(GitAccess::No);
+            cx.notify();
+        });
+        cx.run_until_parked();
+
         let project_b_row = cx
             .debug_bounds("repository-row-project-b")
-            .expect("project-b should be listed");
+            .expect("project-b should be listed even when the active repository is unsafe");
         cx.simulate_click(project_b_row.center(), Modifiers::none());
         cx.run_until_parked();
 

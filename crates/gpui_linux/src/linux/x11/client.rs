@@ -13,7 +13,7 @@ use log::Level;
 use smallvec::SmallVec;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     ops::Deref,
     path::PathBuf,
     rc::{Rc, Weak},
@@ -224,6 +224,7 @@ pub struct X11ClientState {
 
     pub(crate) xinput_support: XinputSupport,
     touches: ActiveTouches<(xinput::DeviceId, u32), X11WindowStatePtr>,
+    touchpads: BTreeSet<xinput::DeviceId>,
 
     pub(crate) common: LinuxCommon,
     pub(crate) clipboard: Clipboard,
@@ -262,6 +263,9 @@ impl X11ClientStatePtr {
             state.cursor_hidden_window = None;
         }
         state.cursor_styles.remove(&x_window);
+        state
+            .touches
+            .forget_window(|window| window.x_window == x_window);
     }
 
     pub fn update_ime_position(&self, bounds: Bounds<Pixels>) {
@@ -392,6 +396,7 @@ impl X11Client {
 
         let pointer_device_states =
             current_pointer_device_states(&xcb_connection, &BTreeMap::new()).unwrap_or_default();
+        let touchpads = current_touchpads(&xcb_connection).unwrap_or_default();
 
         let atoms = XcbAtoms::new(&xcb_connection)
             .context("Failed to get XCB atoms")?
@@ -589,6 +594,7 @@ impl X11Client {
 
             xinput_support,
             touches: ActiveTouches::default(),
+            touchpads,
 
             clipboard,
             clipboard_item: None,
@@ -1395,6 +1401,9 @@ impl X11Client {
                 ) {
                     state.pointer_device_states = pointer_device_states;
                 }
+                if let Some(touchpads) = current_touchpads(&state.xcb_connection) {
+                    state.touchpads = touchpads;
+                }
             }
             Event::XinputDeviceChanged(event) => {
                 let mut state = self.0.borrow_mut();
@@ -1463,6 +1472,9 @@ impl X11Client {
             Event::XinputTouchBegin(event) => {
                 let window = self.get_window(event.event)?;
                 let mut state = self.0.borrow_mut();
+                if state.touchpads.contains(&event.sourceid) {
+                    return Some(());
+                }
                 let position = point(
                     px(event.event_x as f32 / u16::MAX as f32 / state.scale_factor),
                     px(event.event_y as f32 / u16::MAX as f32 / state.scale_factor),
@@ -2234,8 +2246,6 @@ fn dispatch_touches(events: impl IntoIterator<Item = (X11WindowStatePtr, gpui::T
     }
 }
 
-/// The X server also sends pointer events for touches; with touch events selected, they would
-/// count every tap twice.
 fn is_touch_emulation(flags: xinput::PointerEventFlags, detail: u32) -> bool {
     flags.contains(xinput::PointerEventFlags::POINTER_EMULATED)
         && matches!(
@@ -2505,6 +2515,30 @@ fn current_pointer_device_states(
         log::error!("Found no xinput mouse pointers.");
     }
     Some(pointer_device_states)
+}
+
+/// Touchpads report their fingers as touches that the pointer already turns into motion.
+fn current_touchpads(xcb_connection: &XCBConnection) -> Option<BTreeSet<xinput::DeviceId>> {
+    let devices = get_reply(
+        || "Failed to query XInput devices",
+        xcb_connection.xinput_xi_query_device(XINPUT_ALL_DEVICES),
+    )
+    .log_err()?;
+    Some(
+        devices
+            .infos
+            .iter()
+            .filter(|info| {
+                info.classes.iter().any(|class| {
+                    class
+                        .data
+                        .as_touch()
+                        .is_some_and(|touch| touch.mode == xinput::TouchMode::DEPENDENT)
+                })
+            })
+            .map(|info| info.deviceid)
+            .collect(),
+    )
 }
 
 /// Returns true if the device is a pointer device. Does not include pointer device groups.

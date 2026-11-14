@@ -771,26 +771,50 @@ impl TouchGestureRecognizer {
                 }
                 other => self.state = other,
             },
-            TouchPhase::Cancelled => match mem::replace(&mut self.state, TouchGestureState::Idle) {
-                TouchGestureState::Pending { touch, .. } if touch.id == event.id => {}
-                TouchGestureState::Panning { touch, .. } if touch.id == event.id => {
-                    recognized.push(RecognizedTouchGesture::Scroll(scroll_event(
-                        touch.start_position,
-                        Point::default(),
-                        TouchPhase::Cancelled,
-                    )));
+            TouchPhase::Cancelled => {
+                if self.tracked_touch_id() == Some(event.id) {
+                    recognized.extend(self.cancel_tracked_touch(Some(event.position)));
                 }
-                TouchGestureState::LongPressing(touch) if touch.id == event.id => {
-                    recognized.push(RecognizedTouchGesture::LongPress(LongPressEvent {
-                        phase: TouchPhase::Cancelled,
-                        start_position: touch.start_position,
-                        position: event.position,
-                    }));
-                }
-                other => self.state = other,
-            },
+            }
         }
         recognized
+    }
+
+    /// Cancels the touch being followed, for when the platform may never report its release.
+    pub(crate) fn cancel(&mut self) -> Option<RecognizedTouchGesture> {
+        self.cancel_tracked_touch(None)
+    }
+
+    fn tracked_touch_id(&self) -> Option<TouchId> {
+        match &self.state {
+            TouchGestureState::Idle => None,
+            TouchGestureState::Pending { touch, .. }
+            | TouchGestureState::Panning { touch, .. }
+            | TouchGestureState::LongPressing(touch) => Some(touch.id),
+        }
+    }
+
+    fn cancel_tracked_touch(
+        &mut self,
+        position: Option<Point<Pixels>>,
+    ) -> Option<RecognizedTouchGesture> {
+        match mem::replace(&mut self.state, TouchGestureState::Idle) {
+            TouchGestureState::Idle | TouchGestureState::Pending { .. } => None,
+            TouchGestureState::Panning { touch, .. } => {
+                Some(RecognizedTouchGesture::Scroll(scroll_event(
+                    touch.start_position,
+                    Point::default(),
+                    TouchPhase::Cancelled,
+                )))
+            }
+            TouchGestureState::LongPressing(touch) => {
+                Some(RecognizedTouchGesture::LongPress(LongPressEvent {
+                    phase: TouchPhase::Cancelled,
+                    start_position: touch.start_position,
+                    position: position.unwrap_or(touch.last_position),
+                }))
+            }
+        }
     }
 
     pub(crate) fn pending_long_press(&self) -> Option<(TouchId, Duration)> {
@@ -1610,6 +1634,38 @@ mod tests {
             now + Duration::from_millis(16),
         );
         assert!(recognized.is_empty(), "cancelled tap must not click");
+    }
+
+    #[test]
+    fn cancelling_frees_the_recognizer_for_the_next_touch() {
+        let mut recognizer = TouchGestureRecognizer::new(GestureTuning::default());
+        let now = Instant::now();
+
+        recognizer.handle_event_at(
+            &touch_event(TouchId(1), TouchPhase::Started, 100., 100.),
+            now,
+        );
+        recognizer.handle_event_at(
+            &touch_event(TouchId(1), TouchPhase::Moved, 100., 150.),
+            now + Duration::from_millis(16),
+        );
+        let Some(RecognizedTouchGesture::Scroll(scroll)) = recognizer.cancel() else {
+            panic!("expected the pan to be cancelled");
+        };
+        assert_eq!(scroll.touch_phase, TouchPhase::Cancelled);
+
+        recognizer.handle_event_at(
+            &touch_event(TouchId(2), TouchPhase::Started, 10., 10.),
+            now + Duration::from_millis(32),
+        );
+        let recognized = recognizer.handle_event_at(
+            &touch_event(TouchId(2), TouchPhase::Ended, 10., 10.),
+            now + Duration::from_millis(48),
+        );
+        assert!(
+            matches!(recognized.as_slice(), [RecognizedTouchGesture::Tap { .. }]),
+            "expected tap, got {recognized:?}"
+        );
     }
 
     #[test]

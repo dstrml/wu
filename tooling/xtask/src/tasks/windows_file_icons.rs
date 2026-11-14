@@ -19,7 +19,6 @@ const GENERIC_ICON: &str = "document";
 const SIZES: [u32; 6] = [16, 24, 32, 48, 64, 256];
 const SMALLEST_SIZE_WITH_BADGE: u32 = 32;
 
-/// File types the Symbols theme has no icon for, matched to the icon of their language.
 const EXTRA_ICONS: &[(&str, &str)] = &[
     ("bash_login", "shell"),
     ("bash_logout", "shell"),
@@ -81,8 +80,6 @@ struct IconDefinition {
     path: String,
 }
 
-/// Renders a Windows document icon for every file type the installer associates with Wu,
-/// and points the installer's registry entries at them.
 pub fn run_windows_file_icons(_args: WindowsFileIconsArgs) -> Result<()> {
     let workspace = load_workspace()?;
     let root = workspace.workspace_root.as_std_path();
@@ -114,15 +111,8 @@ pub fn run_windows_file_icons(_args: WindowsFileIconsArgs) -> Result<()> {
     }
 
     let logo = svg_body(&fs::read_to_string(root.join(LOGO))?)?;
-    let output_dir = root.join(OUTPUT_DIR);
-    fs::create_dir_all(&output_dir)?;
     let icons: BTreeSet<&String> = icon_by_extension.values().collect();
-    for entry in fs::read_dir(&output_dir)? {
-        let path = entry?.path();
-        if path.extension().is_some_and(|extension| extension == "ico") {
-            fs::remove_file(&path)?;
-        }
-    }
+    let mut rendered_icons = Vec::new();
     for icon in &icons {
         let glyph = if *icon == GENERIC_ICON {
             None
@@ -134,28 +124,50 @@ pub fn run_windows_file_icons(_args: WindowsFileIconsArgs) -> Result<()> {
             let glyph_path = root.join("assets").join(&definition.path);
             Some(svg_body(&fs::read_to_string(&glyph_path)?)?)
         };
-        let ico = render_ico(glyph.as_ref(), &logo)?;
-        fs::write(output_dir.join(format!("{icon}.ico")), ico)?;
+        rendered_icons.push((icon, render_ico(glyph.as_ref(), &logo)?));
     }
 
     let default_icon_pattern = Regex::new(
         r#"(?m)^Root: HKCU; Subkey: "Software\\Classes\\\{#RegValueName\}\.([^\\"]+)\\DefaultIcon";.*$"#,
     )?;
-    let mut missing = Vec::new();
+    let mut without_association = Vec::new();
+    let mut with_default_icon = BTreeSet::new();
     let installer = default_icon_pattern.replace_all(&installer, |captures: &regex::Captures| {
         let extension = &captures[1];
         let Some(icon) = icon_by_extension.get(extension) else {
-            missing.push(extension.to_string());
+            without_association.push(extension.to_string());
             return captures[0].to_string();
         };
+        with_default_icon.insert(extension.to_string());
         format!(
             r#"Root: HKCU; Subkey: "Software\Classes\{{#RegValueName}}.{extension}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{INSTALLED_DIR}\{icon}.ico"; Tasks: associatewithfiles"#
         )
     });
-    if !missing.is_empty() {
+    if !without_association.is_empty() {
         return Err(anyhow!(
-            "DefaultIcon entries without a file association: {missing:?}"
+            "DefaultIcon entries without a file association: {without_association:?}"
         ));
+    }
+    let without_default_icon: Vec<&String> = icon_by_extension
+        .keys()
+        .filter(|extension| !with_default_icon.contains(*extension))
+        .collect();
+    if !without_default_icon.is_empty() {
+        return Err(anyhow!(
+            "file associations without a DefaultIcon entry: {without_default_icon:?}"
+        ));
+    }
+
+    let output_dir = root.join(OUTPUT_DIR);
+    fs::create_dir_all(&output_dir)?;
+    for entry in fs::read_dir(&output_dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|extension| extension == "ico") {
+            fs::remove_file(&path)?;
+        }
+    }
+    for (icon, ico) in rendered_icons {
+        fs::write(output_dir.join(format!("{icon}.ico")), ico)?;
     }
     fs::write(&installer_path, installer.as_ref())?;
 
@@ -169,13 +181,20 @@ pub fn run_windows_file_icons(_args: WindowsFileIconsArgs) -> Result<()> {
 
 fn icon_for_extension(extension: &str, theme: &IconTheme) -> String {
     let lowercase = extension.to_lowercase();
+    let generic_path = theme.file_icons.get(GENERIC_ICON).map(|icon| &icon.path);
     EXTRA_ICONS
         .iter()
         .find(|(extra, _)| *extra == lowercase)
         .map(|(_, icon)| icon.to_string())
         .or_else(|| theme.file_suffixes.get(&lowercase).cloned())
         .or_else(|| theme.file_stems.get(&format!(".{lowercase}")).cloned())
-        .filter(|icon| theme.file_icons.contains_key(icon))
+        .or_else(|| theme.file_stems.get(&lowercase).cloned())
+        .filter(|icon| {
+            theme
+                .file_icons
+                .get(icon)
+                .is_some_and(|definition| Some(&definition.path) != generic_path)
+        })
         .unwrap_or_else(|| GENERIC_ICON.to_string())
 }
 
@@ -190,7 +209,7 @@ fn svg_body(svg: &str) -> Result<SvgBody> {
     let captures = open_tag.captures(svg).context("SVG has no <svg> element")?;
     let attributes = &captures[1];
     let attribute = |name: &str| -> Option<String> {
-        Regex::new(&format!(r#"\b{name}="([^"]*)""#))
+        Regex::new(&format!(r#"(?:^|\s){name}="([^"]*)""#))
             .ok()?
             .captures(attributes)
             .map(|captures| captures[1].to_string())
@@ -204,12 +223,12 @@ fn svg_body(svg: &str) -> Result<SvgBody> {
         (None, Some(width), Some(height)) => format!("0 0 {width} {height}"),
         _ => return Err(anyhow!("SVG has no viewBox or size")),
     };
-    let placement = Regex::new(r#"\b(x|y|width|height|viewBox)="[^"]*""#)?;
+    let placement = Regex::new(r#"(^|\s)(x|y|width|height|viewBox)="[^"]*""#)?;
     let start = captures.get(0).map_or(0, |open| open.end());
     let end = svg.rfind("</svg>").context("SVG has no closing tag")?;
     Ok(SvgBody {
         view_box,
-        attributes: placement.replace_all(attributes, "").trim().to_string(),
+        attributes: placement.replace_all(attributes, "$1").trim().to_string(),
         content: svg[start..end].to_string(),
     })
 }
@@ -303,6 +322,14 @@ mod tests {
         let second_offset = u32::from_le_bytes(ico[34..38].try_into().unwrap()) as usize;
         assert_eq!(&ico[first_offset..first_offset + 3], &[1, 2, 3]);
         assert_eq!(&ico[second_offset..second_offset + 2], &[4, 5]);
+    }
+
+    #[test]
+    fn svg_body_keeps_attributes_that_only_end_in_a_size_name() {
+        let body =
+            svg_body(r#"<svg stroke-width="2" width="24" height="20"><path/></svg>"#).unwrap();
+        assert_eq!(body.view_box, "0 0 24 20");
+        assert_eq!(body.attributes, r#"stroke-width="2""#);
     }
 
     #[test]

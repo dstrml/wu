@@ -8,10 +8,7 @@ struct ActiveTouch<W> {
     position: Point<Pixels>,
 }
 
-/// Tracks the touches a platform window is receiving, for platform backends.
-///
-/// Platforms reuse their touch numbers, but gpui needs touch ids that are never reused, and each
-/// touch stays with the window it started in.
+/// Gives platform touches never-reused ids and keeps each touch with the window it started in.
 pub struct ActiveTouches<K, W> {
     next_id: u64,
     by_slot: HashMap<K, ActiveTouch<W>>,
@@ -79,6 +76,11 @@ impl<K: Hash + Eq, W: Clone> ActiveTouches<K, W> {
             touch.window,
             event(touch.id, TouchPhase::Cancelled, touch.position),
         ))
+    }
+
+    /// Forgets the touches that started in a window that is going away.
+    pub fn forget_window(&mut self, mut is_window: impl FnMut(&W) -> bool) {
+        self.by_slot.retain(|_, touch| !is_window(&touch.window));
     }
 
     /// Cancels every touch, for platforms that cancel all touches at once.
@@ -152,6 +154,19 @@ mod tests {
         let mut touches = ActiveTouches::<i32, &str>::default();
         touches.start(0, "main", point(px(5.), px(5.)));
         assert!(touches.moved(&0, point(px(5.), px(5.))).is_none());
+    }
+
+    #[test]
+    fn forgetting_a_window_drops_only_its_touches() {
+        let mut touches = ActiveTouches::<i32, &str>::default();
+        touches.start(0, "main", point(px(1.), px(1.)));
+        touches.start(1, "popup", point(px(2.), px(2.)));
+        touches.forget_window(|window| *window == "popup");
+        assert!(touches.ended(&1).is_none());
+        assert_eq!(
+            summary(touches.ended(&0).into_iter().collect()),
+            vec![("main", 0, TouchPhase::Ended)]
+        );
     }
 
     #[test]

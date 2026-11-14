@@ -223,6 +223,7 @@ impl Render for DraggedProjectTab {
 fn draggable_project_tab(
     index: usize,
     key: ProjectGroupKey,
+    active_key: ProjectGroupKey,
     multi_workspace: WeakEntity<MultiWorkspace>,
     tab: impl IntoElement,
 ) -> impl IntoElement {
@@ -247,11 +248,30 @@ fn draggable_project_tab(
         .on_drop(move |dragged: &DraggedProjectTab, _, cx| {
             multi_workspace
                 .update(cx, |multi_workspace, cx| {
-                    multi_workspace.move_project_group(&dragged.key, index, cx);
+                    let target = shown_drop_index(
+                        &multi_workspace.project_group_keys(),
+                        &active_key,
+                        &dragged.key,
+                        index,
+                    );
+                    multi_workspace.move_project_group(&dragged.key, target, cx);
                 })
                 .log_err();
         })
         .child(tab)
+}
+
+/// Caps a drop index so the dropped tab is not pushed into the hidden "+N" projects.
+fn shown_drop_index<K: PartialEq>(keys: &[K], active: &K, dragged: &K, target: usize) -> usize {
+    if dragged == active {
+        return target;
+    }
+    keys.iter()
+        .filter(|key| *key != dragged)
+        .enumerate()
+        .filter(|(_, key)| *key != active)
+        .nth(MAX_PROJECT_TABS - 2)
+        .map_or(target, |(last_shown_index, _)| target.min(last_shown_index))
 }
 
 pub struct TitleBar {
@@ -807,6 +827,7 @@ impl TitleBar {
                 tabs = tabs.child(draggable_project_tab(
                     index,
                     key,
+                    active_key.clone(),
                     multi_workspace.downgrade(),
                     tab,
                 ));
@@ -820,6 +841,7 @@ impl TitleBar {
                 tabs = tabs.child(draggable_project_tab(
                     index,
                     key,
+                    active_key.clone(),
                     multi_workspace.downgrade(),
                     tab,
                 ));
@@ -1104,6 +1126,18 @@ impl TitleBar {
 mod tests {
     use super::*;
     use util::{path_list::PathList, paths::PathStyle};
+
+    #[test]
+    fn dropped_tabs_stay_among_the_shown_tabs() {
+        let keys = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        // With "h" active, "f" and "g" are hidden, so dropping "a" onto "h" puts it before "f".
+        assert_eq!(shown_drop_index(&keys, &"h", &"a", 7), 4);
+        assert_eq!(shown_drop_index(&keys, &"h", &"a", 4), 4);
+        assert_eq!(shown_drop_index(&keys, &"h", &"e", 0), 0);
+        assert_eq!(shown_drop_index(&keys, &"h", &"h", 0), 0);
+        assert_eq!(shown_drop_index(&keys, &"a", &"b", 5), 5);
+        assert_eq!(shown_drop_index(&keys[..4], &"d", &"a", 3), 3);
+    }
 
     #[test]
     fn project_tab_names_use_folder_names() {

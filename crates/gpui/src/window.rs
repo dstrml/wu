@@ -1790,6 +1790,9 @@ impl Window {
                 handle
                     .update(&mut cx, |_, window, cx| {
                         window.active.set(active);
+                        if !active {
+                            window.cancel_touch_gesture(cx);
+                        }
                         window.modifiers = window.platform_window.modifiers();
                         window.capslock = window.platform_window.capslock();
                         window
@@ -5695,6 +5698,13 @@ impl Window {
                     self.long_press_capture = None;
                 }
             }
+        }
+    }
+
+    fn cancel_touch_gesture(&mut self, cx: &mut App) {
+        self.long_press_timer.take();
+        if let Some(gesture) = self.touch_gestures.cancel() {
+            self.dispatch_recognized_touch_gesture(gesture, cx);
         }
     }
 

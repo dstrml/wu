@@ -14,8 +14,8 @@ Wu 是一款用 Rust 编写的快速原生代码编辑器，界面简洁现代�
 
 ## 功能
 
-- ⚡ **原生、快速。** 不用 Electron，也没有网页视图。打开就能用，大型视图下也一直流畅。
-- 🍃 **轻量。** Wu 占用的内存比 VS Code 和 Zed 都少。查看[测试结果](https://github.com/dstrml/wu/blob/main/docs/memory-benchmark.md)。
+- ⚡ **原生、快速。** 不用 Electron，也没有网页视图。使用 GPU 渲染。
+- 🍃 **轻量。** 占用的内存比 VS Code 和 Zed 都少。查看[测试结果](https://github.com/dstrml/wu/blob/main/docs/memory-benchmark.md)。
 - 👾 **内置编程智能体。** 直接支持 Claude Code、Codex 和 OpenCode。
 - ✨ **默认就好看。** 外观简洁现代，用起来也顺手。
 - 🤫 **完全私密。** 无需账号，没有遥测。Wu 从不把你的使用数据发送到任何地方。

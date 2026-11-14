@@ -1820,11 +1820,17 @@ impl Dispatch<wl_seat::WlSeat, ()> for WaylandClientStatePtr {
 
                 state.wl_pointer = Some(pointer);
             }
-            if capabilities.contains(wl_seat::Capability::Touch) {
-                let touch = seat.get_touch(qh, ());
-                if let Some(wl_touch) = state.wl_touch.replace(touch) {
-                    wl_touch.release();
-                }
+            let touch = capabilities
+                .contains(wl_seat::Capability::Touch)
+                .then(|| seat.get_touch(qh, ()));
+            let Some(old_touch) = std::mem::replace(&mut state.wl_touch, touch) else {
+                return;
+            };
+            old_touch.release();
+            let cancelled = state.touches.cancel_all();
+            drop(state);
+            for (window, event) in cancelled {
+                window.handle_input(PlatformInput::Touch(event));
             }
         }
     }

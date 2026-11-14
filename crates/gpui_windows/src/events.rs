@@ -545,13 +545,19 @@ impl WindowsWindowInner {
     fn handle_pointer_msg(&self, handle: HWND, msg: u32, wparam: WPARAM) -> Option<isize> {
         let pointer_id = wparam.loword() as u32;
         let mut info = POINTER_INFO::default();
-        unsafe { GetPointerInfo(pointer_id, &mut info) }.log_err()?;
+        if unsafe { GetPointerInfo(pointer_id, &mut info) }
+            .log_err()
+            .is_none()
+        {
+            return self.cancel_touch(pointer_id);
+        }
         if info.pointerType != PT_TOUCH {
             return None;
         }
         let mut location = info.ptPixelLocation;
         if !unsafe { ScreenToClient(handle, &mut location) }.as_bool() {
-            return None;
+            self.cancel_touch(pointer_id);
+            return Some(0);
         }
         let position = logical_point(
             location.x as f32,
@@ -579,10 +585,14 @@ impl WindowsWindowInner {
     }
 
     fn handle_pointer_capture_changed_msg(&self, wparam: WPARAM) -> Option<isize> {
-        let pointer_id = wparam.loword() as u32;
-        let cancelled = self.state.touches.borrow_mut().cancelled(&pointer_id);
-        self.dispatch_touches(cancelled);
-        None
+        self.cancel_touch(wparam.loword() as u32)
+    }
+
+    /// Returns `Some(0)` if the pointer was a touch, so the message is kept from `DefWindowProc`.
+    fn cancel_touch(&self, pointer_id: u32) -> Option<isize> {
+        let cancelled = self.state.touches.borrow_mut().cancelled(&pointer_id)?;
+        self.dispatch_touches([cancelled]);
+        Some(0)
     }
 
     fn dispatch_touches(&self, events: impl IntoIterator<Item = ((), TouchEvent)>) {
