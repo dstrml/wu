@@ -15,5 +15,8 @@ cargo_toml.workspace = true
 clap = { workspace = true, features = ["derive"] }
 indoc.workspace = true
 regex.workspace = true
+resvg.workspace = true
+serde.workspace = true
+serde_json_lenient.workspace = true
 toml.workspace = true
 toml_edit.workspace = true

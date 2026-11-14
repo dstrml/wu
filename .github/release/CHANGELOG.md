@@ -9,6 +9,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Fix the search panel's action buttons doing nothing when out of focus.
 - Show a Repositories list in the Git panel when a project has more than one repository.
 - Reorder project tabs in the title bar by dragging them.
+- Give files associated with Wu on Windows specific icons.
 
 ## 1.2.2 - 2026-11-11
 

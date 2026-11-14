@@ -26,6 +26,8 @@ enum CliCommand {
     SetupWebrtc(tasks::setup_webrtc::SetupWebrtcArgs),
     /// Builds GPUI web examples and serves them.
     WebExamples(tasks::web_examples::WebExamplesArgs),
+    /// Renders the Windows installer's file type icons.
+    WindowsFileIcons(tasks::windows_file_icons::WindowsFileIconsArgs),
 }
 
 fn main() -> Result<()> {
@@ -41,5 +43,8 @@ fn main() -> Result<()> {
         CliCommand::WslSandboxTests(args) => tasks::wsl_sandbox_tests::run_wsl_sandbox_tests(args),
         CliCommand::SetupWebrtc(args) => tasks::setup_webrtc::run_setup_webrtc(args),
         CliCommand::WebExamples(args) => tasks::web_examples::run_web_examples(args),
+        CliCommand::WindowsFileIcons(args) => {
+            tasks::windows_file_icons::run_windows_file_icons(args)
+        }
     }
 }
