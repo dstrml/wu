@@ -86,12 +86,12 @@ use crate::linux::{
     is_within_click_distance, keystroke_from_xkb, keystroke_underlying_dead_key,
     modifiers_from_xkb, new_xkb_context, open_uri_internal, read_fd_with_timeout,
     reveal_path_internal,
+    touch::ActiveTouches,
     wayland::{
         clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
         cursor::Cursor,
         serial::{Serial, SerialKind, SerialTracker},
         to_shape,
-        touch::ActiveTouches,
         window::WaylandWindow,
     },
     xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
@@ -321,7 +321,7 @@ pub(crate) struct WaylandClientState {
     pinch_gesture: Option<zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1>,
     pinch_scale: f32,
     wl_touch: Option<wl_touch::WlTouch>,
-    touches: ActiveTouches<WaylandWindowStatePtr>,
+    touches: ActiveTouches<i32, WaylandWindowStatePtr>,
     wl_keyboard: Option<wl_keyboard::WlKeyboard>,
     cursor_shape_device: Option<wp_cursor_shape_device_v1::WpCursorShapeDeviceV1>,
     data_device: Option<wl_data_device::WlDataDevice>,
@@ -2541,10 +2541,10 @@ impl Dispatch<wl_touch::WlTouch, ()> for WaylandClientStatePtr {
             }
             wl_touch::Event::Motion { id, x, y, .. } => state
                 .touches
-                .moved(id, point(px(x as f32), px(y as f32)))
+                .moved(&id, point(px(x as f32), px(y as f32)))
                 .into_iter()
                 .collect(),
-            wl_touch::Event::Up { id, .. } => state.touches.ended(id).into_iter().collect(),
+            wl_touch::Event::Up { id, .. } => state.touches.ended(&id).into_iter().collect(),
             wl_touch::Event::Cancel => state.touches.cancel_all(),
             _ => return,
         };

@@ -32,7 +32,7 @@ use std::{
     cell::RefCell, ffi::c_void, fmt::Display, num::NonZeroU32, ptr::NonNull, rc::Rc, sync::Arc,
 };
 
-use super::{X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES};
+use super::{X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, XinputSupport};
 
 x11rb::atom_manager! {
     pub XcbAtoms: AtomsCookie {
@@ -458,7 +458,7 @@ impl X11WindowState {
         scale_factor: f32,
         appearance: WindowAppearance,
         parent_window: Option<X11WindowStatePtr>,
-        supports_xinput_gestures: bool,
+        xinput_support: XinputSupport,
         is_bgr: bool,
     ) -> anyhow::Result<Self> {
         // Native popups are not implemented on X11 yet. Rejecting lets callers fall back to
@@ -708,7 +708,12 @@ impl X11WindowState {
                 | xinput::XIEventMask::BUTTON_RELEASE
                 | xinput::XIEventMask::ENTER
                 | xinput::XIEventMask::LEAVE;
-            if supports_xinput_gestures {
+            if xinput_support.touch {
+                xi_event_mask |= xinput::XIEventMask::TOUCH_BEGIN
+                    | xinput::XIEventMask::TOUCH_UPDATE
+                    | xinput::XIEventMask::TOUCH_END;
+            }
+            if xinput_support.gestures {
                 // x11rb 0.13 doesn't define XIEventMask constants for gesture
                 // events, so we construct them from the event opcodes (each
                 // XInput event type N maps to mask bit N).
@@ -926,7 +931,7 @@ impl X11Window {
         scale_factor: f32,
         appearance: WindowAppearance,
         parent_window: Option<X11WindowStatePtr>,
-        supports_xinput_gestures: bool,
+        xinput_support: XinputSupport,
         is_bgr: bool,
     ) -> anyhow::Result<Self> {
         let ptr = X11WindowStatePtr {
@@ -945,7 +950,7 @@ impl X11Window {
                 scale_factor,
                 appearance,
                 parent_window,
-                supports_xinput_gestures,
+                xinput_support,
                 is_bgr,
             )?)),
             callbacks: Rc::new(RefCell::new(Callbacks::default())),
