@@ -7248,6 +7248,9 @@ impl GitPanel {
                 item_ix,
                 offset_in_item: if exact { offset_in_item } else { px(0.) },
             });
+        } else if old_rows.is_empty() {
+            // Rows inserted at the scroll position push it down, which would open on the oldest commit.
+            self.commit_history_list.scroll_to(ListOffset::default());
         }
         let count = self.history_rows.len();
         let focused = anchor
@@ -10628,6 +10631,52 @@ mod tests {
                     tag_names: Vec::new(),
                 }]))
             );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_history_starts_at_the_top_after_switching_tabs(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree("/root", json!({ "project": { ".git": {} } }))
+            .await;
+
+        let dot_git = Path::new(path!("/root/project/.git"));
+        let commits: Vec<Oid> = ["1111", "2222", "3333"]
+            .into_iter()
+            .map(|prefix| format!("{prefix:0<40}").parse().unwrap())
+            .collect();
+        fs.with_git_state(dot_git, false, |state| {
+            state.current_branch_name = None;
+            state.refs.insert("HEAD".into(), commits[0].to_string());
+            state.graph_commits = commits
+                .iter()
+                .map(|sha| {
+                    Arc::new(git::repository::InitialGraphCommitData {
+                        sha: *sha,
+                        parents: SmallVec::new(),
+                        ref_names: Vec::new(),
+                    })
+                })
+                .collect();
+        })
+        .unwrap();
+
+        let panel = history_panel_for_project(fs.clone(), cx).await;
+        wait_for_commit_history_to_settle(&panel, cx).await;
+
+        panel.update(cx, |panel, cx| {
+            assert_eq!(panel.history_rows.len(), 3);
+            panel.commit_history_list.scroll_to(ListOffset::default());
+            panel.set_commit_history(CommitHistory::Loading, cx);
+            panel.load_commit_history(cx);
+        });
+        wait_for_commit_history_to_settle(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(panel.history_rows.len(), 3);
+            assert_eq!(panel.commit_history_list.logical_scroll_top().item_ix, 0);
         });
     }
 

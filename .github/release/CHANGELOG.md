@@ -4,6 +4,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Fix the Git panel's History tab opening at the oldest commit.
 - Add touchscreen support on Linux and Windows.
 - Fix the search panel's action buttons doing nothing when out of focus.
 
