@@ -477,6 +477,31 @@ impl MultiWorkspace {
         }
     }
 
+    pub fn move_project_group(
+        &mut self,
+        key: &ProjectGroupKey,
+        target_index: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self
+            .project_groups
+            .iter()
+            .position(|group| group.key == *key)
+        else {
+            return false;
+        };
+        let target_index = target_index.min(self.project_groups.len() - 1);
+        if index == target_index {
+            return false;
+        }
+        let group = self.project_groups.remove(index);
+        self.project_groups.insert(target_index, group);
+        cx.emit(MultiWorkspaceEvent::ProjectGroupsChanged);
+        self.serialize(cx);
+        cx.notify();
+        true
+    }
+
     pub fn move_project_group_up(&mut self, key: &ProjectGroupKey, cx: &mut Context<Self>) -> bool {
         let Some(index) = self
             .project_groups

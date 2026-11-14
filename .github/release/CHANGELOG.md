@@ -8,6 +8,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Add touchscreen support on Linux and Windows.
 - Fix the search panel's action buttons doing nothing when out of focus.
 - Show a Repositories list in the Git panel when a project has more than one repository.
+- Reorder project tabs in the title bar by dragging them.
 
 ## 1.2.2 - 2026-11-11
 

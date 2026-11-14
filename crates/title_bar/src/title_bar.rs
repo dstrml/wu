@@ -199,6 +199,61 @@ fn render_project_tab(
         })
 }
 
+#[derive(Clone)]
+struct DraggedProjectTab {
+    key: ProjectGroupKey,
+    index: usize,
+}
+
+impl Render for DraggedProjectTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        div()
+            .font_ui(cx)
+            .px_2()
+            .py_0p5()
+            .rounded_sm()
+            .border_1()
+            .border_color(colors.border)
+            .bg(colors.elevated_surface_background)
+            .child(Label::new(project_group_name(&self.key)).size(LabelSize::Small))
+    }
+}
+
+fn draggable_project_tab(
+    index: usize,
+    key: ProjectGroupKey,
+    multi_workspace: WeakEntity<MultiWorkspace>,
+    tab: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .id(("project_tab_drag", index))
+        .rounded_sm()
+        .on_drag(DraggedProjectTab { key, index }, |tab, _, _, cx| {
+            cx.new(|_| tab.clone())
+        })
+        .drag_over::<DraggedProjectTab>(move |style, dragged, _, cx| {
+            let style = style
+                .bg(cx.theme().colors().drop_target_background)
+                .border_color(cx.theme().colors().drop_target_border);
+            if index < dragged.index {
+                style.border_l_2()
+            } else if index > dragged.index {
+                style.border_r_2()
+            } else {
+                style
+            }
+        })
+        .on_drop(move |dragged: &DraggedProjectTab, _, cx| {
+            multi_workspace
+                .update(cx, |multi_workspace, cx| {
+                    multi_workspace.move_project_group(&dragged.key, index, cx);
+                })
+                .log_err();
+        })
+        .child(tab)
+}
+
 pub struct TitleBar {
     platform_titlebar: Entity<PlatformTitleBar>,
     project: Entity<Project>,
@@ -743,21 +798,31 @@ impl TitleBar {
             .bg(box_background);
         for (index, key) in keys.into_iter().enumerate() {
             if key == active_key {
-                tabs = tabs.child(
-                    div()
-                        .rounded_sm()
-                        .border_1()
-                        .border_color(current_border)
-                        .bg(current_background)
-                        .child(self.render_project_name(active_name.clone(), window, cx)),
-                );
+                let tab = div()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(current_border)
+                    .bg(current_background)
+                    .child(self.render_project_name(active_name.clone(), window, cx));
+                tabs = tabs.child(draggable_project_tab(
+                    index,
+                    key,
+                    multi_workspace.downgrade(),
+                    tab,
+                ));
             } else if other_tabs_left == 0 {
                 hidden_count += 1;
             } else {
                 other_tabs_left -= 1;
                 let roots = multi_workspace.read(cx).project_group_roots(&key, cx);
                 let activity = workspace::project_agent_activity(&roots, cx);
-                tabs = tabs.child(render_project_tab(index, key, activity));
+                let tab = render_project_tab(index, key.clone(), activity);
+                tabs = tabs.child(draggable_project_tab(
+                    index,
+                    key,
+                    multi_workspace.downgrade(),
+                    tab,
+                ));
             }
         }
         tabs.when(hidden_count > 0, |tabs| {

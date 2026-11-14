@@ -114,6 +114,40 @@ async fn test_project_group_keys_add_workspace(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_move_project_group_to_index(cx: &mut TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    let mut projects = Vec::new();
+    for root in ["/root_a", "/root_b", "/root_c"] {
+        fs.insert_tree(root, json!({ "file.txt": "" })).await;
+        projects.push(Project::test(fs.clone(), [root.as_ref()], cx).await);
+    }
+    let (multi_workspace, cx) = setup_multi_workspace(&projects, cx);
+    let keys = multi_workspace.read_with(cx, |multi_workspace, _| {
+        multi_workspace.project_group_keys()
+    });
+    let [first, second, third] = <[ProjectGroupKey; 3]>::try_from(keys).unwrap();
+
+    multi_workspace.update(cx, |multi_workspace, cx| {
+        assert!(multi_workspace.move_project_group(&first, 2, cx));
+    });
+    multi_workspace.read_with(cx, |multi_workspace, _| {
+        assert_eq!(
+            multi_workspace.project_group_keys(),
+            [second.clone(), third.clone(), first.clone()]
+        );
+    });
+
+    multi_workspace.update(cx, |multi_workspace, cx| {
+        assert!(multi_workspace.move_project_group(&first, 0, cx));
+        assert!(!multi_workspace.move_project_group(&first, 0, cx));
+    });
+    multi_workspace.read_with(cx, |multi_workspace, _| {
+        assert_eq!(multi_workspace.project_group_keys(), [first, second, third]);
+    });
+}
+
+#[gpui::test]
 async fn test_project_group_keys_duplicate_not_added(cx: &mut TestAppContext) {
     init_test(cx);
     let fs = FakeFs::new(cx.executor());
