@@ -7,6 +7,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Fix the Git panel's History tab opening at the oldest commit.
 - Add touchscreen support on Linux and Windows.
 - Fix the search panel's action buttons doing nothing when out of focus.
+- Show a Repositories list in the Git panel when a project has more than one repository.
 
 ## 1.2.2 - 2026-11-11
 

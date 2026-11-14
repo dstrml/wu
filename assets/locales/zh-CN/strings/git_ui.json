@@ -211,6 +211,7 @@
   "Remote up to date": "远程仓库已是最新",
   "Remove co-authored-by": "移除 co-authored-by",
   "Rename Branch ({branch})": "重命名分支（{branch}）",
+  "Repositories": "仓库",
   "Republish": "重新发布",
   "Restore": "还原",
   "Restore All": "全部还原",
