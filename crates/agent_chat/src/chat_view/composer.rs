@@ -281,8 +281,11 @@ impl ChatView {
             .into_any_element()
     }
 
-    pub(super) fn footer_label_shell(icon_name: IconName, cx: &App) -> gpui::Div {
-        let color = cx.theme().colors().text_muted.opacity(0.6);
+    fn footer_label_color(cx: &App) -> Hsla {
+        cx.theme().colors().text_muted.opacity(0.6)
+    }
+
+    fn footer_label_row(leading: impl IntoElement, cx: &App) -> gpui::Div {
         h_flex()
             .h(px(20.))
             .min_w_0()
@@ -290,36 +293,45 @@ impl ChatView {
             .gap(px(6.))
             .text_size(ui(12.))
             .font_weight(FontWeight::MEDIUM)
-            .text_color(color)
-            .child(icon(icon_name, px(12.), color))
+            .text_color(Self::footer_label_color(cx))
+            .child(leading)
+    }
+
+    pub(super) fn footer_label_shell(icon_name: IconName, cx: &App) -> gpui::Div {
+        Self::footer_label_row(icon(icon_name, px(12.), Self::footer_label_color(cx)), cx)
     }
 
     pub(super) fn render_agent_update(&self, cx: &App) -> Option<AnyElement> {
         let kind = self.session.read(cx).kind();
         let status = self.store.read(cx).agent_update(kind)?.clone();
-        let label = |icon_name: IconName, text: SharedString| {
-            Self::footer_label_shell(icon_name, cx)
+        let color = Self::footer_label_color(cx);
+        let label = |leading: AnyElement, text: SharedString| {
+            Self::footer_label_row(leading, cx)
                 .max_w(px(280.))
                 .child(div().min_w_0().truncate().child(text))
         };
+        let status_icon = |icon_name| icon(icon_name, px(12.), color).into_any_element();
         Some(match status {
             AgentUpdateStatus::Updating => label(
-                IconName::AgentRestart,
+                icon(IconName::LoadCircle, px(12.), color)
+                    .with_animation(
+                        "agent-update-spinner",
+                        Animation::new(Duration::from_secs(1)).repeat(),
+                        |this, delta| {
+                            this.with_transformation(Transformation::rotate(gpui::percentage(
+                                delta,
+                            )))
+                        },
+                    )
+                    .into_any_element(),
                 t!("Updating {agent}…", agent = kind.label()),
-            )
-            .with_animation(
-                "agent-update-pulse",
-                Animation::new(Duration::from_millis(1400))
-                    .repeat()
-                    .with_easing(gpui::pulsating_between(0.5, 1.)),
-                |this, delta| this.opacity(delta),
             )
             .into_any_element(),
             AgentUpdateStatus::Finished(message) => {
-                label(IconName::AgentCheck, message).into_any_element()
+                label(status_icon(IconName::AgentCheck), message).into_any_element()
             }
             AgentUpdateStatus::Failed { message, reason } => {
-                label(IconName::AgentDangerTriangle, message)
+                label(status_icon(IconName::AgentDangerTriangle), message)
                     .id("agent-update-failed")
                     .tooltip(Tooltip::text(reason))
                     .into_any_element()
