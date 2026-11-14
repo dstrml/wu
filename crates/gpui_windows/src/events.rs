@@ -10,7 +10,7 @@ use windows::{
         UI::{
             Controls::*,
             HiDpi::*,
-            Input::{Ime::*, KeyboardAndMouse::*},
+            Input::{Ime::*, KeyboardAndMouse::*, Pointer::*},
             WindowsAndMessaging::*,
         },
     },
@@ -147,6 +147,10 @@ impl WindowsWindowInner {
             WM_XBUTTONUP => {
                 self.handle_xbutton_msg(handle, wparam, lparam, Self::handle_mouse_up_msg)
             }
+            WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP => {
+                self.handle_pointer_msg(handle, msg, wparam)
+            }
+            WM_POINTERCAPTURECHANGED => self.handle_pointer_capture_changed_msg(wparam),
             WM_MOUSEWHEEL => self.handle_mouse_wheel_msg(handle, wparam, lparam),
             WM_MOUSEHWHEEL => self.handle_mouse_horizontal_wheel_msg(handle, wparam, lparam),
             WM_SYSKEYUP => self.handle_syskeyup_msg(wparam, lparam),
@@ -535,6 +539,60 @@ impl WindowsWindowInner {
         self.state.callbacks.input.set(Some(func));
 
         if handled { Some(0) } else { Some(1) }
+    }
+
+    /// Touches must not reach `DefWindowProc`, which would also turn them into mouse clicks.
+    fn handle_pointer_msg(&self, handle: HWND, msg: u32, wparam: WPARAM) -> Option<isize> {
+        let pointer_id = wparam.loword() as u32;
+        let mut info = POINTER_INFO::default();
+        unsafe { GetPointerInfo(pointer_id, &mut info) }.log_err()?;
+        if info.pointerType != PT_TOUCH {
+            return None;
+        }
+        let mut location = info.ptPixelLocation;
+        if !unsafe { ScreenToClient(handle, &mut location) }.as_bool() {
+            return None;
+        }
+        let position = logical_point(
+            location.x as f32,
+            location.y as f32,
+            self.state.scale_factor.get(),
+        );
+        let mut touches = self.state.touches.borrow_mut();
+        let events: Vec<_> = match msg {
+            WM_POINTERDOWN => touches.start(pointer_id, (), position),
+            WM_POINTERUPDATE => touches.moved(&pointer_id, position).into_iter().collect(),
+            _ if info.pointerFlags.contains(POINTER_FLAG_CANCELED) => {
+                touches.cancelled(&pointer_id).into_iter().collect()
+            }
+            _ => {
+                let moved = touches.moved(&pointer_id, position);
+                moved
+                    .into_iter()
+                    .chain(touches.ended(&pointer_id))
+                    .collect()
+            }
+        };
+        drop(touches);
+        self.dispatch_touches(events);
+        Some(0)
+    }
+
+    fn handle_pointer_capture_changed_msg(&self, wparam: WPARAM) -> Option<isize> {
+        let pointer_id = wparam.loword() as u32;
+        let cancelled = self.state.touches.borrow_mut().cancelled(&pointer_id);
+        self.dispatch_touches(cancelled);
+        None
+    }
+
+    fn dispatch_touches(&self, events: impl IntoIterator<Item = ((), TouchEvent)>) {
+        let Some(mut func) = self.state.callbacks.input.take() else {
+            return;
+        };
+        for ((), event) in events {
+            func(PlatformInput::Touch(event));
+        }
+        self.state.callbacks.input.set(Some(func));
     }
 
     fn handle_xbutton_msg(

@@ -1,5 +1,5 @@
+use crate::{Pixels, Point, TouchEvent, TouchId, TouchPhase};
 use collections::HashMap;
-use gpui::{Pixels, Point, TouchEvent, TouchId, TouchPhase};
 use std::hash::Hash;
 
 struct ActiveTouch<W> {
@@ -8,8 +8,11 @@ struct ActiveTouch<W> {
     position: Point<Pixels>,
 }
 
-/// Platforms reuse their touch numbers, but gpui needs touch ids that are never reused.
-pub(crate) struct ActiveTouches<K, W> {
+/// Tracks the touches a platform window is receiving, for platform backends.
+///
+/// Platforms reuse their touch numbers, but gpui needs touch ids that are never reused, and each
+/// touch stays with the window it started in.
+pub struct ActiveTouches<K, W> {
     next_id: u64,
     by_slot: HashMap<K, ActiveTouch<W>>,
 }
@@ -24,12 +27,8 @@ impl<K, W> Default for ActiveTouches<K, W> {
 }
 
 impl<K: Hash + Eq, W: Clone> ActiveTouches<K, W> {
-    pub(crate) fn start(
-        &mut self,
-        slot: K,
-        window: W,
-        position: Point<Pixels>,
-    ) -> Vec<(W, TouchEvent)> {
+    /// Records a new touch, cancelling any touch still using the same platform number.
+    pub fn start(&mut self, slot: K, window: W, position: Point<Pixels>) -> Vec<(W, TouchEvent)> {
         let mut events = Vec::new();
         if let Some(stale) = self.by_slot.remove(&slot) {
             events.push((
@@ -51,7 +50,8 @@ impl<K: Hash + Eq, W: Clone> ActiveTouches<K, W> {
         events
     }
 
-    pub(crate) fn moved(&mut self, slot: &K, position: Point<Pixels>) -> Option<(W, TouchEvent)> {
+    /// Reports a touch that moved, or `None` if it is unknown or did not move.
+    pub fn moved(&mut self, slot: &K, position: Point<Pixels>) -> Option<(W, TouchEvent)> {
         let touch = self.by_slot.get_mut(slot)?;
         if touch.position == position {
             return None;
@@ -63,7 +63,8 @@ impl<K: Hash + Eq, W: Clone> ActiveTouches<K, W> {
         ))
     }
 
-    pub(crate) fn ended(&mut self, slot: &K) -> Option<(W, TouchEvent)> {
+    /// Reports a touch that lifted, at its last known position.
+    pub fn ended(&mut self, slot: &K) -> Option<(W, TouchEvent)> {
         let touch = self.by_slot.remove(slot)?;
         Some((
             touch.window,
@@ -71,8 +72,17 @@ impl<K: Hash + Eq, W: Clone> ActiveTouches<K, W> {
         ))
     }
 
-    #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
-    pub(crate) fn cancel_all(&mut self) -> Vec<(W, TouchEvent)> {
+    /// Reports a touch the platform took back, at its last known position.
+    pub fn cancelled(&mut self, slot: &K) -> Option<(W, TouchEvent)> {
+        let touch = self.by_slot.remove(slot)?;
+        Some((
+            touch.window,
+            event(touch.id, TouchPhase::Cancelled, touch.position),
+        ))
+    }
+
+    /// Cancels every touch, for platforms that cancel all touches at once.
+    pub fn cancel_all(&mut self) -> Vec<(W, TouchEvent)> {
         let mut touches: Vec<_> = self.by_slot.drain().map(|(_, touch)| touch).collect();
         touches.sort_by_key(|touch| touch.id);
         touches
@@ -100,7 +110,7 @@ fn event(id: TouchId, phase: TouchPhase, position: Point<Pixels>) -> TouchEvent 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{point, px};
+    use crate::{point, px};
 
     fn summary(events: Vec<(&'static str, TouchEvent)>) -> Vec<(&'static str, u64, TouchPhase)> {
         events
@@ -156,6 +166,15 @@ mod tests {
                 ("popup", 1, TouchPhase::Cancelled),
             ]
         );
+        assert!(touches.ended(&0).is_none());
+    }
+
+    #[test]
+    fn a_cancelled_touch_is_forgotten() {
+        let mut touches = ActiveTouches::<i32, &str>::default();
+        touches.start(0, "main", point(px(1.), px(1.)));
+        let (_, cancelled) = touches.cancelled(&0).unwrap();
+        assert_eq!(cancelled.phase, TouchPhase::Cancelled);
         assert!(touches.ended(&0).is_none());
     }
 

@@ -1,3 +1,4 @@
+mod active_touches;
 mod app_menu;
 mod keyboard;
 mod keystroke;
@@ -58,6 +59,7 @@ use std::{
 use strum::EnumIter;
 use uuid::Uuid;
 
+pub use active_touches::*;
 pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;

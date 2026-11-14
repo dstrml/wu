@@ -61,6 +61,7 @@ pub struct WindowsWindowState {
     pub last_reported_capslock: Cell<Option<Capslock>>,
     pub hovered: Cell<bool>,
     pub direct_manipulation: DirectManipulationHandler,
+    pub touches: RefCell<ActiveTouches<u32, ()>>,
 
     pub renderer: RefCell<DirectXRenderer>,
     /// Set when the next `draw_window` call must be treated as a forced
@@ -185,6 +186,7 @@ impl WindowsWindowState {
             invalidate_devices,
             draw_coordinator,
             direct_manipulation,
+            touches: RefCell::default(),
             a11y: RefCell::new(None),
         })
     }
