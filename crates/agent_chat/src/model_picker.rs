@@ -62,6 +62,7 @@ pub(crate) fn agent_icon(kind: AgentKind) -> Icon {
         }
         AgentKind::Codex => Icon::new(IconName::AgentCodex),
         AgentKind::Opencode => Icon::new(IconName::AgentOpencode),
+        AgentKind::Omp => Icon::new(IconName::AgentOmp),
     }
 }
 
@@ -70,13 +71,14 @@ fn agent_icon_name(kind: AgentKind) -> IconName {
         AgentKind::Claude => IconName::AgentClaude,
         AgentKind::Codex => IconName::AgentCodex,
         AgentKind::Opencode => IconName::AgentOpencode,
+        AgentKind::Omp => IconName::AgentOmp,
     }
 }
 
 fn brand_tint(kind: AgentKind) -> Option<Hsla> {
     match kind {
         AgentKind::Claude => Some(rgb(CLAUDE_BRAND).into()),
-        AgentKind::Codex | AgentKind::Opencode => None,
+        AgentKind::Codex | AgentKind::Opencode | AgentKind::Omp => None,
     }
 }
 

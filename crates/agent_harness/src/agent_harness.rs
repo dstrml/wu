@@ -30,6 +30,7 @@ fn missing_agent_message(agent: HarnessId) -> i18n::SharedString {
             "Codex isn't installed. Install it, or use OpenCode to connect your own API or a local model."
         ),
         HarnessId::Opencode => i18n::t!("OpenCode isn't installed. Install it and try again."),
+        HarnessId::Omp => i18n::t!("omp isn't installed. Install it and try again."),
     }
 }
 
@@ -146,6 +147,7 @@ pub mod codex;
 pub(crate) mod executable;
 pub(crate) mod jsonrpc;
 mod model_context;
+pub mod omp;
 pub mod opencode;
 pub mod process;
 mod proto;
@@ -337,6 +339,7 @@ pub(crate) fn crash_message(
 pub use claude::ClaudeHarness;
 pub use codex::CodexHarness;
 pub use opencode::OpencodeHarness;
+pub use omp::OmpHarness;
 
 #[cfg_attr(not(unix), allow(unused_variables))]
 pub(crate) async fn shutdown_child(child: &mut process::Child, kill_grace: std::time::Duration) {

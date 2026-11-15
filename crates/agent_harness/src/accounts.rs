@@ -39,8 +39,12 @@ const OPENCODE_NO_ACCOUNTS: &str = i18n::n!(
     "OpenCode manages its own provider logins (`opencode auth login`); Wu can't switch them"
 );
 
+const OMP_NO_ACCOUNTS: &str = i18n::n!(
+    "omp uses the provider keys configured in `~/.omp`; Wu can't switch them"
+);
+
 pub async fn list(harness: HarnessId, data_dir: &Path) -> Result<Vec<Account>, String> {
-    if harness == HarnessId::Opencode {
+    if matches!(harness, HarnessId::Opencode | HarnessId::Omp) {
         return Ok(Vec::new());
     }
     Stores::detect(data_dir)?.list(harness).await
@@ -49,6 +53,9 @@ pub async fn list(harness: HarnessId, data_dir: &Path) -> Result<Vec<Account>, S
 pub async fn activate(harness: HarnessId, account_id: &str, data_dir: &Path) -> Result<(), String> {
     if harness == HarnessId::Opencode {
         return Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string());
+    }
+    if harness == HarnessId::Omp {
+        return Err(i18n::translate(OMP_NO_ACCOUNTS).to_string());
     }
     Stores::detect(data_dir)?
         .activate(harness, account_id)
@@ -63,6 +70,9 @@ pub async fn usage_request(
     if harness == HarnessId::Opencode {
         return Err(i18n::translate(crate::usage::OPENCODE_NO_USAGE).to_string());
     }
+    if harness == HarnessId::Omp {
+        return Err(i18n::translate(crate::usage::OMP_NO_USAGE).to_string());
+    }
     Stores::detect(data_dir)?
         .usage_request(harness, account_id)
         .await
@@ -71,6 +81,9 @@ pub async fn usage_request(
 pub async fn remove(harness: HarnessId, account_id: &str, data_dir: &Path) -> Result<(), String> {
     if harness == HarnessId::Opencode {
         return Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string());
+    }
+    if harness == HarnessId::Omp {
+        return Err(i18n::translate(OMP_NO_ACCOUNTS).to_string());
     }
     Stores::detect(data_dir)?.remove(harness, account_id).await
 }
@@ -278,6 +291,7 @@ impl Stores {
             HarnessId::ClaudeCode => self.activate_claude(&slot).await,
             HarnessId::Codex => self.activate_codex(&slot),
             HarnessId::Opencode => Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string()),
+            HarnessId::Omp => Err(i18n::translate(OMP_NO_ACCOUNTS).to_string()),
         }
     }
 
@@ -354,7 +368,7 @@ impl Stores {
         let live_key = match harness {
             HarnessId::ClaudeCode => self.claude_identity().map(|identity| identity.0),
             HarnessId::Codex => self.detect_codex().map(|live| live.account_key),
-            HarnessId::Opencode => None,
+            HarnessId::Opencode | HarnessId::Omp => None,
         };
         if live_key.is_some_and(|key| slot_id_for(harness, &key) == account_id)
             && let Some(Detected {
@@ -372,6 +386,7 @@ impl Stores {
             HarnessId::Opencode => {
                 Err(i18n::translate(crate::usage::OPENCODE_NO_USAGE).to_string())
             }
+            HarnessId::Omp => Err(i18n::translate(crate::usage::OMP_NO_USAGE).to_string()),
         }
     }
 
@@ -392,7 +407,7 @@ impl Stores {
         let live = match harness {
             HarnessId::ClaudeCode => self.detect_claude().await,
             HarnessId::Codex => self.detect_codex(),
-            HarnessId::Opencode => None,
+            HarnessId::Opencode | HarnessId::Omp => None,
         };
         if let Some(live) = &live
             && let Ok(Some(credentials)) = &live.credentials
@@ -561,6 +576,7 @@ fn harness_slug(harness: HarnessId) -> &'static str {
         HarnessId::ClaudeCode => "claude-code",
         HarnessId::Codex => "codex",
         HarnessId::Opencode => "opencode",
+        HarnessId::Omp => "omp",
     }
 }
 

@@ -24,6 +24,11 @@ pub(crate) fn context(
             vec![root.join("settings.json"), root.join(".credentials.json")]
         }
         HarnessId::Opencode => opencode_files(&home),
+        // omp's provider keys and model configuration live under ~/.omp.
+        HarnessId::Omp => {
+            let omp_root = root("OMP_HOME", home.join(".omp"));
+            vec![omp_root.join("auth.json"), omp_root.join("settings.json")]
+        }
     };
     let binary = binary
         .canonicalize()
@@ -51,6 +56,7 @@ pub(crate) fn context(
         HarnessId::Codex => &["CODEX_", "OPENAI_"],
         HarnessId::ClaudeCode => &["CLAUDE_", "ANTHROPIC_", "AWS_"],
         HarnessId::Opencode => &["OPENCODE_", "OPENAI_", "ANTHROPIC_", "GOOGLE_"],
+        HarnessId::Omp => &["OMP_", "OPENAI_", "ANTHROPIC_", "GOOGLE_"],
     };
     let mut env: Vec<_> = std::env::vars_os()
         .filter(|(key, _)| {

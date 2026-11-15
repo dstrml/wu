@@ -7919,7 +7919,7 @@ fn agent_chat_page() -> SettingsPage {
         ]
     }
 
-    fn new_chats_section() -> [SettingsPageItem; 5] {
+    fn new_chats_section() -> [SettingsPageItem; 6] {
         [
             SettingsPageItem::SectionHeader(n!("New Chats")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8042,10 +8042,41 @@ fn agent_chat_page() -> SettingsPage {
                 })),
                 files: USER,
             }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("omp Permission"),
+                description: n!(
+                    "The permission mode new omp chats start with. You can still change it in each chat."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.default_permission.omp"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .default_permission
+                            .as_ref()?
+                            .omp
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .default_permission
+                            .get_or_insert_default()
+                            .omp = value;
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    should_do_titlecase: Some(false),
+                    ..Default::default()
+                })),
+                files: USER,
+            }),
         ]
     }
 
-    fn agents_section() -> [SettingsPageItem; 5] {
+    fn agents_section() -> [SettingsPageItem; 6] {
         [
             SettingsPageItem::SectionHeader(n!("Agents")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8154,6 +8185,35 @@ fn agent_chat_page() -> SettingsPage {
                             .get_or_insert_default();
                         agents.opencode = value;
                         keep_one_agent_shown(agents, |agents| &mut agents.opencode);
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("omp"),
+                description: n!(
+                    "Show omp in the new chat menu and in Continue Saved Chat. At least one agent stays shown."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.agents.omp"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .agents
+                            .as_ref()?
+                            .omp
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        let agents = settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .agents
+                            .get_or_insert_default();
+                        agents.omp = value;
+                        keep_one_agent_shown(agents, |agents| &mut agents.omp);
                     },
                 }),
                 metadata: None,
@@ -10275,6 +10335,7 @@ mod tests {
             claude_code: Some(false),
             codex: Some(false),
             opencode: None,
+            omp: None,
         };
         keep_one_agent_shown(&mut agents, |agents| &mut agents.opencode);
         assert_eq!(agents.opencode, None);
