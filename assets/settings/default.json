@@ -132,6 +132,7 @@
       "codex": "auto",
       "opencode": "auto",
       "omp": "auto",
+      "pi": "auto",
     },
     // Agents shown in the new chat menu and in Continue Saved Chat.
     "agents": {
@@ -139,6 +140,7 @@
       "codex": true,
       "opencode": true,
       "omp": true,
+      "pi": true,
     },
     // "queue" waits for the agent to finish; "steer" sends the message right away.
     "while_working": "queue",
@@ -149,7 +151,7 @@
     "claude_in_chrome": true,
     // How the Git panel writes commit messages.
     "commit_message": {
-      // "claude_code", "codex", "opencode" or "omp". When unset, the first installed agent.
+      // "claude_code", "codex", "opencode", "omp" or "pi". When unset, the first installed agent.
       "agent": null,
       // When unset, a small, fast model.
       "model": null,

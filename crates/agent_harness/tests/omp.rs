@@ -7,9 +7,9 @@ use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 
 use agent_harness::{
-    AgentEvent, CancellationToken, DoneStatus, Harness, HarnessError, HarnessId, Model,
-    OmpHarness, PermissionMode, ReasoningLevel, RunRequest, RunControls, SteerMessage,
-    TodoItem, TodoStatus, ToolCall, UserInputAnswer,
+    AcpHarness, AgentEvent, CancellationToken, DoneStatus, Harness, HarnessError, HarnessId,
+    Model, PermissionMode, ReasoningLevel, RunControls, RunRequest, SteerMessage, TodoItem,
+    TodoStatus, ToolCall, UserInputAnswer,
 };
 
 fn fixture_path() -> PathBuf {
@@ -24,8 +24,8 @@ fn fixture_path() -> PathBuf {
     path
 }
 
-fn harness() -> OmpHarness {
-    OmpHarness::new().with_executable(fixture_path())
+fn harness() -> AcpHarness {
+    AcpHarness::omp().with_executable(fixture_path())
 }
 
 fn request(scenario: &str) -> RunRequest {
@@ -73,7 +73,7 @@ fn controls(
 }
 
 async fn run_to_end(
-    harness: &OmpHarness,
+    harness: &AcpHarness,
     req: RunRequest,
     controls: RunControls,
 ) -> Vec<AgentEvent> {
@@ -488,7 +488,7 @@ async fn catalog_reads_models_and_thinking_levels() {
 
 #[tokio::test]
 async fn missing_executable_reports_agent_missing() {
-    let harness = OmpHarness::new().with_executable("/nonexistent/omp-fake");
+    let harness = AcpHarness::omp().with_executable("/nonexistent/omp-fake");
     let req = request("happy");
     let (steer_tx, steer_rx) = mpsc::channel(8);
     let controls = RunControls {
@@ -521,7 +521,7 @@ async fn missing_executable_reports_agent_missing() {
 #[ignore]
 async fn live_omp_session() {
     let cwd = std::env::var("OMP_LIVE_CWD").unwrap_or_else(|_| "/tmp".into());
-    let harness = OmpHarness::new();
+    let harness = AcpHarness::omp();
     let req = RunRequest {
         prompt: "say hi in one short sentence".into(),
         model: std::env::var("OMP_LIVE_MODEL").ok().filter(|m| !m.is_empty()),

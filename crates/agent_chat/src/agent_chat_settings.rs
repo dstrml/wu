@@ -2,7 +2,7 @@ use agent_harness::{PermissionMode, ReasoningLevel};
 use settings::{
     AgentChatAgent, AgentChatDefaultEffort, AgentChatWhileWorking, ClaudeCodePermissionDefault,
     CodexPermissionDefault, ContextTokens, DockSide, OmpPermissionDefault,
-    OpencodePermissionDefault, RegisterSetting,
+    OpencodePermissionDefault, PiPermissionDefault, RegisterSetting,
     Settings,
 };
 pub use settings::{AgentChatModelPickerLayout, AgentChatSendKey};
@@ -25,7 +25,7 @@ pub struct AgentChatSettings {
     pub notify_only_in_background: bool,
     pub auto_compact_tokens: Option<u64>,
     pub default_effort: Option<ReasoningLevel>,
-    default_permissions: [(AgentKind, PermissionMode); 4],
+    default_permissions: [(AgentKind, PermissionMode); 5],
     agents: Vec<AgentKind>,
     pub steer_while_working: bool,
     pub confirm_quit_while_working: bool,
@@ -64,6 +64,7 @@ impl Settings for AgentChatSettings {
             (AgentKind::Codex, shown.codex),
             (AgentKind::Opencode, shown.opencode),
             (AgentKind::Omp, shown.omp),
+            (AgentKind::Pi, shown.pi),
         ]
         .into_iter()
         .filter(|(_, shown)| shown.unwrap_or(true))
@@ -108,6 +109,10 @@ impl Settings for AgentChatSettings {
                 (
                     AgentKind::Omp,
                     omp_permission(permission.omp.unwrap_or_default()),
+                ),
+                (
+                    AgentKind::Pi,
+                    pi_permission(permission.pi.unwrap_or_default()),
                 ),
             ],
             agents,
@@ -181,6 +186,15 @@ fn omp_permission(mode: OmpPermissionDefault) -> PermissionMode {
     }
 }
 
+fn pi_permission(mode: PiPermissionDefault) -> PermissionMode {
+    match mode {
+        PiPermissionDefault::Ask => PermissionMode::Ask,
+        PiPermissionDefault::AcceptEdits => PermissionMode::AcceptEdits,
+        PiPermissionDefault::Auto => PermissionMode::Auto,
+        PiPermissionDefault::FullAccess => PermissionMode::FullAccess,
+    }
+}
+
 impl AgentKind {
     pub(crate) fn from_setting(agent: AgentChatAgent) -> Option<Self> {
         match agent {
@@ -189,6 +203,7 @@ impl AgentKind {
             AgentChatAgent::Codex => Some(AgentKind::Codex),
             AgentChatAgent::Opencode => Some(AgentKind::Opencode),
             AgentChatAgent::Omp => Some(AgentKind::Omp),
+            AgentChatAgent::Pi => Some(AgentKind::Pi),
         }
     }
 
@@ -198,6 +213,7 @@ impl AgentKind {
             AgentKind::Codex => AgentChatAgent::Codex,
             AgentKind::Opencode => AgentChatAgent::Opencode,
             AgentKind::Omp => AgentChatAgent::Omp,
+            AgentKind::Pi => AgentChatAgent::Pi,
         }
     }
 }

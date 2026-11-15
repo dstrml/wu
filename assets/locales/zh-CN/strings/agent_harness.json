@@ -226,5 +226,6 @@
   "{reason}. Retrying in {seconds}s.": "{reason}。{seconds} 秒后重试。",
   "{reason}. Retrying.": "{reason}。正在重试。",
   "~/.claude.json exists but couldn't be parsed, so it was left alone. Fix or remove the file and try again.": "~/.claude.json 存在但无法解析，因此未做改动。请修复或删除该文件后重试。",
-  "~/.claude.json is not a JSON object. Not switching.": "~/.claude.json 不是 JSON 对象。未切换。"
+  "~/.claude.json is not a JSON object. Not switching.": "~/.claude.json 不是 JSON 对象。未切换。",
+  "pi isn't installed. Install it and try again.": "未安装 pi。请安装后重试。"
 }

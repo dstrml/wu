@@ -1,4 +1,4 @@
-//! Drives `omp acp` (oh-my-pi) over the Agent Client Protocol: JSON-RPC over stdio.
+//! Drives ACP-speaking coding agents (omp, pi) over the Agent Client Protocol: JSON-RPC over stdio.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -25,49 +25,144 @@ use crate::process::{Child, Stdio};
 use crate::{Harness, HarnessError, RunControls, SteerMessage, StderrTail, shutdown_child};
 
 const PROTOCOL_VERSION: i64 = 1;
-const MODEL_CONFIG_ID: &str = "model";
-const THINKING_CONFIG_ID: &str = "thinking";
+const MODEL_CONFIG_CATEGORY: &str = "model";
+const THINKING_CONFIG_CATEGORY: &str = "thought_level";
 const STEERING_METHOD: &str = "_session/steering";
 
 const INTERRUPT_GRACE: Duration = Duration::from_secs(2);
 const KILL_GRACE: Duration = Duration::from_secs(3);
 
-pub fn resolve_omp_executable() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("OMP_EXECUTABLE").filter(|p| !p.is_empty()) {
-        return crate::executable::validate_native_override(&PathBuf::from(p)).ok();
-    }
-    let mut extra = Vec::new();
-    if let Some(home) = crate::executable::home_dir() {
-        extra.push(home.join(".local").join("bin").join("omp"));
-        extra.push(home.join(".omp").join("bin").join("omp"));
-        extra.push(home.join(".npm-global").join("bin").join("omp"));
-    }
-    extra.push(PathBuf::from("/opt/homebrew/bin/omp"));
-    extra.push(PathBuf::from("/usr/local/bin/omp"));
-    crate::executable::find_on_paths("omp", extra)
+/// The ACP-speaking agents Wu supports. They share one wire protocol and one
+/// harness; the agent only decides the entry point and a few capability quirks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpAgent {
+    /// oh-my-pi, whose native `omp acp` mode speaks ACP.
+    Omp,
+    /// pi, driven through the third-party `pi-acp` adapter.
+    Pi,
 }
 
-pub struct OmpHarness {
+impl AcpAgent {
+    pub fn harness_id(self) -> HarnessId {
+        match self {
+            Self::Omp => HarnessId::Omp,
+            Self::Pi => HarnessId::Pi,
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Omp => "omp",
+            Self::Pi => "pi",
+        }
+    }
+
+    /// Extra CLI args after the executable that enter its ACP mode.
+    pub fn spawn_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Omp => &["acp"],
+            Self::Pi => &[],
+        }
+    }
+
+    fn executable_name(self) -> &'static str {
+        match self {
+            Self::Omp => "omp",
+            Self::Pi => "pi-acp",
+        }
+    }
+
+    fn env_override(self) -> &'static str {
+        match self {
+            Self::Omp => "OMP_EXECUTABLE",
+            Self::Pi => "PI_EXECUTABLE",
+        }
+    }
+
+    fn searched_paths_hint(self) -> &'static str {
+        match self {
+            Self::Omp => {
+                "searched PATH, ~/.local/bin, ~/.omp/bin, ~/.npm-global/bin, \
+                 /opt/homebrew/bin and /usr/local/bin for `omp`"
+            }
+            Self::Pi => {
+                "searched PATH, ~/.local/bin and /opt/homebrew/bin for `pi-acp` \
+                 (npm install -g pi-acp)"
+            }
+        }
+    }
+
+    pub fn resolve_executable() -> Option<PathBuf> {
+        Self::Omp.resolve_executable_for()
+    }
+
+    fn resolve_executable_for(self) -> Option<PathBuf> {
+        if let Some(p) = std::env::var_os(self.env_override()).filter(|p| !p.is_empty()) {
+            return crate::executable::validate_native_override(&PathBuf::from(p)).ok();
+        }
+        let name = self.executable_name();
+        let mut extra = Vec::new();
+        if let Some(home) = crate::executable::home_dir() {
+            extra.push(home.join(".local").join("bin").join(name));
+            if self == Self::Omp {
+                extra.push(home.join(".omp").join("bin").join(name));
+                extra.push(home.join(".npm-global").join("bin").join(name));
+            }
+        }
+        extra.push(PathBuf::from("/opt/homebrew/bin").join(name));
+        extra.push(PathBuf::from("/usr/local/bin").join(name));
+        crate::executable::find_on_paths(name, extra)
+    }
+
+    /// omp injects mid-turn messages through its `_session/steering` extension;
+    /// the pi adapter has no such method, so steering degrades to the next turn.
+    pub fn steering_method(self) -> Option<&'static str> {
+        match self {
+            Self::Omp => Some(STEERING_METHOD),
+            Self::Pi => None,
+        }
+    }
+
+    pub fn thinking_config_id(self) -> &'static str {
+        match self {
+            Self::Omp => "thinking",
+            Self::Pi => "thought_level",
+        }
+    }
+
+    fn crash_name(self) -> &'static str {
+        match self {
+            Self::Omp => "omp acp",
+            Self::Pi => "pi-acp",
+        }
+    }
+}
+
+pub struct AcpHarness {
+    agent: AcpAgent,
     models_cache: crate::catalog::Catalog,
     executable: Option<PathBuf>,
     interrupt_grace: Duration,
     kill_grace: Duration,
 }
 
-impl Default for OmpHarness {
-    fn default() -> Self {
+impl AcpHarness {
+    pub fn omp() -> Self {
+        Self::with_agent(AcpAgent::Omp)
+    }
+
+    pub fn pi() -> Self {
+        Self::with_agent(AcpAgent::Pi)
+    }
+
+    fn with_agent(agent: AcpAgent) -> Self {
         Self {
+            agent,
             models_cache: crate::catalog::Catalog::default(),
             executable: None,
             interrupt_grace: INTERRUPT_GRACE,
             kill_grace: KILL_GRACE,
         }
-    }
-}
-
-impl OmpHarness {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn with_executable(mut self, path: impl Into<PathBuf>) -> Self {
@@ -86,18 +181,16 @@ impl OmpHarness {
         if let Some(p) = &self.executable {
             return crate::executable::validate_native_override(p);
         }
-        if let Some(p) = std::env::var_os("OMP_EXECUTABLE")
+        if let Some(p) = std::env::var_os(self.agent.env_override())
             && !p.is_empty()
         {
             return crate::executable::validate_native_override(&PathBuf::from(p));
         }
-        resolve_omp_executable().ok_or_else(|| {
-            HarnessError::agent_missing(
-                HarnessId::Omp,
-                "searched PATH, ~/.local/bin, ~/.omp/bin, ~/.npm-global/bin, \
-                 /opt/homebrew/bin and /usr/local/bin for `omp`",
-            )
-        })
+        self.agent
+            .resolve_executable_for()
+            .ok_or_else(|| {
+                HarnessError::agent_missing(self.agent.harness_id(), self.agent.searched_paths_hint())
+            })
     }
 
     /// One-shot catalog discovery: a throwaway `omp acp` session reports the
@@ -105,7 +198,9 @@ impl OmpHarness {
     async fn discover_models(&self) -> Result<Vec<Model>, HarnessError> {
         let exe = self.resolve_executable()?;
         let mut cmd = crate::process::command(&exe);
-        cmd.arg("acp");
+        for arg in self.agent.spawn_args() {
+            cmd.arg(arg);
+        }
         cmd.current_dir(crate::executable::scratch_dir());
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -121,11 +216,11 @@ impl OmpHarness {
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| HarnessError::Protocol("omp child has no stdin".into()))?;
+            .ok_or_else(|| HarnessError::Protocol("acp child has no stdin".into()))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| HarnessError::Protocol("omp child has no stdout".into()))?;
+            .ok_or_else(|| HarnessError::Protocol("acp child has no stdout".into()))?;
         let (client, mut incoming) = RpcClient::new(stdin, stdout);
 
         let discovery = async {
@@ -143,7 +238,7 @@ impl OmpHarness {
         };
         let result = discovery.await;
         if let Err(error) = child.kill().await {
-            tracing::debug!(target: "agent_harness::omp", "killing discovery child failed: {error}");
+            tracing::debug!(target: "agent_harness::acp", "killing discovery child failed: {error}");
         }
         result
     }
@@ -320,7 +415,7 @@ async fn send(tx: &mpsc::Sender<Result<AgentEvent, HarnessError>>, event: AgentE
 
 async fn send_final(tx: &mpsc::Sender<Result<AgentEvent, HarnessError>>, event: AgentEvent) {
     if !send(tx, event).await {
-        tracing::debug!(target: "agent_harness::omp", "event receiver gone, dropping final event");
+        tracing::debug!(target: "agent_harness::acp", "event receiver gone, dropping final event");
     }
 }
 
@@ -343,21 +438,21 @@ fn interrupted(session_id: Option<String>) -> AgentEvent {
 }
 
 #[async_trait]
-impl Harness for OmpHarness {
+impl Harness for AcpHarness {
     fn id(&self) -> HarnessId {
-        HarnessId::Omp
+        self.agent.harness_id()
     }
     fn display_name(&self) -> &str {
-        "omp"
+        self.agent.display_name()
     }
     fn supports_steering(&self) -> bool {
-        true
+        self.agent.steering_method().is_some()
     }
     fn steering_mode(&self) -> SteeringMode {
         SteeringMode::StepBoundary
     }
     fn reasoning_levels(&self) -> &[ReasoningLevel] {
-        // Statically the safe subset: omp's thinking levels vary per model, and an
+        // Statically the safe subset: thinking levels vary per model, and an
         // unsupported value is tolerated by the config-option fallback in run_session.
         static LEVELS: [ReasoningLevel; 5] = [
             ReasoningLevel::Minimal,
@@ -378,7 +473,7 @@ impl Harness for OmpHarness {
         let Ok(path) = self.resolve_executable() else {
             return Ok(None);
         };
-        let context = crate::model_context::context(HarnessId::Omp, &path, &[])?;
+        let context = crate::model_context::context(self.agent.harness_id(), &path, &[])?;
         Ok(Some(context))
     }
     fn fallback_models(&self) -> Vec<Model> {
@@ -408,7 +503,9 @@ impl Harness for OmpHarness {
     ) -> Result<BoxStream<'static, Result<AgentEvent, HarnessError>>, HarnessError> {
         let exe = self.resolve_executable()?;
         let mut cmd = crate::process::command(&exe);
-        cmd.arg("acp");
+        for arg in self.agent.spawn_args() {
+            cmd.arg(arg);
+        }
         if request.ephemeral {
             cmd.current_dir(crate::executable::scratch_dir());
         } else {
@@ -429,18 +526,18 @@ impl Harness for OmpHarness {
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| HarnessError::Protocol("omp child has no stdin".into()))?;
+            .ok_or_else(|| HarnessError::Protocol("acp child has no stdin".into()))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| HarnessError::Protocol("omp child has no stdout".into()))?;
+            .ok_or_else(|| HarnessError::Protocol("acp child has no stdout".into()))?;
         let stderr_tail = StderrTail::default();
         if let Some(stderr) = child.stderr.take() {
             let tail = stderr_tail.clone();
             tokio::spawn(async move {
                 let mut lines = tokio::io::BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::debug!(target: "agent_harness::omp", "stderr: {line}");
+                    tracing::debug!(target: "agent_harness::acp", "stderr: {line}");
                     tail.push(&line);
                 }
             });
@@ -449,6 +546,7 @@ impl Harness for OmpHarness {
         let (client, incoming) = RpcClient::new(stdin, stdout);
         let (event_tx, event_rx) = mpsc::channel::<Result<AgentEvent, HarnessError>>(256);
         tokio::spawn(run_session(Session {
+            agent: self.agent,
             child,
             client,
             incoming,
@@ -467,6 +565,7 @@ impl Harness for OmpHarness {
 }
 
 struct Session {
+    agent: AcpAgent,
     child: Child,
     client: RpcClient,
     incoming: mpsc::Receiver<Incoming>,
@@ -480,6 +579,7 @@ struct Session {
 
 async fn run_session(session: Session) {
     let Session {
+        agent,
         mut child,
         client,
         mut incoming,
@@ -498,7 +598,7 @@ async fn run_session(session: Session) {
     } = controls;
     let request_input = Arc::new(request_input);
 
-    let mut permission = request.permission.for_harness(HarnessId::Omp);
+    let mut permission = request.permission.for_harness(agent.harness_id());
     let mut steering_open = true;
     let mut permission_open = true;
     let cwd = request.cwd.clone();
@@ -508,43 +608,51 @@ async fn run_session(session: Session) {
         // `session/new` echoes the id it created, but `session/load`'s response
         // only reports modes/configOptions, so resumed sessions reuse the id
         // from the request.
-        let session_id = match &resume {
-            Some(resume) => resume.clone(),
+        let (session_id, config_options) = match &resume {
+            Some(resume) => {
+                let response = client
+                    .request(
+                        "session/load",
+                        json!({
+                            "sessionId": resume,
+                            "cwd": cwd,
+                            "mcpServers": [],
+                        }),
+                    )
+                    .await?;
+                let config_options =
+                    response.get("configOptions").cloned().unwrap_or(Value::Null);
+                (resume.clone(), config_options)
+            }
             None => {
                 let response = client
                     .request("session/new", json!({ "cwd": cwd, "mcpServers": [] }))
                     .await?;
-                response
+                let config_options =
+                    response.get("configOptions").cloned().unwrap_or(Value::Null);
+                let session_id = response
                     .get("sessionId")
                     .and_then(Value::as_str)
                     .filter(|id| !id.is_empty())
                     .ok_or_else(|| {
-                        HarnessError::Protocol("omp session response has no sessionId".into())
+                        HarnessError::Protocol(format!(
+                            "{} session response has no sessionId: {response}",
+                            agent.display_name()
+                        ))
                     })?
-                    .to_owned()
+                    .to_owned();
+                (session_id, config_options)
             }
         };
-        if let Some(resume) = &resume {
-            client
-                .request(
-                    "session/load",
-                    json!({
-                        "sessionId": resume,
-                        "cwd": cwd,
-                        "mcpServers": [],
-                    }),
-                )
-                .await?;
-        }
-        Ok::<String, HarnessError>(session_id)
+        Ok::<(String, Value), HarnessError>((session_id, config_options))
     };
-    let (session_id, bootstrap_updates) = tokio::select! {
+    let (session_id, bootstrap_updates, config_options) = tokio::select! {
         result = async {
-            let session_id: String = setup.await?;
+            let (session_id, config_options) = setup.await?;
             let updates = collect_bootstrap_updates(&mut incoming).await;
-            Ok::<(String, Vec<Value>), HarnessError>((session_id, updates))
+            Ok::<(String, Vec<Value>, Value), HarnessError>((session_id, updates, config_options))
         } => match result {
-            Ok(pair) => pair,
+            Ok(triple) => triple,
             Err(e) => {
                 send_final(&event_tx, errored(e.to_string(), None)).await;
                 shutdown_child(&mut child, kill_grace).await;
@@ -562,7 +670,7 @@ async fn run_session(session: Session) {
     if !send(
         &event_tx,
         AgentEvent::SessionStarted {
-            harness: HarnessId::Omp,
+            harness: agent.harness_id(),
             model: request.model.clone().unwrap_or_default(),
             tools: Vec::new(),
             cwd: request.cwd.clone(),
@@ -589,7 +697,7 @@ async fn run_session(session: Session) {
 
     // Model and thinking are negotiated per session; a stale picker entry or an
     // unsupported thinking level must not kill the run, omp keeps its own default.
-    for (option_id, value) in requested_config_options(&request) {
+    for (option_id, value) in requested_config_options(&request, agent, &config_options) {
         if let Err(e) = client
             .request(
                 "session/set_config_option",
@@ -601,7 +709,7 @@ async fn run_session(session: Session) {
             )
             .await
         {
-            tracing::debug!(target: "agent_harness::omp", "set_config_option {option_id} failed: {e}");
+            tracing::debug!(target: "agent_harness::acp", "set_config_option {option_id} failed: {e}");
         }
     }
 
@@ -698,7 +806,7 @@ async fn run_session(session: Session) {
                                     break;
                                 }
                             }
-                            stop_from_response(&response)
+                            stop_from_response(agent, &response)
                         }
                         Err(e) => (DoneStatus::Errored, Some(e.to_string())),
                     };
@@ -743,7 +851,7 @@ async fn run_session(session: Session) {
                         let error = if interrupted {
                             None
                         } else {
-                            Some(crate::crash_message("omp acp", status, &stderr_tail))
+                            Some(crate::crash_message(agent.crash_name(), status, &stderr_tail))
                         };
                         let status = if interrupted {
                             DoneStatus::Interrupted
@@ -765,31 +873,37 @@ async fn run_session(session: Session) {
                 },
                 steer = steering.recv(), if steering_open && escalation.is_none() => match steer {
                     Some(message) => {
-                        let steer_params = json!({
-                            "sessionId": session_id,
-                            "prompt": [{ "type": "text", "text": message.prompt }],
-                        });
-                        match client.request(STEERING_METHOD, steer_params).await {
-                            Ok(_) => {
-                                let (previous, next) = rotate(&mut assistant_message_id);
-                                if !send(
-                                    &event_tx,
-                                    AgentEvent::Steered {
-                                        assistant_message_id: Some(previous),
-                                        next_assistant_message_id: Some(next),
-                                    },
-                                )
-                                .await
-                                {
-                                    turn_ended = true;
+                        if let Some(method) = agent.steering_method() {
+                            let steer_params = json!({
+                                "sessionId": session_id,
+                                "prompt": [{ "type": "text", "text": message.prompt }],
+                            });
+                            match client.request(method, steer_params).await {
+                                Ok(_) => {
+                                    let (previous, next) = rotate(&mut assistant_message_id);
+                                    if !send(
+                                        &event_tx,
+                                        AgentEvent::Steered {
+                                            assistant_message_id: Some(previous),
+                                            next_assistant_message_id: Some(next),
+                                        },
+                                    )
+                                    .await
+                                    {
+                                        turn_ended = true;
+                                    }
+                                }
+                                // The agent refuses a steer when no prompt owns the
+                                // turn; redeliver it as the next turn's prompt.
+                                Err(e) => {
+                                    tracing::debug!(target: "agent_harness::acp", "steering refused, queuing as new turn: {e}");
+                                    pending_turn = Some(message);
                                 }
                             }
-                            // omp refuses a steer when no prompt owns the turn;
-                            // redeliver it as the next turn's prompt.
-                            Err(e) => {
-                                tracing::debug!(target: "agent_harness::omp", "steering refused, queuing as new turn: {e}");
-                                pending_turn = Some(message);
-                            }
+                        } else {
+                            // No mid-turn injection on this agent; deliver it as
+                            // the next turn's prompt.
+                            pending_turn = Some(message);
                         }
                     }
                     None => steering_open = false,
@@ -803,7 +917,7 @@ async fn run_session(session: Session) {
                     match changed {
                         Ok(()) => {
                             permission =
-                                permission_changes.borrow_and_update().for_harness(HarnessId::Omp);
+                                permission_changes.borrow_and_update().for_harness(agent.harness_id());
                         }
                         Err(_) => permission_open = false,
                     }
@@ -824,13 +938,33 @@ async fn run_session(session: Session) {
     }
 }
 
-fn requested_config_options(request: &RunRequest) -> Vec<(&'static str, Value)> {
+/// The wire id for a config category differs per agent ("thinking" vs
+/// "thought_level"), so resolve it from the session's advertised options.
+fn config_option_id_for_category(config_options: &Value, category: &str) -> Option<String> {
+    config_options
+        .as_array()?
+        .iter()
+        .find(|option| option.get("category").and_then(Value::as_str) == Some(category))
+        .and_then(|option| option.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn requested_config_options(
+    request: &RunRequest,
+    agent: AcpAgent,
+    config_options: &Value,
+) -> Vec<(String, Value)> {
     let mut options = Vec::new();
+    let model_id = config_option_id_for_category(config_options, MODEL_CONFIG_CATEGORY)
+        .unwrap_or_else(|| MODEL_CONFIG_CATEGORY.to_owned());
+    let thinking_id = config_option_id_for_category(config_options, THINKING_CONFIG_CATEGORY)
+        .unwrap_or_else(|| agent.thinking_config_id().to_owned());
     if let Some(model) = request.model.as_deref().filter(|model| !model.is_empty()) {
-        options.push((MODEL_CONFIG_ID, Value::String(model.to_owned())));
+        options.push((model_id, Value::String(model.to_owned())));
     }
     if let Some(level) = request.reasoning.and_then(thinking_value) {
-        options.push((THINKING_CONFIG_ID, Value::String(level.to_owned())));
+        options.push((thinking_id, Value::String(level.to_owned())));
     }
     options
 }
@@ -881,15 +1015,19 @@ fn response_tokens(response: &Value) -> Option<u64> {
         })
 }
 
-fn stop_from_response(response: &Value) -> (DoneStatus, Option<String>) {
+fn stop_from_response(agent: AcpAgent, response: &Value) -> (DoneStatus, Option<String>) {
     let reason = response.get("stopReason").and_then(Value::as_str);
     match reason {
         Some("cancelled") => (DoneStatus::Interrupted, None),
         Some("max_tokens") | Some("max_turn_requests") | Some("refusal") => (
             DoneStatus::Errored,
             Some(
-                t!("omp stopped the turn: {reason}", reason = reason.unwrap_or("unknown"))
-                    .to_string(),
+                t!(
+                    "{agent} stopped the turn: {reason}",
+                    agent = agent.display_name(),
+                    reason = reason.unwrap_or("unknown")
+                )
+                .to_string(),
             ),
         ),
         // `end_turn` and `end_sequence`, plus a missing reason on old agents.
@@ -1147,7 +1285,7 @@ fn handle_server_request(
         "fs/read_text_file" => handle_fs_read(client, id, params),
         "fs/write_text_file" => handle_fs_write(client, id, params),
         _ => {
-            tracing::debug!(target: "agent_harness::omp", "unsupported server request: {method}");
+            tracing::debug!(target: "agent_harness::acp", "unsupported server request: {method}");
             client.respond_error(id, -32601, &format!("method not supported: {method}"));
         }
     }

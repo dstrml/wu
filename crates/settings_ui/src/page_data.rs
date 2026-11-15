@@ -7919,7 +7919,7 @@ fn agent_chat_page() -> SettingsPage {
         ]
     }
 
-    fn new_chats_section() -> [SettingsPageItem; 6] {
+    fn new_chats_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader(n!("New Chats")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8073,10 +8073,41 @@ fn agent_chat_page() -> SettingsPage {
                 })),
                 files: USER,
             }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("pi Permission"),
+                description: n!(
+                    "The permission mode new pi chats start with. You can still change it in each chat."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.default_permission.pi"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .default_permission
+                            .as_ref()?
+                            .pi
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .default_permission
+                            .get_or_insert_default()
+                            .pi = value;
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    should_do_titlecase: Some(false),
+                    ..Default::default()
+                })),
+                files: USER,
+            }),
         ]
     }
 
-    fn agents_section() -> [SettingsPageItem; 6] {
+    fn agents_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader(n!("Agents")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8214,6 +8245,35 @@ fn agent_chat_page() -> SettingsPage {
                             .get_or_insert_default();
                         agents.omp = value;
                         keep_one_agent_shown(agents, |agents| &mut agents.omp);
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("pi"),
+                description: n!(
+                    "Show pi in the new chat menu and in Continue Saved Chat. At least one agent stays shown."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.agents.pi"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .agents
+                            .as_ref()?
+                            .pi
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        let agents = settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .agents
+                            .get_or_insert_default();
+                        agents.pi = value;
+                        keep_one_agent_shown(agents, |agents| &mut agents.pi);
                     },
                 }),
                 metadata: None,
@@ -10336,6 +10396,7 @@ mod tests {
             codex: Some(false),
             opencode: None,
             omp: None,
+            pi: None,
         };
         keep_one_agent_shown(&mut agents, |agents| &mut agents.opencode);
         assert_eq!(agents.opencode, None);

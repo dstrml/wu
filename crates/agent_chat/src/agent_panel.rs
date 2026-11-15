@@ -1,6 +1,6 @@
 use crate::{
     AgentChatSettings, AgentKind, ContinueSavedChat, NewClaudeChat, NewCodexChat, NewOmpChat,
-    NewOpencodeChat,
+    NewOpencodeChat, NewPiChat,
     ToggleFocus,
     chat_style::{accent, ink, selected_row, text_faint, ui, wash},
     chat_view::ChatView,
@@ -83,6 +83,11 @@ pub fn init(cx: &mut App) {
             .register_action(|workspace, _: &NewOmpChat, window, cx| {
                 if agent_chat_enabled(cx) {
                     new_chat(workspace, AgentKind::Omp, window, cx);
+                }
+            })
+            .register_action(|workspace, _: &NewPiChat, window, cx| {
+                if agent_chat_enabled(cx) {
+                    new_chat(workspace, AgentKind::Pi, window, cx);
                 }
             })
             .register_action(|workspace, _: &ContinueSavedChat, window, cx| {
@@ -1348,13 +1353,14 @@ fn agent_logo(kind: AgentKind) -> IconName {
         AgentKind::Codex => IconName::AgentCodex,
         AgentKind::Opencode => IconName::AgentOpencode,
         AgentKind::Omp => IconName::AgentOmp,
+        AgentKind::Pi => IconName::AgentPi,
     }
 }
 
 fn agent_tint(kind: AgentKind) -> Option<Hsla> {
     match kind {
         AgentKind::Claude => Some(rgb(CLAUDE_BRAND).into()),
-        AgentKind::Codex | AgentKind::Opencode | AgentKind::Omp => None,
+        AgentKind::Codex | AgentKind::Opencode | AgentKind::Omp | AgentKind::Pi => None,
     }
 }
 
@@ -1736,6 +1742,7 @@ pub(crate) fn new_chat_action(kind: AgentKind) -> Box<dyn Action> {
         AgentKind::Codex => Box::new(NewCodexChat),
         AgentKind::Opencode => Box::new(NewOpencodeChat),
         AgentKind::Omp => Box::new(NewOmpChat),
+        AgentKind::Pi => Box::new(NewPiChat),
     }
 }
 

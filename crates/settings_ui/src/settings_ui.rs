@@ -596,6 +596,7 @@ fn init_renderers(cx: &mut App) {
         .add_dropdown_renderer::<settings::CodexPermissionDefault>()
         .add_dropdown_renderer::<settings::OpencodePermissionDefault>()
         .add_dropdown_renderer::<settings::OmpPermissionDefault>()
+        .add_dropdown_renderer::<settings::PiPermissionDefault>()
         .add_dropdown_renderer::<settings::StatusStyle>()
         .add_dropdown_renderer::<settings::GitPanelClickBehavior>()
         .add_dropdown_renderer::<settings::GitPanelSortBy>()

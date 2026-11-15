@@ -49,7 +49,7 @@ impl ChatView {
         let fast = selection.fast_on();
         let colors = cx.theme().colors();
         let brand = match kind {
-            AgentKind::Codex | AgentKind::Opencode | AgentKind::Omp => {
+            AgentKind::Codex | AgentKind::Opencode | AgentKind::Omp | AgentKind::Pi => {
                 agent_icon(kind).color(Color::Muted)
             }
             AgentKind::Claude => agent_icon(kind),
