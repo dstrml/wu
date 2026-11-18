@@ -671,7 +671,6 @@ fn remote_branch_names(branches: &[Branch], remote_name: &str) -> Vec<SharedStri
         .collect()
 }
 
-/// What `render_history_graph_row` draws for one commit.
 struct HistoryGraphRow {
     row_index: usize,
     commit: usize,
@@ -682,8 +681,7 @@ struct HistoryGraphRow {
     is_context_menu_target: bool,
 }
 
-/// The focus border for history rows whose own border would break the graph lines; the row
-/// must be `relative`.
+/// Drawn on top, since a row border would break the graph lines; the row must be `relative`.
 fn history_focus_outline(focused: bool, cx: &App) -> Option<Div> {
     focused.then(|| {
         div()
@@ -696,7 +694,6 @@ fn history_focus_outline(focused: bool, cx: &App) -> Option<Div> {
     })
 }
 
-/// The candidate with the most lightness contrast against `background`.
 fn readable_on(background: gpui::Hsla, candidates: [gpui::Hsla; 2]) -> gpui::Hsla {
     let contrast = |color: &gpui::Hsla| (color.l - background.l).abs();
     if contrast(&candidates[0]) >= contrast(&candidates[1]) {
@@ -1378,7 +1375,6 @@ pub struct GitPanel {
     active_tab: GitPanelTab,
     commit_history_list: ListState,
     history_rows: Rc<[HistoryRow]>,
-    /// Lanes and colors for `git_panel.history_style: graph`; empty with the detailed style.
     history_graph: Rc<HistoryGraph>,
     expanded_history_commits: HashMap<Oid, HistoryCommitFiles>,
     collapsed_history_files: HashMap<Oid, Rc<[HistoryFile]>>,
@@ -7563,8 +7559,7 @@ impl GitPanel {
                 |this, _repo, event, cx| {
                     let is_history_event = match event {
                         RepositoryEvent::GraphEvent(_, _) => true,
-                        // A branch change reloads the history's ref names, which the graph
-                        // style's badges and colors come from.
+                        // Branch badges and colors come from the branch list.
                         RepositoryEvent::BranchListChanged => {
                             GitPanelSettings::get_global(cx).history_style
                                 == GitPanelHistoryStyle::Graph
@@ -7613,16 +7608,13 @@ impl GitPanel {
                 && response.error.is_none()
                 && response.commits.len() < current_entry_count;
             let rebuild_graph = graph_style
-                && if shrunk {
-                    history_graph.is_empty()
-                } else {
-                    history_graph.needs_rebuild(
-                        response.commits,
-                        current_branch.as_deref(),
-                        &branch_list,
-                        response.is_loading,
-                    )
-                };
+                && !shrunk
+                && history_graph.needs_rebuild(
+                    response.commits,
+                    current_branch.as_deref(),
+                    &branch_list,
+                    response.is_loading,
+                );
             let graph = rebuild_graph.then(|| {
                 HistoryGraph::new(response.commits, current_branch.as_deref(), branch_list)
             });
@@ -7851,8 +7843,7 @@ impl GitPanel {
 
         let graph_style =
             GitPanelSettings::get_global(cx).history_style == GitPanelHistoryStyle::Graph;
-        // The graph row has no room for the SHA and date, and hides the author next to a
-        // branch badge, so the tooltip shows them.
+        // The graph row has no room for the SHA and date, so the tooltip shows them.
         let tooltip_sha: SharedString = if graph_style {
             [
                 short_sha.as_ref(),
@@ -7998,8 +7989,7 @@ impl GitPanel {
         window.text_style().line_height_in_pixels(window.rem_size()) + px(4.)
     }
 
-    /// Indents a changed-file row under its commit: with the graph style, the commit's graph
-    /// lines continue on its left. `focused` is `None` for rows that never take focus.
+    /// `focused` is `None` for rows that never take focus.
     fn history_file_row_frame<E: Styled + ParentElement + FluentBuilder>(
         &self,
         element: E,
@@ -8061,28 +8051,36 @@ impl GitPanel {
         let marker_x = HistoryGraph::marker_center(entry.map_or(0, |entry| entry.lane));
         let marker_size = if is_head { px(11.) } else { px(9.) };
         let row_height = Self::history_row_height(window);
+        let has_context_menu = self.context_menu.is_some();
         let panel_background = cx.theme().colors().panel_background;
         let on_color = Color::Custom(readable_on(
             color,
             [panel_background, cx.theme().colors().text],
         ));
-        // Only the first branch fits in the row, and it takes the author's place.
         let branch = graph.branches(commit).first().map(|branch| {
             h_flex()
                 .flex_none()
                 .max_w(rems(10.))
                 .gap_0p5()
                 .child(
-                    Chip::new(branch.name.clone())
-                        .truncate()
-                        .icon(IconName::GitBranch)
-                        .icon_color(on_color)
-                        .label_color(on_color)
-                        .label_size(LabelSize::XSmall)
-                        .bg_color(color)
-                        .border_color(color),
+                    div()
+                        .id(("history-branch", commit))
+                        .min_w_0()
+                        .child(
+                            Chip::new(branch.name.clone())
+                                .truncate()
+                                .icon(IconName::GitBranch)
+                                .icon_color(on_color)
+                                .label_color(on_color)
+                                .label_size(LabelSize::XSmall)
+                                .bg_color(color)
+                                .border_color(color),
+                        )
+                        .when(!has_context_menu, |this| {
+                            this.tooltip(Tooltip::text(branch.name.clone()))
+                        }),
                 )
-                .when(branch.remote, |this| {
+                .when(branch.also_on_remote, |this| {
                     this.child(
                         h_flex()
                             .id(("history-remote-branch", commit))
@@ -8096,7 +8094,9 @@ impl GitPanel {
                                     .size(IconSize::XSmall)
                                     .color(Color::Muted),
                             )
-                            .tooltip(Tooltip::text(t!("Also on the remote"))),
+                            .when(!has_context_menu, |this| {
+                                this.tooltip(Tooltip::text(t!("Also on the remote")))
+                            }),
                     )
                 })
         });

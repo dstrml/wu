@@ -3430,7 +3430,13 @@ impl GitRepository for RealGitRepository {
 
         async move {
             let log_source_args = log_source.get_args();
-            let mut git_log_command = vec!["log", GRAPH_COMMIT_FORMAT, log_order.as_arg()];
+            // A `log.decorate=full` config would otherwise print `refs/heads/...` names.
+            let mut git_log_command = vec![
+                "log",
+                "--decorate=short",
+                GRAPH_COMMIT_FORMAT,
+                log_order.as_arg(),
+            ];
             git_log_command.extend(log_source_args.iter().map(|arg| arg.as_ref()));
             let mut command = git.build_command(&git_log_command);
             command.stdout(Stdio::piped());

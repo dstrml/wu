@@ -661,6 +661,8 @@ enum NextCommitDataRequest {
 
 pub struct InitialGitGraphData {
     fetch_task: Task<()>,
+    // Set before `FullyLoaded` is emitted, while `fetch_task` is still running.
+    finished: bool,
     pub error: Option<SharedString>,
     pub commit_data: Vec<Arc<InitialGraphCommitData>>,
     pub commit_oid_to_index: HashMap<Oid, usize>,
@@ -7348,6 +7350,7 @@ impl Repository {
                                 .initial_graph_data
                                 .get_mut(&(log_source.clone(), log_order))
                             {
+                                data.finished = true;
                                 match &result {
                                     Ok(()) => {
                                         cx.emit(RepositoryEvent::GraphEvent(
@@ -7378,6 +7381,7 @@ impl Repository {
 
                 InitialGitGraphData {
                     fetch_task,
+                    finished: false,
                     error: None,
                     commit_data: Vec::new(),
                     commit_oid_to_index: HashMap::default(),
@@ -7391,7 +7395,7 @@ impl Repository {
         GraphDataResponse {
             commits: &initial_commit_data.commit_data
                 [range.start.min(max_start)..range.end.min(max_end)],
-            is_loading: !initial_commit_data.fetch_task.is_ready(),
+            is_loading: !initial_commit_data.finished && !initial_commit_data.fetch_task.is_ready(),
             error: initial_commit_data.error.clone(),
         }
     }

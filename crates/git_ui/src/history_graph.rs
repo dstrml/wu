@@ -1,10 +1,3 @@
-//! Commit graph shown beside each row of the Git panel's History tab when
-//! `git_panel.history_style` is `graph`.
-//!
-//! The lanes come from the Git Graph's layout. This module decides which branch each commit and
-//! line belongs to, and indexes the lines per row so each list row only paints the few lines that
-//! cross it.
-
 use std::{ops::Range, rc::Rc, sync::Arc};
 
 use collections::{HashMap, HashSet};
@@ -17,19 +10,14 @@ use crate::git_graph::{
     CommitEntry, GitGraph, GraphData, LEFT_PADDING, LINE_WIDTH, paint_commit_lines,
 };
 
-/// Distance between lanes; narrower than the Git Graph's so the subjects keep their room.
 const LANE_WIDTH: Pixels = px(10.);
-/// Space between the panel edge and the first lane.
 const GUTTER: Pixels = px(4.);
-/// Lanes beyond this are clipped, so a busy history does not eat the commit subjects.
 const MAX_LANES: usize = 6;
-/// Branch names treated as the default branch when no `<remote>/HEAD` ref is found.
+/// Used when no `<remote>/HEAD` ref is found.
 const DEFAULT_BRANCH_NAMES: [&str; 2] = ["main", "master"];
 
-/// Which branch a commit or line belongs to; the palette turns it into a color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ColorRole {
-    /// The checked-out branch's own commits.
     Head,
     /// The default branch the checked-out branch grew from.
     Base,
@@ -37,7 +25,6 @@ enum ColorRole {
     Merged(usize),
 }
 
-/// Colors for the graph, taken from the active theme.
 #[derive(Clone)]
 pub(crate) struct GraphPalette {
     head: Hsla,
@@ -72,23 +59,21 @@ impl GraphPalette {
     }
 }
 
-/// A branch ref on a commit, with its local and remote copies merged.
+/// A local branch and its remote copy on the same commit are one entry.
 pub(crate) struct HistoryBranch {
     pub(crate) name: SharedString,
-    /// Whether the branch also exists on a remote, or only there.
-    pub(crate) remote: bool,
+    short_name: SharedString,
+    pub(crate) also_on_remote: bool,
 }
 
 pub(crate) struct HistoryGraph {
     graph: GraphData,
-    /// The inputs the graph was built from, to tell when it is stale.
     current_branch: Option<String>,
     branch_list: Arc<[Branch]>,
     width: Pixels,
     commit_roles: Vec<ColorRole>,
     line_roles: Vec<ColorRole>,
-    /// For each commit row, the lines that run through it, including those that start or end
-    /// at it.
+    /// Per row, the lines crossing it, including those that start or end there.
     lines_by_row: Vec<SmallVec<[u32; 4]>>,
     branches_by_row: Vec<Vec<HistoryBranch>>,
 }
@@ -116,7 +101,14 @@ impl HistoryGraph {
             .iter()
             .map(|commit| branches(&commit.ref_names, &remotes))
             .collect();
-        let base_row = base_row(commits, &branches_by_row, current_branch);
+        let first_parent_rows: Vec<bool> =
+            graph.commits.iter().map(|entry| entry.lane == 0).collect();
+        let base_row = base_row(
+            commits,
+            &branches_by_row,
+            &first_parent_rows,
+            current_branch,
+        );
 
         let lanes = graph
             .commits
@@ -149,10 +141,7 @@ impl HistoryGraph {
         }
     }
 
-    /// Whether the graph should be rebuilt for `commits`. The repository reloads its commits,
-    /// as new `Arc`s, whenever history or refs change, so comparing pointers is enough. While
-    /// the history is still loading, the graph is only rebuilt once the commit count doubles, so
-    /// loading a long history stays linear.
+    /// While loading, rebuilds only once the commit count doubles, so a long load stays linear.
     pub(crate) fn needs_rebuild(
         &self,
         commits: &[Arc<InitialGraphCommitData>],
@@ -170,7 +159,7 @@ impl HistoryGraph {
             }
         };
         let same_inputs = self.current_branch.as_deref() == current_branch
-            && Arc::ptr_eq(&self.branch_list, branch_list)
+            && (Arc::ptr_eq(&self.branch_list, branch_list) || self.branch_list == *branch_list)
             && same_commit(shown.first(), commits.first());
         if !same_inputs || shown.len() > commits.len() {
             return true;
@@ -179,10 +168,6 @@ impl HistoryGraph {
             return !same_commit(shown.last(), commits.last());
         }
         !is_loading || commits.len() >= shown.len() * 2
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.graph.commits.is_empty()
     }
 
     pub(crate) fn width(&self) -> Pixels {
@@ -205,13 +190,12 @@ impl HistoryGraph {
         GUTTER + LANE_WIDTH * lane as f32 + LANE_WIDTH / 2.
     }
 
-    /// Where a commit's marker goes: commits on clipped lanes keep a marker on the last
-    /// visible lane.
+    /// Commits on clipped lanes keep a marker on the last visible lane.
     pub(crate) fn marker_center(lane: usize) -> Pixels {
         Self::lane_center(lane.min(MAX_LANES - 1))
     }
 
-    /// Paints the lines crossing commit row `row` or, with `below`, the rows listed under it.
+    /// With `below`, paints the lines continuing under row `row` instead of across it.
     pub(crate) fn render_lines(
         self: &Rc<Self>,
         row: usize,
@@ -248,8 +232,7 @@ impl HistoryGraph {
                         let ix = ix as usize;
                         (this.graph.lines[ix].as_ref(), ix, color(ix))
                     });
-                    // Shift the graph left so the first lane sits next to the panel edge
-                    // instead of after the Git Graph's padding.
+                    // Start at the gutter instead of the Git Graph's padding.
                     let mut shifted = bounds;
                     shifted.origin.x += GUTTER - LEFT_PADDING;
                     paint_commit_lines(
@@ -268,9 +251,9 @@ impl HistoryGraph {
     }
 }
 
-/// Branch refs on a commit, one per branch name; `remotes` tells `origin/x` from a local `a/b`.
 fn branches(ref_names: &[SharedString], remotes: &HashSet<&str>) -> Vec<HistoryBranch> {
     let mut branches: Vec<HistoryBranch> = Vec::new();
+    let mut remote_refs: Vec<(SharedString, SharedString)> = Vec::new();
     for name in ref_names {
         if name.starts_with("tag: ") || name.ends_with("/HEAD") {
             continue;
@@ -279,42 +262,50 @@ fn branches(ref_names: &[SharedString], remotes: &HashSet<&str>) -> Vec<HistoryB
             continue;
         };
         let name = ref_name.as_ref();
-        let (short, remote) = match name.split_once('/') {
-            Some((remote, short)) if remotes.contains(remote) => (short, true),
-            _ => (name, false),
-        };
-        match branches
-            .iter_mut()
-            .find(|branch| branch.name.as_ref() == short)
-        {
-            Some(branch) => branch.remote |= remote,
+        match name.split_once('/') {
+            Some((remote, short)) if remotes.contains(remote) => {
+                remote_refs.push((name.to_string().into(), short.to_string().into()));
+            }
+            _ => branches.push(HistoryBranch {
+                name: name.to_string().into(),
+                short_name: name.to_string().into(),
+                also_on_remote: false,
+            }),
+        }
+    }
+    for (name, short_name) in remote_refs {
+        match branches.iter_mut().find(|branch| branch.name == short_name) {
+            Some(branch) => branch.also_on_remote = true,
             None => branches.push(HistoryBranch {
-                name: short.to_string().into(),
-                remote,
+                name,
+                short_name,
+                also_on_remote: false,
             }),
         }
     }
     branches
 }
 
-/// First row of the default branch, where the checked-out branch's own commits end. Returns
-/// `commits.len()` when there is no default branch or it is the checked-out branch itself, so
-/// every lane-0 commit belongs to the checked-out branch.
+/// Row where the checked-out branch's own commits end, or `commits.len()` if that's unknown.
 fn base_row(
     commits: &[Arc<InitialGraphCommitData>],
     branches_by_row: &[Vec<HistoryBranch>],
+    first_parent_rows: &[bool],
     current_branch: Option<&str>,
 ) -> usize {
+    let on_first_parent_line = |row: &usize| first_parent_rows.get(*row).copied().unwrap_or(false);
     let remote_head = commits
         .iter()
         .position(|commit| commit.ref_names.iter().any(|name| name.ends_with("/HEAD")));
-    let default_row = remote_head.or_else(|| {
-        branches_by_row.iter().position(|branches| {
-            branches
-                .iter()
-                .any(|branch| DEFAULT_BRANCH_NAMES.contains(&branch.name.as_ref()))
-        })
+    let named_default = branches_by_row.iter().position(|branches| {
+        branches
+            .iter()
+            .any(|branch| DEFAULT_BRANCH_NAMES.contains(&branch.short_name.as_ref()))
     });
+    let default_row = match remote_head {
+        Some(row) => Some(row).filter(on_first_parent_line),
+        None => named_default.filter(on_first_parent_line),
+    };
     let on_default_branch = match (default_row, current_branch) {
         (Some(row), Some(current)) => branches_by_row[row]
             .iter()
@@ -327,9 +318,7 @@ fn base_row(
     }
 }
 
-/// Assigns every commit and line to a branch: lane 0 is the checked-out branch down to
-/// `base_row` and the default branch below it; each merged branch keeps the role of the merge
-/// that brought it in.
+/// Lane 0 is the checked-out branch above `base_row` and the default branch below it.
 fn roles(graph: &GraphData, base_row: usize) -> (Vec<ColorRole>, Vec<ColorRole>) {
     let main_role = |row: usize| {
         if row < base_row {
@@ -348,13 +337,15 @@ fn roles(graph: &GraphData, base_row: usize) -> (Vec<ColorRole>, Vec<ColorRole>)
 
     let mut order: Vec<usize> = (0..graph.lines.len()).collect();
     order.sort_by_key(|&ix| graph.lines[ix].full_interval.start);
-    let mut merge_roles: HashMap<usize, ColorRole> = HashMap::default();
+    let mut merge_roles: HashMap<(usize, usize), ColorRole> = HashMap::default();
     for ix in order {
         let line = &graph.lines[ix];
         let Range { start, end } = line.full_interval;
         let role = if line.starts_with_merge() {
             let next = merge_roles.len();
-            *merge_roles.entry(start).or_insert(ColorRole::Merged(next))
+            *merge_roles
+                .entry((start, end))
+                .or_insert(ColorRole::Merged(next))
         } else {
             commit_roles
                 .get(start)
@@ -401,7 +392,7 @@ mod tests {
     fn names(branches: &[HistoryBranch]) -> Vec<(&str, bool)> {
         branches
             .iter()
-            .map(|branch| (branch.name.as_ref(), branch.remote))
+            .map(|branch| (branch.name.as_ref(), branch.also_on_remote))
             .collect()
     }
 
@@ -422,7 +413,11 @@ mod tests {
 
         assert_eq!(
             names(&branches(&refs, &remotes)),
-            [("feature/foo", true), ("main", true), ("backup/x", false)]
+            [
+                ("feature/foo", true),
+                ("backup/x", false),
+                ("origin/main", false)
+            ]
         );
     }
 
@@ -438,7 +433,7 @@ mod tests {
             .map(|commit| branches(&commit.ref_names, &HashSet::default()))
             .collect();
 
-        assert_eq!(base_row(&commits, &by_row, Some("topic")), 2);
+        assert_eq!(base_row(&commits, &by_row, &[true; 3], Some("topic")), 2);
     }
 
     #[test]
@@ -449,7 +444,42 @@ mod tests {
             .map(|commit| branches(&commit.ref_names, &HashSet::default()))
             .collect();
 
-        assert_eq!(base_row(&commits, &by_row, Some("main")), commits.len());
+        assert_eq!(
+            base_row(&commits, &by_row, &[true; 2], Some("main")),
+            commits.len()
+        );
+    }
+
+    #[test]
+    fn test_default_branch_merged_into_head_is_not_its_base() {
+        let commits = commits(&[
+            (1, &[2, 3], &["HEAD -> topic"]),
+            (2, &[4], &[]),
+            (3, &[4], &["main"]),
+            (4, &[], &[]),
+        ]);
+        let graph = HistoryGraph::new(&commits, Some("topic"), Arc::from([]));
+
+        assert!(
+            graph
+                .commit_roles
+                .iter()
+                .all(|role| *role != ColorRole::Base)
+        );
+    }
+
+    #[test]
+    fn test_octopus_merge_colors_each_merged_branch() {
+        let commits = commits(&[
+            (1, &[2, 3, 4], &[]),
+            (2, &[5], &[]),
+            (3, &[5], &[]),
+            (4, &[5], &[]),
+            (5, &[], &[]),
+        ]);
+        let graph = HistoryGraph::new(&commits, None, Arc::from([]));
+
+        assert_ne!(graph.commit_roles[2], graph.commit_roles[3]);
     }
 
     #[test]

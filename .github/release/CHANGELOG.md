@@ -4,7 +4,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
-- Add an optional branch graph to the Git panel's History tab.
+- Add branch graph to the Git panel's History tab. Pick Graph in Settings → Panels → Git Panel section → History Style to enable it.
 - Support Mermaid diagrams in Markdown preview.
 - Fix terminal on Windows not picking new env vars without Wu restart.
 - Show "Open with Wu" in context menu on Windows 11 when the classic Windows 10 menu is enabled.

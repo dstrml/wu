@@ -842,7 +842,6 @@ pub(crate) struct CommitLine {
 }
 
 impl CommitLine {
-    /// Whether the line leaves a merge commit towards its merged parent.
     pub(crate) fn starts_with_merge(&self) -> bool {
         matches!(
             self.segments.first(),
@@ -868,8 +867,7 @@ impl CommitLine {
                     on_row,
                     curve_kind,
                 } => {
-                    // A merge bends right below the merge commit; a checkout bends right
-                    // above the commit it joins.
+                    // Merges bend below the merge commit, checkouts above the commit they join.
                     let bent = match curve_kind {
                         CurveKind::Merge => *on_row <= row + 1,
                         CurveKind::Checkout => *on_row <= row,
@@ -1322,9 +1320,7 @@ fn draw_commit_circle(center_x: Pixels, center_y: Pixels, color: Hsla, window: &
     }
 }
 
-/// Paints commit lines for the rows starting at `first_visible_row`, `lane_width` apart. Lines
-/// sharing a `key` are painted together on one layer, in ascending key order, all in that key's
-/// color.
+/// Lines sharing a `key` are painted on one layer, in ascending key order, in that key's color.
 pub(crate) fn paint_commit_lines<'a>(
     bounds: Bounds<Pixels>,
     lines: impl IntoIterator<Item = (&'a CommitLine, usize, Hsla)>,
@@ -5490,6 +5486,69 @@ mod tests {
 
         assert_eq!(commit_count, 0);
         assert!(!is_loading, "empty graph data should stop loading");
+    }
+
+    #[gpui::test]
+    async fn test_graph_data_is_not_loading_when_fully_loaded_fires(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            Path::new("/project"),
+            json!({
+                ".git": {},
+                "file.txt": "content",
+            }),
+        )
+        .await;
+        let mut rng = StdRng::seed_from_u64(7);
+        let commits = generate_random_commit_dag(&mut rng, 10, false);
+        fs.set_graph_commits(Path::new("/project/.git"), commits.clone());
+
+        let project = Project::test(fs.clone(), [Path::new("/project")], cx).await;
+        project
+            .update(cx, |project, cx| project.git_scans_complete(cx))
+            .await;
+        cx.run_until_parked();
+        let repository = project.read_with(cx, |project, cx| {
+            project
+                .active_repository(cx)
+                .expect("should have a repository")
+        });
+
+        let loading_when_fully_loaded = Arc::new(Mutex::new(Vec::new()));
+        let subscription = cx.update(|cx| {
+            let loading_when_fully_loaded = loading_when_fully_loaded.clone();
+            cx.subscribe(&repository, move |repository, event, cx| {
+                if let RepositoryEvent::GraphEvent(_, GitGraphEvent::FullyLoaded) = event {
+                    let state = repository.update(cx, |repository, cx| {
+                        let response = repository.graph_data(
+                            LogSource::default(),
+                            LogOrder::default(),
+                            0..usize::MAX,
+                            cx,
+                        );
+                        (response.commits.len(), response.is_loading)
+                    });
+                    loading_when_fully_loaded
+                        .lock()
+                        .expect("mutex should be available")
+                        .push(state);
+                }
+            })
+        });
+        repository.update(cx, |repository, cx| {
+            repository.graph_data(LogSource::default(), LogOrder::default(), 0..usize::MAX, cx);
+        });
+        cx.run_until_parked();
+        drop(subscription);
+
+        assert_eq!(
+            *loading_when_fully_loaded
+                .lock()
+                .expect("mutex should be available"),
+            [(commits.len(), false)]
+        );
     }
 
     #[gpui::test]
