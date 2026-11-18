@@ -21,6 +21,8 @@ use crate::{
 pub struct ProjectEnvironment {
     cli_environment: Option<HashMap<String, String>>,
     local_environments: HashMap<(Shell, Arc<Path>), Shared<Task<Option<HashMap<String, String>>>>>,
+    #[cfg(windows)]
+    windows_environment_generation: usize,
     remote_environments: HashMap<(Shell, Arc<Path>), Shared<Task<Option<HashMap<String, String>>>>>,
     environment_error_messages: VecDeque<String>,
     environment_error_messages_tx: mpsc::UnboundedSender<String>,
@@ -57,6 +59,8 @@ impl ProjectEnvironment {
         Self {
             cli_environment,
             local_environments: Default::default(),
+            #[cfg(windows)]
+            windows_environment_generation: 0,
             remote_environments: Default::default(),
             environment_error_messages: Default::default(),
             environment_error_messages_tx: tx,
@@ -202,6 +206,15 @@ impl ProjectEnvironment {
         if let Some(cli_environment) = self.get_cli_environment() {
             log::debug!("using project environment variables from CLI");
             return Task::ready(Some(cli_environment)).shared();
+        }
+
+        #[cfg(windows)]
+        {
+            let generation = util::shell_env::refresh_windows_environment();
+            if generation != self.windows_environment_generation {
+                self.windows_environment_generation = generation;
+                self.local_environments.clear();
+            }
         }
 
         self.local_environments

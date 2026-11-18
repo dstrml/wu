@@ -9800,6 +9800,8 @@ pub async fn restart_and_restore_workspaces(
         recorded_workspace_ids = true;
     }
 
+    #[cfg(windows)]
+    util::shell_env::refresh_windows_environment();
     // The relaunch may quit synchronously, so the ids are recorded before
     // restarting and only removed again when the restart did not happen.
     if let Err(error) = cx.update(|cx| cx.restart()) {

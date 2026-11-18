@@ -347,6 +347,8 @@ fn main() {
 
     #[cfg(windows)]
     check_for_conpty_dll();
+    #[cfg(windows)]
+    util::shell_env::refresh_windows_environment();
 
     let app = build_application()
         .with_assets(Assets)

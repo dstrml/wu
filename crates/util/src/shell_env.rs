@@ -303,12 +303,165 @@ async fn capture_windows(
     )
 }
 
+#[cfg(any(windows, test))]
+#[derive(Default)]
+struct EnvironmentTracker {
+    known: Option<HashMap<String, String>>,
+    generation: usize,
+}
+
+#[cfg(any(windows, test))]
+impl EnvironmentTracker {
+    /// Returns the variables that differ from the last snapshot. The first snapshot only records them.
+    fn update(&mut self, current: HashMap<String, String>) -> Vec<(String, String)> {
+        let Some(known) = self.known.as_mut() else {
+            self.known = Some(current);
+            return Vec::new();
+        };
+        let changed = current
+            .iter()
+            .filter(|(name, value)| known.get(*name) != Some(*value))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        if !changed.is_empty() {
+            self.generation += 1;
+        }
+        *known = current;
+        changed
+    }
+}
+
+#[cfg(any(windows, test))]
+fn parse_environment_block(block: &[u16]) -> HashMap<String, String> {
+    block
+        .split(|unit| *unit == 0)
+        .take_while(|entry| !entry.is_empty())
+        .map(String::from_utf16_lossy)
+        // Entries like `=C:=C:\src` hold each drive's working directory, not variables.
+        .filter(|entry| !entry.starts_with('='))
+        .filter_map(|entry| {
+            let (name, value) = entry.split_once('=')?;
+            Some((name.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+/// Applies Windows environment changes made since launch. The result goes up after each change.
+#[cfg(windows)]
+pub fn refresh_windows_environment() -> usize {
+    use crate::ResultExt as _;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    static TRACKER: Mutex<Option<(EnvironmentTracker, Instant)>> = Mutex::new(None);
+
+    let mut tracker = TRACKER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((tracker, last_read)) = tracker.as_ref()
+        && last_read.elapsed() < Duration::from_secs(1)
+    {
+        return tracker.generation;
+    }
+    let (tracker, last_read) =
+        tracker.get_or_insert_with(|| (EnvironmentTracker::default(), Instant::now()));
+    *last_read = Instant::now();
+    if let Some(current) = read_windows_environment().log_err() {
+        for (name, value) in tracker.update(current) {
+            // Windows locks the environment block itself, so other threads can't see a torn update.
+            unsafe { std::env::set_var(name, value) };
+        }
+    }
+    tracker.generation
+}
+
+#[cfg(windows)]
+fn read_windows_environment() -> Result<HashMap<String, String>> {
+    use crate::ResultExt as _;
+    use windows::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::{TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY},
+        System::{
+            Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock},
+            Threading::{GetCurrentProcess, OpenProcessToken},
+        },
+    };
+
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE,
+            &mut token,
+        )
+        .context("opening the process token")?;
+        let mut block = std::ptr::null_mut();
+        let created = CreateEnvironmentBlock(&mut block, Some(token), false);
+        CloseHandle(token).log_err();
+        created.context("reading the Windows environment")?;
+        let start = block as *const u16;
+        let mut length = 0;
+        while *start.add(length) != 0 || *start.add(length + 1) != 0 {
+            length += 1;
+        }
+        let environment = parse_environment_block(std::slice::from_raw_parts(start, length + 2));
+        DestroyEnvironmentBlock(block).log_err();
+        Ok(environment)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::ExitStatus;
 
     use super::*;
     use crate::path;
+
+    #[test]
+    fn environment_tracker_reports_only_later_changes() {
+        let snapshot = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect::<HashMap<_, _>>()
+        };
+        let mut tracker = EnvironmentTracker::default();
+        assert!(
+            tracker
+                .update(snapshot(&[("PATH", "a"), ("HOME", "h")]))
+                .is_empty()
+        );
+        assert_eq!(tracker.generation, 0);
+
+        assert!(
+            tracker
+                .update(snapshot(&[("PATH", "a"), ("HOME", "h")]))
+                .is_empty()
+        );
+        assert_eq!(tracker.generation, 0);
+
+        let mut changed = tracker.update(snapshot(&[("PATH", "a;b"), ("HOME", "h"), ("NEW", "1")]));
+        changed.sort();
+        assert_eq!(
+            changed,
+            [
+                ("NEW".to_string(), "1".to_string()),
+                ("PATH".to_string(), "a;b".to_string())
+            ]
+        );
+        assert_eq!(tracker.generation, 1);
+    }
+
+    #[test]
+    fn environment_block_skips_drive_directories() {
+        let block = "=C:=C:\\src\0Path=C:\\bin;D:\\tools\0EMPTY=\0\0"
+            .encode_utf16()
+            .collect::<Vec<_>>();
+        let environment = parse_environment_block(&block);
+        assert_eq!(environment.len(), 2);
+        assert_eq!(environment["Path"], "C:\\bin;D:\\tools");
+        assert_eq!(environment["EMPTY"], "");
+    }
 
     #[cfg(unix)]
     fn exit_status(code: i32) -> ExitStatus {
