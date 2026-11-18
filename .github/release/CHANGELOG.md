@@ -4,7 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
-- Show "Open with Wu" in the right-click menu on Windows 11 when the classic Windows 10 menu is turned back on.
+- Draw Mermaid diagrams in the Markdown preview.
+- Show "Open with Wu" in the right-click menu on Windows 11 when the classic Windows 10 menu is enabled.
 
 ## 1.3.0 - 2026-11-14
 

@@ -23,6 +23,7 @@ i18n.workspace = true
 language.workspace = true
 log.workspace = true
 markdown.workspace = true
+mermaid_render.workspace = true
 project.workspace = true
 settings.workspace = true
 theme.workspace = true

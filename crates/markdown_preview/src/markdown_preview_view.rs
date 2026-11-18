@@ -14,17 +14,19 @@ use editor::{
     Editor, EditorEvent, EditorSettingsScrollbarProxy, MultiBufferOffset, SelectionEffects,
 };
 use gpui::{
-    App, ClipboardItem, Context, Entity, EntityId, EventEmitter, FocusHandle, Focusable, Global,
-    ImageSource, InteractiveElement, IntoElement, IsZero, Pixels, Render, Resource,
-    RetainAllImageCache, ScrollHandle, SharedString, SharedUri, Subscription, Task, WeakEntity,
-    Window, point, px,
+    AnyElement, App, ClipboardItem, Context, Entity, EntityId, EventEmitter, FocusHandle,
+    Focusable, Global, Image, ImageSource, InteractiveElement, IntoElement, IsZero, ObjectFit,
+    Pixels, Render, Resource, RetainAllImageCache, ScrollHandle, SharedString, SharedUri,
+    Subscription, Task, WeakEntity, Window, img, point, px, retain_all,
 };
 use i18n::t;
 use language::{Buffer, LanguageRegistry};
 use markdown::{
-    CodeBlockRenderer, CopyButtonVisibility, Markdown, MarkdownElement, MarkdownFont,
-    MarkdownOptions, MarkdownStyle,
+    CodeBlockPreview, CodeBlockRenderer, CopyButtonVisibility, Markdown, MarkdownElement,
+    MarkdownFont, MarkdownOptions, MarkdownStyle,
+    parser::{CodeBlockKind, MarkdownEvent, MarkdownTag},
 };
+use mermaid_render::{Diagram, DiagramTheme, MermaidDiagrams};
 use project::search::SearchQuery;
 use project::{Project, ProjectPath, image_store};
 use settings::{SeedQuerySetting, Settings, update_settings_file};
@@ -58,6 +60,92 @@ use crate::{ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToTop, ScrollUp,
 
 const REPARSE_DEBOUNCE: Duration = Duration::from_millis(200);
 
+fn is_mermaid(kind: &CodeBlockKind) -> bool {
+    matches!(kind, CodeBlockKind::FencedLang(language) if language.eq_ignore_ascii_case("mermaid"))
+}
+
+fn mermaid_sources<'a>(source: &'a str, events: &[(Range<usize>, MarkdownEvent)]) -> Vec<&'a str> {
+    events
+        .iter()
+        .filter_map(|(_, event)| match event {
+            MarkdownEvent::Start(MarkdownTag::CodeBlock { kind, metadata })
+                if metadata.is_fenced_closed && is_mermaid(kind) =>
+            {
+                source.get(metadata.content_range.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn diagram_theme(theme: &Theme) -> DiagramTheme {
+    let colors = theme.colors();
+    let is_light = theme.appearance.is_light();
+    let canvas = colors.editor_background;
+    let node = if is_light {
+        canvas
+    } else {
+        canvas.blend(colors.text.opacity(0.06))
+    };
+    DiagramTheme {
+        font_family: "Inter".into(),
+        background: canvas.into(),
+        text: colors.text.into(),
+        line: colors.text_muted.into(),
+        node_fill: node.into(),
+        node_border: colors
+            .text
+            .opacity(if is_light { 0.17 } else { 0.14 })
+            .into(),
+        accent: colors.text_accent.into(),
+    }
+}
+
+fn diagram_preview(
+    diagrams: &Entity<MermaidDiagrams>,
+    kind: &CodeBlockKind,
+    code: &str,
+    cx: &App,
+) -> Option<CodeBlockPreview> {
+    if !is_mermaid(kind) {
+        return None;
+    }
+    match diagrams.read(cx).get(code)? {
+        Diagram::Pending => None,
+        Diagram::Ready {
+            image,
+            width,
+            height,
+        } => Some(CodeBlockPreview {
+            element: render_diagram(image.clone(), *width, *height),
+            hide_code: true,
+        }),
+        Diagram::Failed(error) => Some(CodeBlockPreview {
+            element: div()
+                .pb_2()
+                .child(
+                    Label::new(t!("Couldn't draw this diagram: {error}", error = error))
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
+                )
+                .into_any_element(),
+            hide_code: false,
+        }),
+    }
+}
+
+fn render_diagram(image: Arc<Image>, width: f32, height: f32) -> AnyElement {
+    // Each drawing gets its own cache, so its pixels are freed once the diagram changes.
+    div()
+        .image_cache(retain_all(("mermaid-diagram", image.id())))
+        .w_full()
+        .max_w(px(width))
+        .mx_auto()
+        .aspect_ratio(width / height.max(1.))
+        .child(img(image).size_full().object_fit(ObjectFit::Contain))
+        .into_any_element()
+}
+
 fn reset_persisted_font_size(settings: &mut settings::SettingsContent) {
     if let Some(markdown_preview) = settings.markdown_preview.as_mut() {
         markdown_preview.font_size = None;
@@ -71,6 +159,9 @@ pub struct MarkdownPreviewView {
     focus_handle: FocusHandle,
     markdown: Entity<Markdown>,
     _markdown_subscription: Subscription,
+    diagrams: Entity<MermaidDiagrams>,
+    diagram_scan: Option<(Arc<[(Range<usize>, MarkdownEvent)]>, DiagramTheme, usize)>,
+    _diagrams_subscription: Subscription,
     active_source_index: Option<usize>,
     scroll_handle: ScrollHandle,
     image_cache: Entity<RetainAllImageCache>,
@@ -394,6 +485,7 @@ impl MarkdownPreviewView {
                     cx,
                 )
             });
+            let diagrams = cx.new(|_| MermaidDiagrams::default());
             let mut this = Self {
                 active_editor: None,
                 focus_handle: cx.focus_handle(),
@@ -410,6 +502,9 @@ impl MarkdownPreviewView {
                     },
                 ),
                 markdown,
+                _diagrams_subscription: cx.observe(&diagrams, |_, _, cx| cx.notify()),
+                diagrams,
+                diagram_scan: None,
                 active_source_index: None,
                 scroll_handle: ScrollHandle::new(),
                 image_cache: RetainAllImageCache::new(cx),
@@ -1051,6 +1146,29 @@ impl MarkdownPreviewView {
         ThemeRegistry::global(cx).get(&theme_name.0).ok()
     }
 
+    fn request_diagrams(&mut self, theme: &DiagramTheme, cx: &mut Context<Self>) {
+        let parsed = self.markdown.read(cx).parsed_markdown();
+        let events = parsed.events().clone();
+        let source = parsed.source().clone();
+        let generation = self.diagrams.read(cx).generation();
+        if let Some((scanned_events, scanned_theme, scanned_generation)) = &self.diagram_scan
+            && Arc::ptr_eq(scanned_events, &events)
+            && scanned_theme == theme
+            && *scanned_generation == generation
+        {
+            return;
+        }
+        let sources = mermaid_sources(&source, &events);
+        self.diagrams.update(cx, |diagrams, cx| {
+            diagrams.retain(&sources);
+            for diagram_source in &sources {
+                diagrams.request(diagram_source, theme, cx);
+            }
+        });
+        let generation = self.diagrams.read(cx).generation();
+        self.diagram_scan = Some((events, theme.clone(), generation));
+    }
+
     fn render_markdown_element(
         &self,
         preview_theme: &Option<Arc<Theme>>,
@@ -1092,6 +1210,10 @@ impl MarkdownPreviewView {
                 copy_button_visibility: CopyButtonVisibility::VisibleOnHover,
                 wrap_button_visibility: markdown::WrapButtonVisibility::Hidden,
                 border: false,
+            })
+            .code_block_preview({
+                let diagrams = self.diagrams.clone();
+                move |kind, code, _, cx| diagram_preview(&diagrams, kind, code, cx)
             })
             .scroll_handle(self.scroll_handle.clone())
             .show_root_block_markers()
@@ -1750,6 +1872,10 @@ impl Item for MarkdownPreviewView {
 impl Render for MarkdownPreviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let preview_theme = self.resolve_preview_theme(cx);
+        self.request_diagrams(
+            &diagram_theme(preview_theme.as_ref().unwrap_or_else(|| cx.theme())),
+            cx,
+        );
         let bg_color = preview_theme
             .as_ref()
             .map(|theme| theme.colors().editor_background)
@@ -4405,5 +4531,26 @@ mod tests {
             }
             _ => panic!("Expected preview image to resolve to a local path"),
         }
+    }
+
+    #[gpui::test]
+    fn finds_closed_mermaid_blocks_only(cx: &mut TestAppContext) {
+        let markdown = cx.new(|cx| {
+            markdown::Markdown::new(
+                "```mermaid\nflowchart TD\nA --> B\n```\n\n- item\n\n  ```mermaid\n  pie\n  ```\n\n```rust\nfn main() {}\n```\n\n```mermaid\nunclosed\n"
+                    .into(),
+                None,
+                None,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        markdown.read_with(cx, |markdown, _| {
+            let parsed = markdown.parsed_markdown();
+            assert_eq!(
+                super::mermaid_sources(parsed.source(), parsed.events()),
+                ["flowchart TD\nA --> B\n", "  pie\n"]
+            );
+        });
     }
 }

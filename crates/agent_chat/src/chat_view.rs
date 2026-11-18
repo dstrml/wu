@@ -44,6 +44,7 @@ use markdown::{
     CodeBlockRenderer, HeadingLevelStyles, Markdown, MarkdownElement, MarkdownFont, MarkdownOptions,
     MarkdownStyle, TABLE_GROUP, TableActionsFn, parser::CodeBlockKind,
 };
+use mermaid_render::{Diagram, DiagramTheme, MermaidDiagrams};
 use project::Project;
 use gpui::{FollowMode, ListAlignment, ListState, list};
 #[cfg(test)]
@@ -193,9 +194,8 @@ pub struct ChatView {
     known_paths: HashMap<std::path::PathBuf, links::PathState>,
     scanned_sources: HashMap<gpui::EntityId, usize>,
     link_menu: Option<links::LinkMenu>,
-    diagrams: std::cell::RefCell<HashMap<(String, bool), mermaid::Diagram>>,
-    diagram_tasks: HashMap<(String, bool), Task<()>>,
-    diagram_scan: (Option<bool>, HashMap<gpui::EntityId, usize>),
+    diagrams: Entity<MermaidDiagrams>,
+    diagram_scan: (Option<(DiagramTheme, usize)>, HashMap<gpui::EntityId, usize>),
     diagram_sources_shown: HashSet<String>,
     editing_queued: Option<queue_panel::QueuedEdit>,
     lightbox_focus: FocusHandle,
@@ -281,6 +281,7 @@ impl ChatView {
         });
         let list = ListState::new(0, ListAlignment::Top, px(LIST_OVERDRAW));
         list.set_follow_mode(FollowMode::Tail);
+        let diagrams = cx.new(|_| MermaidDiagrams::default());
         let subscriptions = vec![
             cx.observe_in(&session, window, |this, session, window, cx| {
                 if session.read(cx).is_deleted() {
@@ -313,6 +314,7 @@ impl ChatView {
                 }
                 cx.notify();
             }),
+            cx.observe(&diagrams, |_, _, cx| cx.notify()),
         ];
         let mut view = Self {
             session,
@@ -370,8 +372,7 @@ impl ChatView {
             known_paths: HashMap::default(),
             scanned_sources: HashMap::default(),
             link_menu: None,
-            diagrams: Default::default(),
-            diagram_tasks: HashMap::default(),
+            diagrams,
             diagram_scan: Default::default(),
             diagram_sources_shown: HashSet::default(),
             editing_queued: None,
@@ -1121,7 +1122,7 @@ impl ChatView {
                     view.upgrade().map(|chat| {
                         let shown_source =
                             chat.read(cx).diagram_sources_shown.contains(code.trim_end());
-                        let diagram = chat.read(cx).diagram(&code, cx);
+                        let diagram = chat.read(cx).diagrams.read(cx).get(&code).cloned();
                         (shown_source, diagram)
                     })
                 } else {
@@ -1132,11 +1133,10 @@ impl ChatView {
                 let diagram_view = view.clone();
                 let muted = colors.text_muted;
                 let ready_diagram = diagram.as_ref().and_then(|(shown_source, diagram)| {
-                    matches!(diagram, Some(mermaid::Diagram::Ready { .. }))
-                        .then_some(*shown_source)
+                    matches!(diagram, Some(Diagram::Ready { .. })).then_some(*shown_source)
                 });
                 let failure = diagram.as_ref().and_then(|(_, diagram)| match diagram {
-                    Some(mermaid::Diagram::Failed(error)) => {
+                    Some(Diagram::Failed(error)) => {
                         Some(t!("Couldn't draw this diagram: {error}", error = error))
                     }
                     _ => None,
@@ -1271,9 +1271,7 @@ impl ChatView {
                     )
                     .when_some(
                         diagram.and_then(|(shown_source, diagram)| match diagram {
-                            Some(diagram @ mermaid::Diagram::Ready { .. }) if !shown_source => {
-                                Some(diagram)
-                            }
+                            Some(diagram @ Diagram::Ready { .. }) if !shown_source => Some(diagram),
                             _ => None,
                         }),
                         |this, diagram| this.child(render_diagram(diagram, diagram_view.clone())),
@@ -1288,10 +1286,7 @@ impl ChatView {
                         && view.upgrade().is_some_and(|chat| {
                             let chat = chat.read(cx);
                             !chat.diagram_sources_shown.contains(code.trim_end())
-                                && matches!(
-                                    chat.diagram(code, cx),
-                                    Some(mermaid::Diagram::Ready { .. })
-                                )
+                                && chat.diagrams.read(cx).is_ready(code)
                         })
                 }
             })),
@@ -2821,8 +2816,8 @@ fn code_text_style(cx: &App) -> TextStyleRefinement {
     }
 }
 
-fn render_diagram(diagram: mermaid::Diagram, view: WeakEntity<ChatView>) -> AnyElement {
-    let mermaid::Diagram::Ready {
+fn render_diagram(diagram: Diagram, view: WeakEntity<ChatView>) -> AnyElement {
+    let Diagram::Ready {
         image,
         width,
         height,

@@ -1,3 +1,7 @@
+mod diagrams;
+
+pub use diagrams::{Diagram, MermaidDiagrams};
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -17,6 +21,13 @@ pub struct Rgba {
     pub g: f32,
     pub b: f32,
     pub a: f32,
+}
+
+impl From<gpui::Hsla> for Rgba {
+    fn from(color: gpui::Hsla) -> Self {
+        let gpui::Rgba { r, g, b, a } = color.to_rgb();
+        Self { r, g, b, a }
+    }
 }
 
 impl Rgba {

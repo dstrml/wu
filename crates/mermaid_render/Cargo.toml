@@ -13,6 +13,13 @@ path = "src/mermaid_render.rs"
 doctest = false
 
 [dependencies]
+collections.workspace = true
+gpui.workspace = true
+i18n.workspace = true
 mermaid-rs-renderer.workspace = true
 thiserror.workspace = true
 usvg.workspace = true
+util.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

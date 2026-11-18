@@ -442,6 +442,15 @@ pub enum CodeBlockRenderer {
 
 pub type CodeBlockHideFn = Arc<dyn Fn(&CodeBlockKind, &str, &App) -> bool>;
 
+/// Drawn in place of a code block, or above it when `hide_code` is false.
+pub struct CodeBlockPreview {
+    pub element: AnyElement,
+    pub hide_code: bool,
+}
+
+type CodeBlockPreviewFn =
+    Box<dyn Fn(&CodeBlockKind, &str, &mut Window, &App) -> Option<CodeBlockPreview>>;
+
 /// Builds controls pinned to a table's top-right corner from its markdown source.
 pub type TableActionsFn = Arc<dyn Fn(&str, Range<usize>, &mut Window, &App) -> AnyElement>;
 
@@ -780,7 +789,6 @@ impl Markdown {
         self.parse(cx);
     }
 
-    #[cfg(any(test, feature = "test-support"))]
     pub fn parsed_markdown(&self) -> &ParsedMarkdown {
         &self.parsed_markdown
     }
@@ -1414,6 +1422,7 @@ pub struct MarkdownElement {
     markdown: Entity<Markdown>,
     style: MarkdownStyle,
     code_block_renderer: CodeBlockRenderer,
+    code_block_preview: Option<CodeBlockPreviewFn>,
     table_actions: Option<TableActionsFn>,
     on_url_click: Option<Rc<dyn Fn(SharedString, &mut Window, &mut App)>>,
     on_url_hover: Option<UrlHoverCallback>,
@@ -1435,6 +1444,7 @@ impl MarkdownElement {
                 wrap_button_visibility: WrapButtonVisibility::Hidden,
                 border: false,
             },
+            code_block_preview: None,
             table_actions: None,
             on_url_click: None,
             on_url_hover: None,
@@ -1470,6 +1480,14 @@ impl MarkdownElement {
 
     pub fn code_block_renderer(mut self, variant: CodeBlockRenderer) -> Self {
         self.code_block_renderer = variant;
+        self
+    }
+
+    pub fn code_block_preview(
+        mut self,
+        preview: impl Fn(&CodeBlockKind, &str, &mut Window, &App) -> Option<CodeBlockPreview> + 'static,
+    ) -> Self {
+        self.code_block_preview = Some(Box::new(preview));
         self
     }
 
@@ -2451,10 +2469,27 @@ impl Element for MarkdownElement {
                                     }
 
                                     parent_container.style().refine(&self.style.code_block);
+                                    let preview = self
+                                        .code_block_preview
+                                        .as_ref()
+                                        .filter(|_| !is_indented)
+                                        .and_then(|preview| {
+                                            let code = parsed_markdown
+                                                .source()
+                                                .get(metadata.content_range.clone())
+                                                .unwrap_or_default();
+                                            preview(kind, code, window, cx)
+                                        });
+                                    let hide_code =
+                                        preview.as_ref().is_some_and(|preview| preview.hide_code);
+                                    if let Some(preview) = preview {
+                                        parent_container.extend([preview.element]);
+                                    }
                                     builder.push_div(parent_container, range, markdown_end);
 
                                     let code_block = div()
                                         .id(("code-block", range.start))
+                                        .when(hide_code, |code_block| code_block.hidden())
                                         .rounded_lg()
                                         .map(|code_block| {
                                             if let Some(scroll_handle) = scroll_handle.as_ref() {
@@ -4861,6 +4896,62 @@ mod tests {
             seen.lock().expect("lock").first(),
             Some(&("rust".to_string(), "fn main() {}\n".to_string()))
         );
+    }
+
+    #[gpui::test]
+    fn test_code_block_preview_draws_over_its_code_block(cx: &mut TestAppContext) {
+        struct TestWindow;
+
+        impl Render for TestWindow {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+
+        struct PreviewMarkdown {
+            markdown: Entity<Markdown>,
+            seen: Arc<std::sync::Mutex<Vec<String>>>,
+        }
+
+        impl Render for PreviewMarkdown {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let seen = self.seen.clone();
+                MarkdownElement::new(self.markdown.clone(), MarkdownStyle::default())
+                    .code_block_preview(move |kind, code, _, _| {
+                        seen.lock().expect("lock").push(code.to_string());
+                        matches!(kind, CodeBlockKind::FencedLang(language) if language.as_ref() == "mermaid")
+                            .then(|| CodeBlockPreview {
+                                element: div()
+                                    .size(px(10.))
+                                    .debug_selector(|| "code-block-preview".into())
+                                    .into_any_element(),
+                                hide_code: true,
+                            })
+                    })
+            }
+        }
+
+        ensure_theme_initialized(cx);
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        let markdown = cx.new(|cx| {
+            Markdown::new(
+                "```mermaid\nflowchart TD\n```\n\n    indented\n".into(),
+                None,
+                None,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), |_, cx| {
+            cx.new(|_| PreviewMarkdown {
+                markdown: markdown.clone(),
+                seen: seen.clone(),
+            })
+            .into_any_element()
+        });
+        assert_eq!(*seen.lock().expect("lock"), ["flowchart TD\n"]);
+        assert!(cx.debug_bounds("code-block-preview").is_some());
     }
 
     #[gpui::test]
