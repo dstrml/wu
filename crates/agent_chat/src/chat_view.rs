@@ -89,6 +89,7 @@ const SPACE_MD: f32 = 12.;
 const SPACE_LG: f32 = 16.;
 const FIRST_ROW_BREATHING_ROOM: f32 = 10.;
 const TRANSCRIPT_BOTTOM_PAD: f32 = 32.;
+const REVEALED_HIGHLIGHT_PAD: f32 = 10.;
 const MD_BLOCK_GAP: f32 = 12.;
 const TREE_ROW_HEIGHT: f32 = 32.;
 const TREE_GUTTER: f32 = 48.;
@@ -1331,11 +1332,30 @@ impl ChatView {
         let user_text = user.and_then(|index| self.user_markdown(index, cx));
         let user_style = Self::user_style(window, cx);
         let painted_turns = self.painted_turns.clone();
+        let top_pad = if is_first_turn {
+            self.first_row_inset()
+        } else {
+            SPACE_LG
+        };
+        let bottom_pad = if is_last_turn {
+            TRANSCRIPT_BOTTOM_PAD
+        } else {
+            0.
+        };
         let turn = v_flex()
             .relative()
             .w_full()
             .when(self.revealed_turn == Some(turn_index), |this| {
-                this.rounded(px(12.)).bg(accent(cx).opacity(0.08))
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(top_pad - REVEALED_HIGHLIGHT_PAD))
+                        .bottom(px(bottom_pad - REVEALED_HIGHLIGHT_PAD))
+                        .left(px(-REVEALED_HIGHLIGHT_PAD))
+                        .right(px(-REVEALED_HIGHLIGHT_PAD))
+                        .rounded(px(12.))
+                        .bg(accent(cx).opacity(0.08)),
+                )
             })
             .child(
                 canvas(
@@ -1347,12 +1367,8 @@ impl ChatView {
                 .absolute()
                 .size_full(),
             )
-            .pt(px(if is_first_turn {
-                self.first_row_inset()
-            } else {
-                SPACE_LG
-            }))
-            .when(is_last_turn, |this| this.pb(px(TRANSCRIPT_BOTTOM_PAD)))
+            .pt(px(top_pad))
+            .pb(px(bottom_pad))
             .when_some(user, |this, index| {
                 this.child(self.render_user_message(index, user_text, user_style, cx))
             })
