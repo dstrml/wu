@@ -4,8 +4,9 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
-- Fix terminal on Windows not picking new env vars without Wu restart.
+- Add an optional branch graph to the Git panel's History tab.
 - Support Mermaid diagrams in Markdown preview.
+- Fix terminal on Windows not picking new env vars without Wu restart.
 - Show "Open with Wu" in context menu on Windows 11 when the classic Windows 10 menu is enabled.
 
 ## 1.3.0 - 2026-11-14
