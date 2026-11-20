@@ -1098,6 +1098,25 @@ impl BranchListDelegate {
         cx.emit(DismissEvent);
     }
 
+    fn merge_at(&self, idx: usize, cx: &mut Context<Picker<Self>>) {
+        let Some(Entry::Branch { branch, .. }) = self.matches.get(idx) else {
+            return;
+        };
+        if branch.is_head {
+            return;
+        }
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        crate::merge_into_current_branch(
+            crate::MergeSource::Branch(branch.name().to_string().into()),
+            repo.downgrade(),
+            self.workspace.clone(),
+            cx,
+        );
+        cx.emit(DismissEvent);
+    }
+
     fn delete_at(
         &self,
         idx: usize,
@@ -2055,6 +2074,13 @@ impl PickerDelegate for BranchListDelegate {
                                             cx,
                                         );
                                     }),
+                            )
+                            .child(
+                                Button::new("merge-branch", t!("Merge"))
+                                    .tooltip(Tooltip::text(t!("Merge into the current branch")))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.delegate.merge_at(this.delegate.selected_index, cx);
+                                    })),
                             )
                         },
                     )

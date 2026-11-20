@@ -78,6 +78,23 @@ pub(crate) fn commit_context_menu(
                     );
                 }
             })
+            .when_some(
+                repository
+                    .clone()
+                    .filter(|_| source == CommitContextMenuSource::GitGraph),
+                |menu, repository| {
+                    let workspace = workspace.clone();
+                    menu.entry(t!("Cherry-pick"), None, move |_window, cx| {
+                        crate::merge_into_current_branch(
+                            crate::MergeSource::Commit(sha),
+                            repository.clone(),
+                            workspace.clone(),
+                            cx,
+                        );
+                    })
+                    .separator()
+                },
+            )
             .entry(
                 t!("Copy SHA"),
                 Some(CopyCommitSha.boxed_clone()),

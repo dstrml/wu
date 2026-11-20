@@ -1,4 +1,8 @@
 {
+  "git::AbortMerge": {
+    "name": "中止合并",
+    "description": "中止因冲突而停止的合并或拣选。"
+  },
   "git::Add": {
     "name": "添加",
     "description": "将文件添加到 Git 暂存区。"

@@ -40,9 +40,9 @@ use git::{
         Branch, BranchesScanResult, CommitData, CommitDetails, CommitFileStatus, CommitOptions,
         CreateWorktreeTarget, DiffType, FetchOptions, FileHistoryChangedFileSets,
         GitCommitTemplate, GitRepository, GitRepositoryCheckpoint, InitialGraphCommitData,
-        LogOrder, LogSource, PushOptions, Remote, RemoteCommandOutput, RepoPath, ResetMode,
-        SearchCommitArgs, UpstreamTrackingStatus, Worktree as GitWorktree, delete_branch_flag,
-        is_binary_content,
+        LogOrder, LogSource, MergeOutcome, PushOptions, Remote, RemoteCommandOutput, RepoPath,
+        ResetMode, SearchCommitArgs, UpstreamTrackingStatus, Worktree as GitWorktree,
+        delete_branch_flag, is_binary_content,
     },
     stash::{GitStash, StashEntry},
     status::{
@@ -585,6 +585,35 @@ impl sum_tree::KeyedItem for StatusEntry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RepositoryId(pub u64);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbortableMerge {
+    Merge,
+    CherryPick,
+}
+
+fn merge_outcome_to_proto(outcome: MergeOutcome) -> proto::GitMergeResponse {
+    use proto::git_merge_response::Outcome;
+    let outcome = match outcome {
+        MergeOutcome::Completed => Outcome::Completed,
+        MergeOutcome::AlreadyUpToDate => Outcome::AlreadyUpToDate,
+        MergeOutcome::StoppedOnConflicts => Outcome::StoppedOnConflicts,
+        MergeOutcome::ReadyToCommit => Outcome::ReadyToCommit,
+    };
+    proto::GitMergeResponse {
+        outcome: outcome as i32,
+    }
+}
+
+fn merge_outcome_from_proto(response: proto::GitMergeResponse) -> MergeOutcome {
+    use proto::git_merge_response::Outcome;
+    match response.outcome() {
+        Outcome::Completed => MergeOutcome::Completed,
+        Outcome::AlreadyUpToDate => MergeOutcome::AlreadyUpToDate,
+        Outcome::StoppedOnConflicts => MergeOutcome::StoppedOnConflicts,
+        Outcome::ReadyToCommit => MergeOutcome::ReadyToCommit,
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MergeDetails {
     pub merge_heads_by_conflicted_path: TreeMap<RepoPath, Vec<Option<SharedString>>>,
@@ -1046,6 +1075,10 @@ impl GitStore {
         client.add_entity_request_handler(Self::handle_create_remote);
         client.add_entity_request_handler(Self::handle_remove_remote);
         client.add_entity_request_handler(Self::handle_delete_branch);
+        client.add_entity_request_handler(Self::handle_merge);
+        client.add_entity_request_handler(Self::handle_cherry_pick);
+        client.add_entity_request_handler(Self::handle_abort_merge);
+        client.add_entity_request_handler(Self::handle_squash_commits);
         client.add_entity_request_handler(Self::handle_git_init);
         client.add_entity_request_handler(Self::handle_push);
         client.add_entity_request_handler(Self::handle_pull);
@@ -4338,6 +4371,78 @@ impl GitStore {
         repository_handle
             .update(&mut cx, |repository_handle, _| {
                 repository_handle.delete_branch(is_remote, branch_name, force)
+            })
+            .await??;
+
+        Ok(proto::Ack {})
+    }
+
+    async fn handle_merge(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::GitMerge>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::GitMergeResponse> {
+        let repository_id = RepositoryId::from_proto(envelope.payload.repository_id);
+        let repository_handle = Self::repository_for_request(&this, repository_id, &mut cx)?;
+        let branch_name = envelope.payload.branch_name;
+
+        let outcome = repository_handle
+            .update(&mut cx, |repository_handle, _| {
+                repository_handle.merge(branch_name)
+            })
+            .await??;
+
+        Ok(merge_outcome_to_proto(outcome))
+    }
+
+    async fn handle_cherry_pick(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::GitCherryPick>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::GitMergeResponse> {
+        let repository_id = RepositoryId::from_proto(envelope.payload.repository_id);
+        let repository_handle = Self::repository_for_request(&this, repository_id, &mut cx)?;
+        let commit = envelope.payload.commit;
+
+        let outcome = repository_handle
+            .update(&mut cx, |repository_handle, _| {
+                repository_handle.cherry_pick(commit)
+            })
+            .await??;
+
+        Ok(merge_outcome_to_proto(outcome))
+    }
+
+    async fn handle_abort_merge(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::GitAbortMerge>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::Ack> {
+        let repository_id = RepositoryId::from_proto(envelope.payload.repository_id);
+        let repository_handle = Self::repository_for_request(&this, repository_id, &mut cx)?;
+
+        repository_handle
+            .update(&mut cx, |repository_handle, _| {
+                repository_handle.abort_merge()
+            })
+            .await??;
+
+        Ok(proto::Ack {})
+    }
+
+    async fn handle_squash_commits(
+        this: Entity<Self>,
+        envelope: TypedEnvelope<proto::GitSquashCommits>,
+        mut cx: AsyncApp,
+    ) -> Result<proto::Ack> {
+        let repository_id = RepositoryId::from_proto(envelope.payload.repository_id);
+        let repository_handle = Self::repository_for_request(&this, repository_id, &mut cx)?;
+        let commits = envelope.payload.commits;
+        let message = envelope.payload.message;
+
+        repository_handle
+            .update(&mut cx, |repository_handle, _| {
+                repository_handle.squash_commits(commits, message)
             })
             .await??;
 
@@ -9776,6 +9881,130 @@ impl Repository {
                 }
             },
         )
+    }
+
+    pub fn merge(&mut self, branch_name: String) -> oneshot::Receiver<Result<MergeOutcome>> {
+        let id = self.id;
+        self.send_job(
+            "merge",
+            Some(format!("git merge {branch_name}").into()),
+            move |repo, _cx| async move {
+                match repo {
+                    RepositoryState::Local(LocalRepositoryState {
+                        backend,
+                        environment,
+                        ..
+                    }) => backend.merge(branch_name, environment).await,
+                    RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                        let response = client
+                            .request(proto::GitMerge {
+                                project_id: project_id.0,
+                                repository_id: id.to_proto(),
+                                branch_name,
+                            })
+                            .await?;
+                        Ok(merge_outcome_from_proto(response))
+                    }
+                }
+            },
+        )
+    }
+
+    pub fn cherry_pick(&mut self, commit: String) -> oneshot::Receiver<Result<MergeOutcome>> {
+        let id = self.id;
+        self.send_job(
+            "cherry_pick",
+            Some(format!("git cherry-pick {commit}").into()),
+            move |repo, _cx| async move {
+                match repo {
+                    RepositoryState::Local(LocalRepositoryState {
+                        backend,
+                        environment,
+                        ..
+                    }) => backend.cherry_pick(commit, environment).await,
+                    RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                        let response = client
+                            .request(proto::GitCherryPick {
+                                project_id: project_id.0,
+                                repository_id: id.to_proto(),
+                                commit,
+                            })
+                            .await?;
+                        Ok(merge_outcome_from_proto(response))
+                    }
+                }
+            },
+        )
+    }
+
+    pub fn abort_merge(&mut self) -> oneshot::Receiver<Result<()>> {
+        let id = self.id;
+        self.send_job(
+            "abort_merge",
+            Some("git merge --abort".into()),
+            move |repo, _cx| async move {
+                match repo {
+                    RepositoryState::Local(LocalRepositoryState {
+                        backend,
+                        environment,
+                        ..
+                    }) => backend.abort_merge(environment).await,
+                    RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                        client
+                            .request(proto::GitAbortMerge {
+                                project_id: project_id.0,
+                                repository_id: id.to_proto(),
+                            })
+                            .await?;
+                        Ok(())
+                    }
+                }
+            },
+        )
+    }
+
+    pub fn squash_commits(
+        &mut self,
+        commits: Vec<String>,
+        message: String,
+    ) -> oneshot::Receiver<Result<()>> {
+        let id = self.id;
+        self.send_job(
+            "squash_commits",
+            Some(format!("git squash {} commits", commits.len()).into()),
+            move |repo, _cx| async move {
+                match repo {
+                    RepositoryState::Local(LocalRepositoryState {
+                        backend,
+                        environment,
+                        ..
+                    }) => backend.squash_commits(commits, message, environment).await,
+                    RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                        client
+                            .request(proto::GitSquashCommits {
+                                project_id: project_id.0,
+                                repository_id: id.to_proto(),
+                                commits,
+                                message,
+                            })
+                            .await?;
+                        Ok(())
+                    }
+                }
+            },
+        )
+    }
+
+    pub fn abortable_merge(&self) -> Option<AbortableMerge> {
+        self.snapshot
+            .merge
+            .merge_heads_by_conflicted_path
+            .values()
+            .find_map(|heads| match heads.as_slice() {
+                [Some(_), ..] => Some(AbortableMerge::Merge),
+                [None, Some(_), ..] => Some(AbortableMerge::CherryPick),
+                _ => None,
+            })
     }
 
     pub fn rename_branch(

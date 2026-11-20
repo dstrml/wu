@@ -8,15 +8,20 @@ mod blame_ui;
 pub mod clone;
 
 use git::{
-    repository::{Branch, CommitDetails, Upstream, UpstreamTracking, UpstreamTrackingStatus},
+    Oid,
+    repository::{
+        Branch, CommitDetails, MergeOutcome, Upstream, UpstreamTracking, UpstreamTrackingStatus,
+    },
     status::{FileStatus, StatusCode, UnmergedStatus, UnmergedStatusCode},
 };
+use git_ui_core::notifications::show_error_toast;
 use gpui::{
     App, ClipboardItem, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     SharedString, Subscription, Task, TaskExt, WeakEntity, Window,
 };
 use i18n::t;
 use menu::{Cancel, Confirm};
+use notifications::status_toast::StatusToast;
 use project::git_store::Repository;
 use project_diff::ProjectDiff;
 use time::OffsetDateTime;
@@ -276,6 +281,14 @@ pub fn init(cx: &mut App) {
             };
             panel.update(cx, |panel, cx| {
                 panel.stash_tracked(action, window, cx);
+            });
+        });
+        workspace.register_action(|workspace, action: &git::AbortMerge, window, cx| {
+            let Some(panel) = workspace.panel::<git_panel::GitPanel>(cx) else {
+                return;
+            };
+            panel.update(cx, |panel, cx| {
+                panel.abort_merge(action, window, cx);
             });
         });
         workspace.register_action(|workspace, action: &git::StashPop, window, cx| {
@@ -882,6 +895,106 @@ fn render_remote_button(
             menu_handle,
         )),
     }
+}
+
+pub(crate) enum MergeSource {
+    Branch(SharedString),
+    Commit(Oid),
+}
+
+pub(crate) fn merge_into_current_branch(
+    source: MergeSource,
+    repository: WeakEntity<Repository>,
+    workspace: WeakEntity<Workspace>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        let receiver = repository.update(cx, |repository, _| match &source {
+            MergeSource::Branch(branch) => repository.merge(branch.to_string()),
+            MergeSource::Commit(sha) => repository.cherry_pick(sha.to_string()),
+        })?;
+        let result = receiver.await?;
+        let Some(workspace) = workspace.upgrade() else {
+            return Ok(());
+        };
+        cx.update(|cx| {
+            let (command, name) = match &source {
+                MergeSource::Branch(branch) => ("merge", branch.clone()),
+                MergeSource::Commit(sha) => ("cherry-pick", sha.display_short().into()),
+            };
+            let is_merge = matches!(source, MergeSource::Branch(_));
+            let (message, needs_attention) = match result {
+                Ok(MergeOutcome::Completed) if is_merge => {
+                    (t!("Merged {branch}", branch = name), false)
+                }
+                Ok(MergeOutcome::Completed) => (t!("Cherry-picked {sha}", sha = name), false),
+                Ok(MergeOutcome::AlreadyUpToDate) => {
+                    (t!("Already up to date with {name}", name = name), false)
+                }
+                Ok(MergeOutcome::StoppedOnConflicts) if is_merge => (
+                    t!(
+                        "Merging {branch} stopped on conflicts. Fix them, then commit.",
+                        branch = name
+                    ),
+                    true,
+                ),
+                Ok(MergeOutcome::StoppedOnConflicts) => (
+                    t!(
+                        "Cherry-picking {sha} stopped on conflicts. Fix them, then commit.",
+                        sha = name
+                    ),
+                    true,
+                ),
+                Ok(MergeOutcome::ReadyToCommit) if is_merge => (
+                    t!(
+                        "Merging {branch} is ready. Review the changes, then commit.",
+                        branch = name
+                    ),
+                    true,
+                ),
+                Ok(MergeOutcome::ReadyToCommit) => (
+                    t!(
+                        "Cherry-picking {sha} is ready. Review the changes, then commit.",
+                        sha = name
+                    ),
+                    true,
+                ),
+                Err(error) => {
+                    show_error_toast(workspace, command, error, cx);
+                    return;
+                }
+            };
+            workspace.update(cx, |workspace, cx| {
+                let workspace_handle = cx.weak_entity();
+                let toast = StatusToast::new(message, cx, |this, _| {
+                    if !needs_attention {
+                        return this.icon(
+                            Icon::new(IconName::GitBranch)
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                        );
+                    }
+                    this.icon(
+                        Icon::new(IconName::Warning)
+                            .size(IconSize::Small)
+                            .color(Color::Warning),
+                    )
+                    .auto_dismiss(false)
+                    .dismiss_button(true)
+                    .action(t!("Open Git Panel"), move |window, cx| {
+                        workspace_handle
+                            .update(cx, |workspace, cx| {
+                                workspace.focus_panel::<GitPanel>(window, cx);
+                            })
+                            .ok();
+                    })
+                });
+                workspace.toggle_status_toast(toast, cx);
+            });
+        });
+        anyhow::Ok(())
+    })
+    .detach_and_log_err(cx);
 }
 
 mod remote_button {

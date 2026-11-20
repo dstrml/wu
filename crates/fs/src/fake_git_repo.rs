@@ -15,8 +15,8 @@ use git::{
         AskPassDelegate, Branch, CommitData, CommitDataReader, CommitDetails, CommitOptions,
         CreateWorktreeTarget, FetchOptions, FileHistoryChangedFileSets, GRAPH_CHUNK_SIZE,
         GitRepository, GitRepositoryCheckpoint, InitialGraphCommitData, LogOrder, LogSource,
-        PushOptions, RefEdit, Remote, RepoPath, ResetMode, SearchCommitArgs, Worktree,
-        commit_hash_search_query,
+        MergeOutcome, PushOptions, RefEdit, Remote, RepoPath, ResetMode, SearchCommitArgs,
+        Worktree, commit_hash_search_query,
     },
     stash::GitStash,
     status::{
@@ -1087,6 +1087,35 @@ impl GitRepository for FakeGitRepository {
             state.branches_requiring_force_delete.remove(&name);
             Ok(())
         })
+    }
+
+    fn merge(
+        &self,
+        _branch: String,
+        _env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>> {
+        unimplemented!()
+    }
+
+    fn cherry_pick(
+        &self,
+        _commit: String,
+        _env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>> {
+        unimplemented!()
+    }
+
+    fn abort_merge(&self, _env: Arc<HashMap<String, String>>) -> BoxFuture<'_, Result<()>> {
+        unimplemented!()
+    }
+
+    fn squash_commits(
+        &self,
+        _commits: Vec<String>,
+        _message: String,
+        _env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<()>> {
+        unimplemented!()
     }
 
     fn blame(

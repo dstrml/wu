@@ -38,7 +38,8 @@ use git::status::{
     DiffStat, DiffTreeType, StageStatus, StatusCode, TrackedStatus, TreeDiff, TreeDiffStatus,
 };
 use git::{
-    Amend, Commit, Signoff, SkipHooks, ToggleStaged, repository::RepoPath, status::FileStatus,
+    AbortMerge, Amend, Commit, Signoff, SkipHooks, ToggleStaged, repository::RepoPath,
+    status::FileStatus,
 };
 use git::{
     ExpandCommitEditor, GenerateCommitMessage, GitHostingProviderRegistry, GitRemote, Refresh,
@@ -63,8 +64,8 @@ use project::git_store::GitAccess;
 use project::{
     Fs, Project, ProjectPath,
     git_store::{
-        CommitDataState, CommitDiff, GitStoreEvent, Repository, RepositoryEvent, RepositoryId,
-        pending_op,
+        AbortableMerge, CommitDataState, CommitDiff, GitStoreEvent, Repository, RepositoryEvent,
+        RepositoryId, pending_op,
     },
     project_settings::{GitPathStyle, ProjectSettings},
 };
@@ -77,7 +78,7 @@ use settings::{
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::future::Future;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 use std::path::Path;
 use std::rc::Rc;
 use std::{sync::Arc, time::Duration};
@@ -302,6 +303,134 @@ impl Render for StashMessageModal {
                     .child(Headline::new(self.kind.title()).size(HeadlineSize::XSmall)),
             )
             .child(div().px_3().pb_3().w_full().child(self.editor.clone()))
+    }
+}
+
+struct SquashCommitsModal {
+    editor: Entity<Editor>,
+    panel: WeakEntity<GitPanel>,
+    repository: WeakEntity<Repository>,
+    commits: Vec<Oid>,
+}
+
+impl SquashCommitsModal {
+    fn new(
+        panel: WeakEntity<GitPanel>,
+        repository: WeakEntity<Repository>,
+        commits: Vec<Oid>,
+        message: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::auto_height(4, 16, window, cx);
+            editor.set_text(message, window, cx);
+            editor
+        });
+        Self {
+            editor,
+            panel,
+            repository,
+            commits,
+        }
+    }
+
+    fn cancel(&mut self, _: &menu::Cancel, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(DismissEvent);
+    }
+
+    fn confirm(
+        &mut self,
+        _: &menu::SecondaryConfirm,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.squash(cx);
+    }
+
+    fn squash(&mut self, cx: &mut Context<Self>) {
+        let message = self.editor.read(cx).text(cx).trim().to_owned();
+        if message.is_empty() {
+            return;
+        }
+        let commits = self.commits.clone();
+        let repository = self.repository.clone();
+        self.panel
+            .update(cx, |panel, cx| {
+                panel.squash_commits(repository, commits, message, cx)
+            })
+            .ok();
+        cx.emit(DismissEvent);
+    }
+}
+
+impl EventEmitter<DismissEvent> for SquashCommitsModal {}
+impl ModalView for SquashCommitsModal {}
+impl Focusable for SquashCommitsModal {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.editor.focus_handle(cx)
+    }
+}
+
+impl Render for SquashCommitsModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focus_handle = self.editor.focus_handle(cx);
+        v_flex()
+            .key_context("SquashCommitsModal")
+            .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::confirm))
+            .elevation_2(cx)
+            .w(rems(34.))
+            .child(
+                h_flex()
+                    .px_3()
+                    .pt_2()
+                    .pb_1()
+                    .w_full()
+                    .gap_1p5()
+                    .child(Icon::new(IconName::GitBranch).size(IconSize::XSmall))
+                    .child(
+                        Headline::new(t!("Squash {count} Commits", count = self.commits.len()))
+                            .size(HeadlineSize::XSmall),
+                    ),
+            )
+            .child(
+                div().px_3().w_full().child(
+                    div()
+                        .p_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().colors().border_variant)
+                        .child(self.editor.clone()),
+                ),
+            )
+            .child(
+                h_flex()
+                    .p_3()
+                    .gap_1()
+                    .justify_end()
+                    .child(
+                        Button::new("cancel-squash", t!("Cancel"))
+                            .key_binding(
+                                KeyBinding::for_action_in(&menu::Cancel, &focus_handle, cx)
+                                    .map(|kb| kb.size(rems_from_px(12_f32))),
+                            )
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                    )
+                    .child(
+                        Button::new("confirm-squash", t!("Squash"))
+                            .style(ButtonStyle::Filled)
+                            .key_binding(
+                                KeyBinding::for_action_in(
+                                    &menu::SecondaryConfirm,
+                                    &focus_handle,
+                                    cx,
+                                )
+                                .map(|kb| kb.size(rems_from_px(12_f32))),
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| this.squash(cx))),
+                    ),
+            )
     }
 }
 
@@ -679,6 +808,7 @@ struct HistoryGraphRow {
     tags: Option<AnyElement>,
     unpushed: Option<AnyElement>,
     is_context_menu_target: bool,
+    is_selected: bool,
 }
 
 /// Drawn on top, since a row border would break the graph lines; the row must be `relative`.
@@ -1379,6 +1509,7 @@ pub struct GitPanel {
     expanded_history_commits: HashMap<Oid, HistoryCommitFiles>,
     collapsed_history_files: HashMap<Oid, Rc<[HistoryFile]>>,
     history_context_menu_commit: Option<Oid>,
+    history_selection: Option<(Oid, Oid)>,
     commit_history: CommitHistory,
     focused_history_entry: Option<usize>,
     history_keyboard_nav: bool,
@@ -1687,6 +1818,7 @@ impl GitPanel {
                 expanded_history_commits: HashMap::default(),
                 collapsed_history_files: HashMap::default(),
                 history_context_menu_commit: None,
+                history_selection: None,
                 commit_history: CommitHistory::Loading,
                 focused_history_entry: None,
                 history_keyboard_nav: false,
@@ -3508,6 +3640,46 @@ impl GitPanel {
 
     pub fn total_staged_count(&self) -> usize {
         self.tracked_staged_count + self.new_staged_count + self.conflicted_staged_count
+    }
+
+    pub fn abort_merge(&mut self, _: &AbortMerge, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(active_repository) = self.active_repository.clone() else {
+            return;
+        };
+        let (message, confirm_text) = match active_repository.read(cx).abortable_merge() {
+            Some(AbortableMerge::CherryPick) => (
+                t!("Abort the cherry-pick? Your conflict fixes will be lost."),
+                t!("Abort Cherry-pick"),
+            ),
+            _ => (
+                t!("Abort the merge? Your conflict fixes will be lost."),
+                t!("Abort Merge"),
+            ),
+        };
+        let prompt = window.prompt(
+            PromptLevel::Warning,
+            &message,
+            None,
+            &[
+                PromptButton::new(confirm_text),
+                PromptButton::cancel(t!("Cancel")),
+            ],
+            cx,
+        );
+        cx.spawn(async move |this, cx| {
+            if prompt.await != Ok(0) {
+                return Ok(());
+            }
+            let abort = active_repository.update(cx, |repo, _| repo.abort_merge());
+            let result = abort.await?;
+            this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.show_error_toast("merge --abort", error, cx);
+                }
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
     }
 
     pub fn stash_pop(&mut self, _: &StashPop, _window: &mut Window, cx: &mut Context<Self>) {
@@ -7462,6 +7634,126 @@ impl GitPanel {
         cx.notify();
     }
 
+    fn history_selection_range(&self) -> Option<RangeInclusive<usize>> {
+        let (anchor, end) = self.history_selection?;
+        let anchor = self.history_commit_index(anchor)?;
+        let end = self.history_commit_index(end)?;
+        (anchor != end).then(|| anchor.min(end)..=anchor.max(end))
+    }
+
+    fn deploy_squash_context_menu(
+        &mut self,
+        position: Point<Pixels>,
+        selection: RangeInclusive<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(entries) = self.commit_history_entries().get(selection) else {
+            return;
+        };
+        let commits = entries.iter().map(|entry| entry.sha).collect::<Vec<_>>();
+        let count = commits.len();
+        let panel = cx.entity().downgrade();
+        let focus_handle = self.focus_handle.clone();
+        let context_menu = ContextMenu::build(window, cx, move |context_menu, _, _| {
+            context_menu
+                .context(focus_handle)
+                .header(t!("{count} Commits", count = count))
+                .entry(t!("Squash Into One Commit…"), None, move |window, cx| {
+                    panel
+                        .update(cx, |panel, cx| {
+                            panel.prompt_for_squash(commits.clone(), window, cx)
+                        })
+                        .ok();
+                })
+        });
+        self.history_context_menu_commit = None;
+        self.set_context_menu(context_menu, position, None, window, cx);
+    }
+
+    fn prompt_for_squash(
+        &mut self,
+        commits: Vec<Oid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(repository) = self.active_repository.clone() else {
+            return;
+        };
+        let panel = cx.entity().downgrade();
+        let workspace = self.workspace.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let mut messages = Vec::with_capacity(commits.len());
+            for sha in commits.iter().rev() {
+                let details = repository
+                    .update(cx, |repository, _| repository.show(sha.to_string()))
+                    .await??;
+                messages.push(details.message.trim().to_string());
+            }
+            let message = messages.join("\n\n");
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    SquashCommitsModal::new(
+                        panel,
+                        repository.downgrade(),
+                        commits,
+                        message,
+                        window,
+                        cx,
+                    )
+                });
+            })?;
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn squash_commits(
+        &mut self,
+        repository: WeakEntity<Repository>,
+        commits: Vec<Oid>,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(repository) = repository.upgrade() else {
+            return;
+        };
+        let count = commits.len();
+        let commits = commits.iter().map(ToString::to_string).collect();
+        let squash = repository.update(cx, |repository, _| {
+            repository.squash_commits(commits, message)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = squash.await?;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.history_selection = None;
+                        if let Some(workspace) = this.workspace.upgrade() {
+                            workspace.update(cx, |workspace, cx| {
+                                let toast = StatusToast::new(
+                                    t!("Squashed {count} commits", count = count),
+                                    cx,
+                                    |this, _| {
+                                        this.icon(
+                                            Icon::new(IconName::GitBranch)
+                                                .size(IconSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                    },
+                                );
+                                workspace.toggle_status_toast(toast, cx);
+                            });
+                        }
+                    }
+                    Err(error) => this.show_error_toast("squash", error, cx),
+                }
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
     fn deploy_history_context_menu(
         &mut self,
         position: Point<Pixels>,
@@ -7470,6 +7762,14 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(selection) = self
+            .history_selection_range()
+            .filter(|selection| selection.contains(&commit))
+        {
+            self.deploy_squash_context_menu(position, selection, window, cx);
+            return;
+        }
+        self.history_selection = None;
         let Some(commit) = self.commit_history_entries().get(commit).cloned() else {
             return;
         };
@@ -7761,6 +8061,9 @@ impl GitPanel {
         let has_context_menu = self.context_menu.is_some();
         let is_context_menu_target =
             self.context_menu.is_some() && self.history_context_menu_commit == Some(entry.sha);
+        let is_selected = self
+            .history_selection_range()
+            .is_some_and(|selection| selection.contains(&commit));
         let is_expanded = self.expanded_history_commits.contains_key(&entry.sha);
         let sha = entry.sha;
 
@@ -7867,6 +8170,7 @@ impl GitPanel {
                     tags: tags.map(IntoElement::into_any_element),
                     unpushed: unpushed.map(IntoElement::into_any_element),
                     is_context_menu_target,
+                    is_selected,
                 },
                 window,
                 cx,
@@ -7895,6 +8199,9 @@ impl GitPanel {
                     this.border_color(cx.theme().colors().panel_focused_border)
                 })
                 .hover(|s| s.bg(cx.theme().colors().element_hover))
+                .when(is_selected, |this| {
+                    this.bg(cx.theme().colors().element_selected)
+                })
                 .when(is_context_menu_target, |this| {
                     this.bg(cx.theme().colors().element_hover)
                 })
@@ -7961,7 +8268,21 @@ impl GitPanel {
         })
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _, _, cx| {
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                this.history_selection = if event.modifiers.shift {
+                    let anchor = this
+                        .history_selection
+                        .map(|(anchor, _)| anchor)
+                        .or_else(|| {
+                            let HistoryRow::Commit(focused) = this.focused_history_row()? else {
+                                return None;
+                            };
+                            Some(this.commit_history_entries().get(focused)?.sha)
+                        });
+                    Some((anchor.unwrap_or(sha), sha))
+                } else {
+                    None
+                };
                 this.focused_history_entry = Some(row_index);
                 this.history_keyboard_nav = false;
                 cx.notify();
@@ -7975,7 +8296,7 @@ impl GitPanel {
             }),
         )
         .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-            if event.click_count() > 1 {
+            if event.click_count() > 1 || event.modifiers().shift {
                 return;
             }
             if let Some(commit) = this.history_commit_index(sha) {
@@ -8039,6 +8360,7 @@ impl GitPanel {
             tags,
             unpushed,
             is_context_menu_target,
+            is_selected,
         } = row;
         let graph = self.history_graph.clone();
         let palette = GraphPalette::new(cx);
@@ -8109,6 +8431,9 @@ impl GitPanel {
             .h(row_height)
             .overflow_hidden()
             .hover(|s| s.bg(cx.theme().colors().element_hover))
+            .when(is_selected, |this| {
+                this.bg(cx.theme().colors().element_selected)
+            })
             .when(is_context_menu_target, |this| {
                 this.bg(cx.theme().colors().element_hover)
             })
@@ -8632,6 +8957,9 @@ impl GitPanel {
             .entries
             .get(ix + 1)
             .is_some_and(GitListEntry::is_selectable);
+        let abortable_merge = (section == Section::Conflict)
+            .then(|| self.active_repository.as_ref()?.read(cx).abortable_merge())
+            .flatten();
 
         h_flex()
             .id(id)
@@ -8664,47 +8992,68 @@ impl GitPanel {
                             .size(LabelSize::Small),
                     ),
             )
-            .child(if section_is_empty {
-                gpui::Empty.into_any_element()
-            } else {
-                let checkbox = Checkbox::new(checkbox_id, toggle_state)
-                    .disabled(!has_write_access || all_conflicts_resolved)
-                    .fill()
-                    .elevation(ElevationIndex::Surface)
-                    .on_click(move |_, window, cx| {
-                        cx.stop_propagation();
-                        if !has_write_access || all_conflicts_resolved {
-                            return;
-                        }
+            .child(
+                h_flex()
+                    .gap_1()
+                    .when_some(abortable_merge, |this, abortable_merge| {
+                        let label = match abortable_merge {
+                            AbortableMerge::Merge => t!("Abort Merge"),
+                            AbortableMerge::CherryPick => t!("Abort Cherry-pick"),
+                        };
+                        this.child(
+                            Button::new("abort-merge", label)
+                                .label_size(LabelSize::Small)
+                                .disabled(!has_write_access)
+                                .on_click(|_, window, cx| {
+                                    cx.stop_propagation();
+                                    window.dispatch_action(AbortMerge.boxed_clone(), cx);
+                                }),
+                        )
+                    })
+                    .child(if section_is_empty {
+                        gpui::Empty.into_any_element()
+                    } else {
+                        let checkbox = Checkbox::new(checkbox_id, toggle_state)
+                            .disabled(!has_write_access || all_conflicts_resolved)
+                            .fill()
+                            .elevation(ElevationIndex::Surface)
+                            .on_click(move |_, window, cx| {
+                                cx.stop_propagation();
+                                if !has_write_access || all_conflicts_resolved {
+                                    return;
+                                }
 
-                        checkbox_weak
-                            .update(cx, |this, cx| {
-                                this.toggle_staged_for_entry(
-                                    &GitListEntry::Header(GitHeaderEntry { header: section }),
-                                    stage_intent,
-                                    window,
-                                    cx,
-                                );
-                            })
-                            .ok();
-                    });
-                let tooltip_label = if all_conflicts_resolved {
-                    Some(t!("All conflicts marked as resolved"))
-                } else {
-                    match stage_intent {
-                        StageIntent::Stage => Some(t!("Stage All")),
-                        StageIntent::Unstage => Some(t!("Unstage All")),
-                        StageIntent::Toggle => None,
-                    }
-                };
-                if let Some(label) = tooltip_label {
-                    checkbox
-                        .tooltip(move |_window, cx| Tooltip::simple(label.clone(), cx))
-                        .into_any_element()
-                } else {
-                    checkbox.into_any_element()
-                }
-            })
+                                checkbox_weak
+                                    .update(cx, |this, cx| {
+                                        this.toggle_staged_for_entry(
+                                            &GitListEntry::Header(GitHeaderEntry {
+                                                header: section,
+                                            }),
+                                            stage_intent,
+                                            window,
+                                            cx,
+                                        );
+                                    })
+                                    .ok();
+                            });
+                        let tooltip_label = if all_conflicts_resolved {
+                            Some(t!("All conflicts marked as resolved"))
+                        } else {
+                            match stage_intent {
+                                StageIntent::Stage => Some(t!("Stage All")),
+                                StageIntent::Unstage => Some(t!("Unstage All")),
+                                StageIntent::Toggle => None,
+                            }
+                        };
+                        if let Some(label) = tooltip_label {
+                            checkbox
+                                .tooltip(move |_window, cx| Tooltip::simple(label.clone(), cx))
+                                .into_any_element()
+                        } else {
+                            checkbox.into_any_element()
+                        }
+                    }),
+            )
             .on_click(move |_, window, cx| {
                 weak.update(cx, |this, cx| {
                     this.toggle_section_collapsed(section, window, cx);

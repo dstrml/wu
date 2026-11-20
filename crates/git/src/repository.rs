@@ -3,7 +3,9 @@ use crate::stash::GitStash;
 use crate::status::{
     DiffTreeType, FileStatus, GitStatus, StatusCode, TrackedStatus, TreeDiff, TreeDiffStatus,
 };
-use crate::{Oid, RunHook, SHA256_HEX_LENGTH, SHORT_SHA_LENGTH};
+use crate::{
+    Oid, REBASE_APPLY_DIR, REBASE_MERGE_DIR, RunHook, SHA256_HEX_LENGTH, SHORT_SHA_LENGTH,
+};
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_channel::Sender;
 use collections::HashMap;
@@ -663,6 +665,14 @@ pub enum ResetMode {
     Mixed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeOutcome {
+    Completed,
+    AlreadyUpToDate,
+    StoppedOnConflicts,
+    ReadyToCommit,
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum FetchOptions {
     All,
@@ -863,6 +873,28 @@ pub trait GitRepository: Send + Sync {
         is_remote: bool,
         name: String,
         force: bool,
+    ) -> BoxFuture<'_, Result<()>>;
+
+    fn merge(
+        &self,
+        branch: String,
+        env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>>;
+
+    fn cherry_pick(
+        &self,
+        commit: String,
+        env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>>;
+
+    fn abort_merge(&self, env: Arc<HashMap<String, String>>) -> BoxFuture<'_, Result<()>>;
+
+    /// `commits` are newest first and must be next to each other on the current branch.
+    fn squash_commits(
+        &self,
+        commits: Vec<String>,
+        message: String,
+        env: Arc<HashMap<String, String>>,
     ) -> BoxFuture<'_, Result<()>>;
 
     fn worktrees(&self) -> BoxFuture<'_, Result<Vec<Worktree>>>;
@@ -1301,6 +1333,77 @@ impl RealGitRepository {
         self.working_directory
             .clone()
             .unwrap_or_else(|| self.git_dir.clone())
+    }
+
+    fn run_merge_command(
+        &self,
+        args: Vec<String>,
+        env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>> {
+        let git = self.git_binary_in_worktree();
+        let git_dir = self.path();
+        self.executor
+            .spawn(async move {
+                let git = git?;
+                anyhow::ensure!(
+                    !operation_in_progress(&git_dir),
+                    "Finish or abort the merge, cherry-pick or rebase in progress first"
+                );
+                anyhow::ensure!(
+                    !has_conflicted_paths(&git).await?,
+                    "Resolve the conflicted files first"
+                );
+                if let [subcommand, commit] = &args[..]
+                    && subcommand == "cherry-pick"
+                    && git
+                        .run(&["merge-base", "--is-ancestor", commit, "HEAD"])
+                        .await
+                        .is_ok()
+                {
+                    bail!("This commit is already on the current branch");
+                }
+                let head_before = git.run(&["rev-parse", "HEAD"]).await.ok();
+
+                let output = git.build_command(&args).envs(env.iter()).output().await?;
+                if output.status.success() {
+                    if operation_in_progress(&git_dir) {
+                        return Ok(MergeOutcome::ReadyToCommit);
+                    }
+                    let head_after = git.run(&["rev-parse", "HEAD"]).await.ok();
+                    return Ok(if head_after == head_before {
+                        MergeOutcome::AlreadyUpToDate
+                    } else {
+                        MergeOutcome::Completed
+                    });
+                }
+                if has_conflicted_paths(&git).await? {
+                    return Ok(MergeOutcome::StoppedOnConflicts);
+                }
+                if operation_in_progress(&git_dir) {
+                    let nothing_staged = git
+                        .run(&["diff", "--cached", "--quiet", "HEAD"])
+                        .await
+                        .is_ok();
+                    if !nothing_staged {
+                        return Ok(MergeOutcome::ReadyToCommit);
+                    }
+                    abort_merge_in_progress(&git, &git_dir, &env).await?;
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let message = if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                };
+                let message = message
+                    .lines()
+                    .filter(|line| !line.starts_with("hint:"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                bail!("{}", message.trim())
+            })
+            .boxed()
     }
 
     fn git_binary_in_worktree(&self) -> Result<GitBinary> {
@@ -2485,6 +2588,50 @@ impl GitRepository for RealGitRepository {
                 git_binary.run(&["branch", flag, &name]).await?;
                 anyhow::Ok(())
             })
+            .boxed()
+    }
+
+    fn merge(
+        &self,
+        branch: String,
+        env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>> {
+        self.run_merge_command(vec!["merge".into(), "--no-edit".into(), branch], env)
+    }
+
+    fn cherry_pick(
+        &self,
+        commit: String,
+        env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<MergeOutcome>> {
+        self.run_merge_command(vec!["cherry-pick".into(), commit], env)
+    }
+
+    fn abort_merge(&self, env: Arc<HashMap<String, String>>) -> BoxFuture<'_, Result<()>> {
+        let git = self.git_binary_in_worktree();
+        let git_dir = self.path();
+        self.executor
+            .spawn(async move {
+                let git = git?;
+                anyhow::ensure!(
+                    abort_merge_in_progress(&git, &git_dir, &env).await?,
+                    "No merge or cherry-pick is in progress"
+                );
+                Ok(())
+            })
+            .boxed()
+    }
+
+    fn squash_commits(
+        &self,
+        commits: Vec<String>,
+        message: String,
+        env: Arc<HashMap<String, String>>,
+    ) -> BoxFuture<'_, Result<()>> {
+        let git = self.git_binary_in_worktree();
+        let git_dir = self.path();
+        self.executor
+            .spawn(async move { squash_commits(&git?, &git_dir, commits, message, &env).await })
             .boxed()
     }
 
@@ -4218,6 +4365,222 @@ struct GitBinaryCommandError {
     stdout: String,
     stderr: String,
     status: ExitStatus,
+}
+
+async fn has_conflicted_paths(git: &GitBinary) -> Result<bool> {
+    let paths = git.run(&["diff", "--name-only", "--diff-filter=U"]).await?;
+    Ok(!paths.is_empty())
+}
+
+fn operation_in_progress(git_dir: &Path) -> bool {
+    [
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "sequencer",
+        REBASE_MERGE_DIR,
+        REBASE_APPLY_DIR,
+    ]
+    .iter()
+    .any(|name| git_dir.join(name).exists())
+}
+
+async fn squash_commits(
+    git: &GitBinary,
+    git_dir: &Path,
+    commits: Vec<String>,
+    message: String,
+    env: &HashMap<String, String>,
+) -> Result<()> {
+    anyhow::ensure!(commits.len() >= 2, "Select at least two commits to squash");
+    let message = message.trim().to_string();
+    anyhow::ensure!(!message.is_empty(), "The commit message can't be empty");
+    anyhow::ensure!(
+        !operation_in_progress(git_dir),
+        "Finish or abort the merge, cherry-pick or rebase in progress first"
+    );
+
+    let mut selected = Vec::with_capacity(commits.len());
+    for commit in commits.iter().rev() {
+        selected.push(
+            git.run(&["rev-parse", "--verify", &format!("{commit}^{{commit}}")])
+                .await?,
+        );
+    }
+    let oldest = &selected[0];
+
+    let pushed_to = git
+        .run(&[
+            "for-each-ref",
+            "--contains",
+            oldest,
+            "--format=%(refname:short)",
+            "refs/remotes",
+        ])
+        .await?;
+    if let Some(remote_branch) = pushed_to.lines().next() {
+        bail!(
+            "These commits are already on {remote_branch}. Squashing them would need a force push."
+        );
+    }
+
+    let oldest_parents = git
+        .run(&["rev-list", "--parents", "-n", "1", oldest])
+        .await?;
+    let oldest_parents = oldest_parents
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>();
+    let base = match oldest_parents[..] {
+        [] if git.run(&["rev-parse", "--is-shallow-repository"]).await? == "true" => {
+            bail!(
+                "This clone doesn't have the full history. Fetch it first to squash these commits."
+            )
+        }
+        [] => None,
+        [parent] => Some(parent.to_string()),
+        _ => bail!("Merge commits can't be squashed"),
+    };
+    let range = match &base {
+        Some(base) => format!("{base}..HEAD"),
+        None => "HEAD".to_string(),
+    };
+    let mut chain = Vec::new();
+    let mut expected_parent = base.clone();
+    for line in git
+        .run(&["rev-list", "--parents", "--reverse", &range])
+        .await?
+        .lines()
+    {
+        let mut shas = line.split_whitespace().map(str::to_string);
+        let Some(sha) = shas.next() else {
+            continue;
+        };
+        let parents = shas.collect::<Vec<_>>();
+        anyhow::ensure!(
+            parents.len() <= 1,
+            "There's a merge commit after these commits, so they can't be squashed"
+        );
+        anyhow::ensure!(
+            parents.first() == expected_parent.as_ref(),
+            "Only commits on the current branch can be squashed"
+        );
+        expected_parent = Some(sha.clone());
+        chain.push(sha);
+    }
+    anyhow::ensure!(
+        chain.starts_with(&selected),
+        "Only commits next to each other on the current branch can be squashed"
+    );
+
+    let head = chain.last().context("The current branch has no commits")?;
+    let sign = git
+        .run(&["config", "--bool", "commit.gpgsign"])
+        .await
+        .is_ok_and(|value| value == "true");
+    let mut new_head = commit_tree(
+        git,
+        env,
+        &selected[selected.len() - 1],
+        base.as_deref(),
+        oldest,
+        &message,
+        sign,
+    )
+    .await?;
+    for commit in &chain[selected.len()..] {
+        let message = git.run_raw(&["log", "-1", "--format=%B", commit]).await?;
+        new_head = commit_tree(
+            git,
+            env,
+            commit,
+            Some(&new_head),
+            commit,
+            message.trim_end(),
+            sign,
+        )
+        .await?;
+    }
+    git.run(&[
+        "update-ref",
+        "-m",
+        &format!("squash: combine {} commits", selected.len()),
+        "HEAD",
+        &new_head,
+        head,
+    ])
+    .await?;
+    Ok(())
+}
+
+async fn commit_tree(
+    git: &GitBinary,
+    env: &HashMap<String, String>,
+    files_from: &str,
+    parent: Option<&str>,
+    author_from: &str,
+    message: &str,
+    sign: bool,
+) -> Result<String> {
+    let author = git
+        .run(&[
+            "log",
+            "-1",
+            "--format=%an%x00%ae%x00%ad",
+            "--date=raw",
+            author_from,
+        ])
+        .await?;
+    let [name, email, date] = author.split('\0').collect::<Vec<_>>()[..] else {
+        bail!("Couldn't read the author of {author_from}");
+    };
+    let mut args = vec!["commit-tree".to_string(), format!("{files_from}^{{tree}}")];
+    if let Some(parent) = parent {
+        args.extend(["-p".to_string(), parent.to_string()]);
+    }
+    if sign {
+        args.push("-S".to_string());
+    }
+    args.extend(["-m".to_string(), message.to_string()]);
+    let output = git
+        .build_command(&args)
+        .envs(env.iter())
+        .env("GIT_AUTHOR_NAME", name)
+        .env("GIT_AUTHOR_EMAIL", email)
+        .env("GIT_AUTHOR_DATE", date)
+        .output()
+        .await?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Failed to write the squashed commit:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+async fn abort_merge_in_progress(
+    git: &GitBinary,
+    git_dir: &Path,
+    env: &HashMap<String, String>,
+) -> Result<bool> {
+    let subcommand = if git_dir.join("MERGE_HEAD").exists() {
+        "merge"
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        "cherry-pick"
+    } else {
+        return Ok(false);
+    };
+    let output = git
+        .build_command(&[subcommand, "--abort"])
+        .envs(env.iter())
+        .output()
+        .await?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Failed to abort {subcommand}:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(true)
 }
 
 async fn run_git_command(
@@ -5959,6 +6322,156 @@ mod tests {
         //         .ok(),
         //     None
         // );
+    }
+
+    #[gpui::test]
+    async fn test_merge_cherry_pick_and_abort(cx: &mut TestAppContext) {
+        disable_git_global_config();
+        cx.executor().allow_parking();
+
+        let repo_dir = tempfile::tempdir().unwrap();
+        let dir = repo_dir.path();
+        git_init_repo(dir);
+        let commit_file = |name: &str, contents: &str| {
+            fs::write(dir.join(name), contents).unwrap();
+            git_command(dir, ["add", name]);
+            git_command(dir, ["commit", "-m", name]);
+        };
+        commit_file("shared", "base\n");
+        git_command(dir, ["switch", "-c", "feature"]);
+        commit_file("shared", "feature\n");
+        commit_file("extra", "extra\n");
+        let extra_commit = git_command_output(dir, ["rev-parse", "HEAD"])
+            .trim()
+            .to_string();
+        git_command(dir, ["switch", "-c", "clean", "main"]);
+        commit_file("clean", "clean\n");
+        git_command(dir, ["switch", "main"]);
+        commit_file("shared", "main\n");
+
+        let repo =
+            RealGitRepository::new(&dir.join(".git"), None, Some("git".into()), cx.executor())
+                .unwrap();
+        let env = Arc::new(test_commit_envs());
+
+        let outcome = repo.cherry_pick(extra_commit.clone(), env.clone()).await;
+        assert_eq!(outcome.unwrap(), MergeOutcome::Completed);
+        assert_eq!(fs::read_to_string(dir.join("extra")).unwrap(), "extra\n");
+
+        repo.cherry_pick(extra_commit.clone(), env.clone())
+            .await
+            .expect_err("picking a commit whose changes are already applied should fail");
+        assert!(!dir.join(".git/CHERRY_PICK_HEAD").exists());
+        repo.cherry_pick("HEAD~1".into(), env.clone())
+            .await
+            .expect_err("picking a commit already on the branch should fail");
+
+        let outcome = repo.merge("clean".into(), env.clone()).await;
+        assert_eq!(outcome.unwrap(), MergeOutcome::Completed);
+        assert_eq!(fs::read_to_string(dir.join("clean")).unwrap(), "clean\n");
+        let outcome = repo.merge("clean".into(), env.clone()).await;
+        assert_eq!(outcome.unwrap(), MergeOutcome::AlreadyUpToDate);
+
+        let outcome = repo.merge("feature".into(), env.clone()).await;
+        assert_eq!(outcome.unwrap(), MergeOutcome::StoppedOnConflicts);
+        assert!(dir.join(".git/MERGE_HEAD").exists());
+
+        fs::write(dir.join("shared"), "resolved\n").unwrap();
+        git_command(dir, ["add", "shared"]);
+        repo.cherry_pick(extra_commit, env.clone())
+            .await
+            .expect_err("a merge in progress should block cherry-picking");
+        repo.merge("clean".into(), env.clone())
+            .await
+            .expect_err("a merge in progress should block merging");
+        assert!(dir.join(".git/MERGE_HEAD").exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("shared")).unwrap(),
+            "resolved\n"
+        );
+
+        repo.abort_merge(env.clone()).await.unwrap();
+        assert!(!dir.join(".git/MERGE_HEAD").exists());
+        assert_eq!(fs::read_to_string(dir.join("shared")).unwrap(), "main\n");
+        repo.abort_merge(env.clone())
+            .await
+            .expect_err("aborting with nothing in progress should fail");
+
+        git_command(dir, ["switch", "-c", "late", "main~3"]);
+        commit_file("late", "late\n");
+        git_command(dir, ["switch", "main"]);
+        git_command(dir, ["config", "branch.main.mergeOptions", "--no-commit"]);
+        let outcome = repo.merge("late".into(), env.clone()).await;
+        assert_eq!(outcome.unwrap(), MergeOutcome::ReadyToCommit);
+        assert!(dir.join(".git/MERGE_HEAD").exists());
+        repo.abort_merge(env).await.unwrap();
+    }
+
+    #[gpui::test]
+    async fn test_squash_commits(cx: &mut TestAppContext) {
+        disable_git_global_config();
+        cx.executor().allow_parking();
+
+        let repo_dir = tempfile::tempdir().unwrap();
+        let dir = repo_dir.path();
+        git_init_repo(dir);
+        let commit_file = |name: &str, contents: &str, message: &str| {
+            fs::write(dir.join(name), contents).unwrap();
+            git_command(dir, ["add", name]);
+            git_command(dir, ["commit", "-m", message]);
+        };
+        let rev = |revision: &str| {
+            git_command_output(dir, ["rev-parse", revision])
+                .trim()
+                .to_string()
+        };
+        commit_file("a", "1", "first");
+        commit_file("a", "2", "second");
+        commit_file("b", "1", "third");
+        commit_file("a", "3", "fourth");
+        let head_tree = rev("HEAD^{tree}");
+        fs::write(dir.join("a"), "uncommitted").unwrap();
+
+        let repo =
+            RealGitRepository::new(&dir.join(".git"), None, Some("git".into()), cx.executor())
+                .unwrap();
+        let env = Arc::new(test_commit_envs());
+
+        repo.squash_commits(vec![rev("HEAD"), rev("HEAD~2")], "x".into(), env.clone())
+            .await
+            .expect_err("commits that aren't next to each other can't be squashed");
+
+        repo.squash_commits(
+            vec![rev("HEAD~1"), rev("HEAD~2")],
+            "second and third".into(),
+            env.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            git_command_output(dir, ["rev-list", "--count", "HEAD"]).trim(),
+            "3"
+        );
+        assert_eq!(rev("HEAD^{tree}"), head_tree);
+        let subjects = git_command_output(dir, ["log", "--format=%s"]);
+        assert_eq!(
+            subjects.lines().collect::<Vec<_>>(),
+            ["fourth", "second and third", "first"]
+        );
+        assert_eq!(fs::read_to_string(dir.join("a")).unwrap(), "uncommitted");
+
+        git_command(dir, ["update-ref", "refs/remotes/origin/main", "HEAD~1"]);
+        repo.squash_commits(vec![rev("HEAD"), rev("HEAD~1")], "x".into(), env.clone())
+            .await
+            .expect_err("pushed commits can't be squashed");
+        git_command(dir, ["update-ref", "-d", "refs/remotes/origin/main"]);
+
+        repo.squash_commits(vec![rev("HEAD~1"), rev("HEAD~2")], "root".into(), env)
+            .await
+            .unwrap();
+        let subjects = git_command_output(dir, ["log", "--format=%s"]);
+        assert_eq!(subjects.lines().collect::<Vec<_>>(), ["fourth", "root"]);
+        assert_eq!(rev("HEAD^{tree}"), head_tree);
     }
 
     #[cfg(unix)]

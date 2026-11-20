@@ -234,6 +234,40 @@ message GitDeleteBranch {
   bool force = 5;
 }
 
+message GitMerge {
+  uint64 project_id = 1;
+  uint64 repository_id = 2;
+  string branch_name = 3;
+}
+
+message GitCherryPick {
+  uint64 project_id = 1;
+  uint64 repository_id = 2;
+  string commit = 3;
+}
+
+message GitMergeResponse {
+  enum Outcome {
+    COMPLETED = 0;
+    ALREADY_UP_TO_DATE = 1;
+    STOPPED_ON_CONFLICTS = 2;
+    READY_TO_COMMIT = 3;
+  }
+  Outcome outcome = 1;
+}
+
+message GitAbortMerge {
+  uint64 project_id = 1;
+  uint64 repository_id = 2;
+}
+
+message GitSquashCommits {
+  uint64 project_id = 1;
+  uint64 repository_id = 2;
+  repeated string commits = 3;
+  string message = 4;
+}
+
 message GitDiff {
   uint64 project_id = 1;
   reserved 2;

@@ -409,7 +409,13 @@ message Envelope {
     GetOutgoingCallsResponse get_outgoing_calls_response = 487;
     LanguageServerShowDocumentRequest language_server_show_document_request = 490;
     ExecuteLspCommand execute_lsp_command = 491;
-    ExecuteLspCommandResponse execute_lsp_command_response = 492; // current max
+    ExecuteLspCommandResponse execute_lsp_command_response = 492;
+
+    GitMerge git_merge = 493;
+    GitCherryPick git_cherry_pick = 494;
+    GitMergeResponse git_merge_response = 495;
+    GitAbortMerge git_abort_merge = 496;
+    GitSquashCommits git_squash_commits = 497; // current max
   }
 
   reserved 87 to 88;

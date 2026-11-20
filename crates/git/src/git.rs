@@ -97,6 +97,8 @@ actions!(
         TrashUntrackedFiles,
         /// Undoes the last commit, keeping changes in the working directory.
         Uncommit,
+        /// Aborts the merge or cherry-pick that stopped on conflicts.
+        AbortMerge,
         /// Pushes commits to the remote repository.
         Push,
         /// Pushes commits to a specific remote branch.
