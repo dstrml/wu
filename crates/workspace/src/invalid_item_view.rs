@@ -1,15 +1,19 @@
 use std::{path::Path, sync::Arc};
 
-use gpui::{EventEmitter, FocusHandle, Focusable};
+use gpui::{AnyElement, EventEmitter, FocusHandle, Focusable};
 use i18n::t;
 use ui::{
     App, Button, ButtonCommon, ButtonStyle, Clickable, Context, FluentBuilder, InteractiveElement,
     KeyBinding, Label, LabelCommon, LabelSize, ParentElement, Render, SharedString, Styled as _,
     Window, h_flex, v_flex,
 };
+use util::paths::PathExt as _;
 use wu_actions::workspace::OpenWithSystem;
 
-use crate::Item;
+use crate::{
+    Item,
+    item::{TabContentParams, file_tab_title},
+};
 
 /// A view to display when a certain buffer/image/other item fails to open.
 #[derive(Debug)]
@@ -44,6 +48,16 @@ impl InvalidItemView {
 
 impl Item for InvalidItemView {
     type Event = ();
+
+    fn tab_content(&self, params: TabContentParams, _: &Window, cx: &App) -> AnyElement {
+        let title = self.tab_content_text(params.detail.unwrap_or_default(), cx);
+        file_tab_title(&title, params.text_color(), &params)
+    }
+
+    fn tab_tooltip_text(&self, _: &App) -> Option<SharedString> {
+        let path = self.abs_path.compact();
+        Some(path.to_string_lossy().into_owned().into())
+    }
 
     fn tab_content_text(&self, mut detail: usize, _: &App) -> SharedString {
         // Ensure we always render at least the filename.

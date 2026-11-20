@@ -588,11 +588,8 @@ impl Item for ImageView {
             params.text_color()
         };
 
-        Label::new(self.tab_content_text(params.detail.unwrap_or_default(), cx))
-            .single_line()
-            .color(label_color)
-            .when(params.preview, |this| this.italic())
-            .into_any_element()
+        let title = self.tab_content_text(params.detail.unwrap_or_default(), cx);
+        workspace::item::file_tab_title(&title, label_color, &params)
     }
 
     fn tab_content_text(&self, _: usize, cx: &App) -> SharedString {

@@ -27,7 +27,10 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use ui::{Color, Icon, IntoElement, Label, LabelCommon};
+use ui::{
+    Color, FluentBuilder as _, Icon, IntoElement, Label, LabelCommon, ParentElement as _,
+    Styled as _, h_flex,
+};
 use util::ResultExt;
 
 #[derive(Clone, Copy, Debug)]
@@ -118,6 +121,30 @@ pub enum ItemEvent {
     UpdateTab,
     UpdateBreadcrumbs,
     Edit,
+}
+
+pub const MAX_TAB_TITLE_LEN: usize = 24;
+
+pub fn file_tab_title(title: &str, color: Color, params: &TabContentParams) -> AnyElement {
+    let label = if params.truncate_title_middle {
+        Label::new(title.to_string()).truncate_middle().flex_1()
+    } else {
+        Label::new(util::truncate_and_trailoff(
+            title,
+            params.max_title_len.unwrap_or(MAX_TAB_TITLE_LEN),
+        ))
+    };
+    h_flex()
+        .when(params.truncate_title_middle, |this| {
+            this.w_full().min_w_0().overflow_hidden()
+        })
+        .child(
+            label
+                .single_line()
+                .color(color)
+                .when(params.preview, |this| this.italic()),
+        )
+        .into_any_element()
 }
 
 #[derive(Clone, Copy, Default, Debug)]

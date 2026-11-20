@@ -6,9 +6,10 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 - Support git ops like cherry-pick, merge, and squash.
 - Add tree graph to Git panel's History.
-- Support Mermaid diagrams in Markdown preview.
-- Speed up startup when it reopens long agent chats.
-- Fix terminal on Windows not picking new env vars without Wu restart.
+- Support Mermaid diagrams in markdown preview.
+- Faster startup when reopening long agent chats.
+- Fix long file names stretching PDF and image tabs.
+- Fix terminal not picking up new env vars without Wu restart on Windows.
 - Show "Open with Wu" in context menu on Windows 11 when the classic Windows 10 menu is enabled.
 - Respect the system's dark or light mode in the Windows installer.
 
