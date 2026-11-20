@@ -84,6 +84,7 @@
   "Delete": "删除",
   "Delete Branch": "删除分支",
   "Description": "描述",
+  "Detailed": "详细",
   "Detected dubious ownership in repository at {path}. This happens when the .git/ directory is not owned by the current user. If you want to learn more about safe directories, visit git's documentation.": "检测到 {path} 处的仓库所有权可疑。当 .git/ 目录不属于当前用户时会出现这种情况。如需进一步了解安全目录，请查看 Git 文档。",
   "Diff (1 file)": "差异（1 个文件）",
   "Diff ({count} files)": "差异（{count} 个文件）",

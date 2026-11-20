@@ -5,11 +5,11 @@ All notable user-facing changes to Wu are listed here, newest first.
 ## Unreleased
 
 - Support git ops like cherry-pick, merge, and squash.
-- Add branch graph to the Git panel's History tab. Pick Graph in Settings → Panels → Git Panel section → History Style to enable it.
+- Add tree graph to Git panel's History.
 - Support Mermaid diagrams in Markdown preview.
 - Fix terminal on Windows not picking new env vars without Wu restart.
 - Show "Open with Wu" in context menu on Windows 11 when the classic Windows 10 menu is enabled.
-- Match the Windows installer to the system's dark or light mode.
+- Respect the system's dark or light mode in the Windows installer.
 
 ## 1.3.0 - 2026-11-14
 

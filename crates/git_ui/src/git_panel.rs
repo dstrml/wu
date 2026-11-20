@@ -150,6 +150,8 @@ actions!(
         SetGroupByStaging,
         /// Toggles showing entries in tree vs flat view.
         ToggleTreeView,
+        /// Toggles the History tab between the detailed list and the branch graph.
+        ToggleHistoryGraph,
         /// Expands the selected entry to show its children.
         ExpandSelectedEntry,
         /// Collapses the selected entry to hide its children.
@@ -5182,6 +5184,26 @@ impl GitPanel {
         }
     }
 
+    fn toggle_history_graph(
+        &mut self,
+        _: &ToggleHistoryGraph,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let history_style = match GitPanelSettings::get_global(cx).history_style {
+            GitPanelHistoryStyle::Detailed => GitPanelHistoryStyle::Graph,
+            GitPanelHistoryStyle::Graph => GitPanelHistoryStyle::Detailed,
+        };
+        if let Some(workspace) = self.workspace.upgrade() {
+            let fs = workspace.read(cx).app_state().fs.clone();
+            cx.update_global::<SettingsStore, _>(|store, _cx| {
+                store.update_settings_file(fs, move |settings, _cx| {
+                    settings.git_panel.get_or_insert_default().history_style = Some(history_style);
+                });
+            })
+        }
+    }
+
     pub(crate) fn increase_font_size(
         &mut self,
         action: &IncreaseBufferFontSize,
@@ -7238,30 +7260,82 @@ impl GitPanel {
             ))
     }
 
+    fn render_history_header(&self, cx: &App) -> Option<impl IntoElement> {
+        self.active_repository.as_ref()?;
+        let focus_handle = self.focus_handle.clone();
+        Some(
+            h_flex()
+                .min_h(Tab::container_height(cx))
+                .w_full()
+                .px_2()
+                .flex_none()
+                .justify_end()
+                .border_b_1()
+                .border_color(cx.theme().colors().border_variant)
+                .child(
+                    PopoverMenu::new("history-view-options-menu")
+                        .trigger_with_tooltip(
+                            IconButton::new("history-view-options-trigger", IconName::Filter)
+                                .icon_size(IconSize::Small),
+                            Tooltip::text(t!("View Options")),
+                        )
+                        .menu(move |window, cx| {
+                            let graph = GitPanelSettings::get_global(cx).history_style
+                                == GitPanelHistoryStyle::Graph;
+                            let focus_handle = focus_handle.clone();
+                            Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                                let entry = |label: SharedString, selected: bool| {
+                                    ContextMenuEntry::new(label)
+                                        .toggle(IconPosition::End, selected)
+                                        .handler(move |window, cx| {
+                                            if !selected {
+                                                window.dispatch_action(
+                                                    Box::new(ToggleHistoryGraph),
+                                                    cx,
+                                                );
+                                            }
+                                        })
+                                };
+                                menu.context(focus_handle)
+                                    .header(t!("View"))
+                                    .item(entry(t!("Detailed"), !graph))
+                                    .item(entry(t!("Graph"), graph))
+                            }))
+                        })
+                        .anchor(Anchor::TopRight),
+                ),
+        )
+    }
+
     fn render_history_tab(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex().flex_1().size_full().overflow_hidden().map(|this| {
-            let has_repo = self.active_repository.is_some();
-            match &self.commit_history {
-                _ if !has_repo => {
-                    this.child(Self::render_history_placeholder(t!("No repository found")))
-                }
-                CommitHistory::Error(_) => this.child(Self::render_history_placeholder(t!(
-                    "Failed to load commit history"
-                ))),
-                CommitHistory::Loading => this.child(Self::render_history_placeholder(t!(
-                    "Loading Commit History…"
-                ))),
-                CommitHistory::Loaded(entries) if entries.is_empty() => {
-                    this.child(Self::render_history_placeholder(t!("No commits yet")))
-                }
-                CommitHistory::Loaded(_) => match self.render_commit_history(window, cx) {
-                    Some(history) => this.child(history),
-                    None => this.child(Self::render_history_placeholder(t!(
-                        "Failed to load commits"
+        v_flex()
+            .flex_1()
+            .size_full()
+            .overflow_hidden()
+            .children(self.render_history_header(cx))
+            .map(|this| {
+                let has_repo = self.active_repository.is_some();
+                match &self.commit_history {
+                    _ if !has_repo => {
+                        this.child(Self::render_history_placeholder(t!("No repository found")))
+                    }
+                    CommitHistory::Error(_) => this.child(Self::render_history_placeholder(t!(
+                        "Failed to load commit history"
                     ))),
-                },
-            }
-        })
+                    CommitHistory::Loading => this.child(Self::render_history_placeholder(t!(
+                        "Loading Commit History…"
+                    ))),
+                    CommitHistory::Loaded(entries) if entries.is_empty() => {
+                        this.child(Self::render_history_placeholder(t!("No commits yet")))
+                    }
+                    CommitHistory::Loaded(_) => match self.render_commit_history(window, cx) {
+                        Some(history) => this.child(history),
+                        None => this.child(Self::render_history_placeholder(t!(
+                            "Failed to load commits"
+                        ))),
+                    },
+                }
+            })
     }
 
     fn render_history_placeholder(message: SharedString) -> impl IntoElement {
@@ -10026,6 +10100,7 @@ impl Render for GitPanel {
             .on_action(cx.listener(Self::set_group_by_status))
             .on_action(cx.listener(Self::set_group_by_staging))
             .on_action(cx.listener(Self::toggle_tree_view))
+            .on_action(cx.listener(Self::toggle_history_graph))
             .on_action(cx.listener(Self::increase_font_size))
             .on_action(cx.listener(Self::decrease_font_size))
             .on_action(cx.listener(Self::reset_font_size))
@@ -11568,6 +11643,29 @@ mod tests {
                 ]
             );
         });
+    }
+
+    #[gpui::test]
+    async fn test_toggle_history_graph_saves_the_history_style_setting(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree("/root", json!({ "project": { ".git": {} } }))
+            .await;
+        let panel = history_panel_for_project(fs, cx).await;
+        let window = cx.windows()[0];
+        let toggle = |cx: &mut TestAppContext| {
+            cx.update_window(window, |_, window, cx| {
+                panel.update(cx, |panel, cx| {
+                    panel.toggle_history_graph(&ToggleHistoryGraph, window, cx)
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.read(|cx| GitPanelSettings::get_global(cx).history_style)
+        };
+        assert_eq!(toggle(cx), GitPanelHistoryStyle::Graph);
+        assert_eq!(toggle(cx), GitPanelHistoryStyle::Detailed);
     }
 
     #[gpui::test]

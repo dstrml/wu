@@ -79,6 +79,10 @@
     "name": "切换焦点",
     "description": "将焦点移到 Git 面板或移出 Git 面板。"
   },
+  "git_panel::ToggleHistoryGraph": {
+    "name": "切换历史图谱",
+    "description": "在“历史记录”标签页中切换详细列表和分支图谱。"
+  },
   "git_panel::ToggleTreeView": {
     "name": "切换树状视图",
     "description": "在树状视图和平铺视图之间切换条目的显示方式。"
