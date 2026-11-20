@@ -8,6 +8,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Support Mermaid diagrams in Markdown preview.
 - Fix terminal on Windows not picking new env vars without Wu restart.
 - Show "Open with Wu" in context menu on Windows 11 when the classic Windows 10 menu is enabled.
+- Match the Windows installer to the system's dark or light mode.
 
 ## 1.3.0 - 2026-11-14
 

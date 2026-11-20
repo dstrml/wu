@@ -27,7 +27,7 @@ SourceDir={#SourceDir}
 AppVersion={#Version}
 VersionInfoVersion={#Version}
 ShowLanguageDialog=auto
-WizardStyle=modern
+WizardStyle=modern dynamic
 
 CloseApplications=force
 
