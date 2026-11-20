@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.4.0 - 2026-11-21
+
 - Support git ops like cherry-pick, merge, and squash.
 - Add tree graph to Git panel's History.
 - Support Mermaid diagrams in markdown preview.
