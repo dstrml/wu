@@ -10,6 +10,7 @@ use db::sqlez::{
     bindable::{Bind, Column, StaticColumnCount},
     statement::Statement,
 };
+use futures::StreamExt as _;
 use gpui::{AsyncWindowContext, Entity, WeakEntity, WindowId};
 
 use language::{Toolchain, ToolchainScope};
@@ -377,16 +378,33 @@ impl SerializedPane {
             }
         }
 
-        let mut items = Vec::new();
-        for item_handle in futures::future::join_all(item_tasks).await {
-            let item_handle = item_handle.log_err();
-            items.push(item_handle.clone());
-
-            if let Some(item_handle) = item_handle {
-                pane.update_in(cx, |pane, window, cx| {
-                    pane.add_item(item_handle.clone(), true, true, None, window, cx);
-                })?;
+        // Add each item as soon as it loads, so a slow one doesn't hold back the rest of the pane.
+        let first_index = pane.read_with(cx, |pane, _| pane.items_len())?;
+        let mut items: Vec<Option<Box<dyn ItemHandle>>> = vec![None; item_tasks.len()];
+        let mut loading = item_tasks
+            .into_iter()
+            .enumerate()
+            .map(|(index, task)| async move { (index, task.await) })
+            .collect::<futures::stream::FuturesUnordered<_>>();
+        let mut active_item = None;
+        while let Some((index, item_handle)) = loading.next().await {
+            let Some(item_handle) = item_handle.log_err() else {
+                continue;
+            };
+            items[index] = Some(item_handle.clone());
+            if active_item_index == Some(index) {
+                active_item = Some(item_handle.clone());
             }
+            let destination = first_index + items[..index].iter().flatten().count();
+            pane.update_in(cx, |pane, window, cx| {
+                pane.add_item(item_handle, true, true, Some(destination), window, cx);
+                if let Some(index) = active_item
+                    .as_ref()
+                    .and_then(|active_item| pane.index_for_item(active_item.as_ref()))
+                {
+                    pane.activate_item(index, false, false, window, cx);
+                }
+            })?;
         }
 
         if let Some(active_item) = active_item_index.and_then(|index| items.get(index)?.clone()) {

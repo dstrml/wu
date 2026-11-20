@@ -1614,6 +1614,9 @@ pub mod test {
         }
     }
 
+    /// Restored `TestItem`s with an id at least this large take a second to load.
+    pub const SLOW_TEST_ITEM_ID: ItemId = 1000;
+
     impl SerializableItem for TestItem {
         fn serialized_item_kind() -> &'static str {
             "TestItem"
@@ -1623,11 +1626,23 @@ pub mod test {
             _project: Entity<Project>,
             _workspace: WeakEntity<Workspace>,
             workspace_id: WorkspaceId,
-            _item_id: ItemId,
+            item_id: ItemId,
             _window: &mut Window,
             cx: &mut App,
         ) -> Task<anyhow::Result<Entity<Self>>> {
-            let entity = cx.new(|cx| Self::new_deserialized(workspace_id, cx));
+            if item_id >= SLOW_TEST_ITEM_ID {
+                return cx.spawn(async move |cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(1))
+                        .await;
+                    Ok(cx.new(|cx| {
+                        Self::new_deserialized(workspace_id, cx).with_label(&item_id.to_string())
+                    }))
+                });
+            }
+            let entity = cx.new(|cx| {
+                Self::new_deserialized(workspace_id, cx).with_label(&item_id.to_string())
+            });
             Task::ready(Ok(entity))
         }
 

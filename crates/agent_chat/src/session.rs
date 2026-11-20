@@ -653,6 +653,15 @@ fn new_markdown(text: String, languages: &Arc<LanguageRegistry>, cx: &mut App) -
     cx.new(|cx| Markdown::new(text.into(), Some(languages), None, cx))
 }
 
+fn saved_markdown(
+    text: String,
+    languages: &Arc<LanguageRegistry>,
+    cx: &mut App,
+) -> Entity<Markdown> {
+    let languages = languages.clone();
+    cx.new(|cx| Markdown::new_deferred(text.into(), Some(languages), None, cx))
+}
+
 fn deserialize_entry(
     entry: SerializedEntry,
     languages: &Arc<LanguageRegistry>,
@@ -673,10 +682,10 @@ fn deserialize_entry(
             undelivered,
         },
         SerializedEntry::Assistant { text, at } => Entry::Assistant {
-            markdown: new_markdown(text, languages, cx),
+            markdown: saved_markdown(text, languages, cx),
             at,
         },
-        SerializedEntry::Thinking { text } => Entry::Thinking(new_markdown(text, languages, cx)),
+        SerializedEntry::Thinking { text } => Entry::Thinking(saved_markdown(text, languages, cx)),
         SerializedEntry::Tool {
             id,
             call,

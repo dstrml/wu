@@ -387,6 +387,7 @@ pub struct Markdown {
     images_by_source_offset: HashMap<usize, Arc<Image>>,
     should_reparse: bool,
     pending_parse: Option<Task<()>>,
+    parse_deferred: bool,
     focus_handle: FocusHandle,
     language_registry: Option<Arc<LanguageRegistry>>,
     fallback_code_block_language: Option<LanguageName>,
@@ -573,9 +574,45 @@ impl Markdown {
         options: MarkdownOptions,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut this = Self::unparsed(
+            source,
+            language_registry,
+            fallback_code_block_language,
+            options,
+            cx,
+        );
+        this.parse(cx);
+        this
+    }
+
+    /// Like [`Markdown::new`], but waits to parse until the markdown is first drawn.
+    pub fn new_deferred(
+        source: SharedString,
+        language_registry: Option<Arc<LanguageRegistry>>,
+        fallback_code_block_language: Option<LanguageName>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::unparsed(
+            source,
+            language_registry,
+            fallback_code_block_language,
+            MarkdownOptions::default(),
+            cx,
+        );
+        this.parse_deferred = true;
+        this
+    }
+
+    fn unparsed(
+        source: SharedString,
+        language_registry: Option<Arc<LanguageRegistry>>,
+        fallback_code_block_language: Option<LanguageName>,
+        options: MarkdownOptions,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
 
-        let mut this = Self {
+        Self {
             source,
             selection: Selection::default(),
             pressed_link: None,
@@ -588,6 +625,7 @@ impl Markdown {
             images_by_source_offset: Default::default(),
             parsed_markdown: ParsedMarkdown::default(),
             pending_parse: None,
+            parse_deferred: false,
             focus_handle,
             language_registry,
             fallback_code_block_language,
@@ -600,9 +638,7 @@ impl Markdown {
             context_menu_selected_markdown: None,
             search_highlights: Rc::default(),
             active_search_highlight: None,
-        };
-        this.parse(cx);
-        this
+        }
     }
 
     pub fn new_text(source: SharedString, cx: &mut Context<Self>) -> Self {
@@ -673,7 +709,7 @@ impl Markdown {
     }
 
     pub fn is_parsing(&self) -> bool {
-        self.pending_parse.is_some()
+        self.pending_parse.is_some() || self.parse_deferred
     }
 
     pub fn scroll_to_heading_when_parsed(&mut self, slug: SharedString, cx: &mut Context<Self>) {
@@ -928,6 +964,7 @@ impl Markdown {
     }
 
     fn parse(&mut self, cx: &mut Context<Self>) {
+        self.parse_deferred = false;
         if self.source.is_empty() {
             self.should_reparse = false;
             self.pending_parse.take();
@@ -2269,6 +2306,9 @@ impl Element for MarkdownElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (gpui::LayoutId, Self::RequestLayoutState) {
+        if self.markdown.read(cx).parse_deferred {
+            self.markdown.update(cx, |markdown, cx| markdown.parse(cx));
+        }
         let highlights = {
             let markdown = self.markdown.read(cx);
             let colors = cx.theme().colors();
@@ -5007,6 +5047,35 @@ mod tests {
 
     fn render_markdown(markdown: &str, cx: &mut TestAppContext) -> RenderedText {
         render_markdown_with_language_registry(markdown, None, cx)
+    }
+
+    #[gpui::test]
+    fn test_deferred_markdown_parses_when_first_drawn(cx: &mut TestAppContext) {
+        struct TestWindow;
+
+        impl Render for TestWindow {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+
+        ensure_theme_initialized(cx);
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        let markdown = cx.new(|cx| Markdown::new_deferred("**bold**".into(), None, None, cx));
+        cx.run_until_parked();
+        markdown.read_with(cx, |markdown, _| {
+            assert!(markdown.is_parsing());
+            assert!(markdown.parsed_markdown().source().is_empty());
+        });
+
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), |_, _| {
+            MarkdownElement::new(markdown.clone(), MarkdownStyle::default()).into_any_element()
+        });
+        cx.run_until_parked();
+        markdown.read_with(cx, |markdown, _| {
+            assert!(!markdown.is_parsing());
+            assert_eq!(markdown.parsed_markdown().source().as_ref(), "**bold**");
+        });
     }
 
     #[gpui::test]

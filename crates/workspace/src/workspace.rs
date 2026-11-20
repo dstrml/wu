@@ -16272,6 +16272,69 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_slow_items_do_not_hold_back_the_rest_of_a_restored_pane(cx: &mut TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| {
+            register_serializable_item::<TestItem>(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/root", json!({ "test.txt": "" })).await;
+        let project = Project::test(fs, ["root".as_ref()], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        let slow = crate::item::test::SLOW_TEST_ITEM_ID;
+        let serialized_pane = SerializedPane::new(
+            vec![
+                SerializedItem::new("TestItem", 1, false, false),
+                SerializedItem::new("TestItem", slow, true, false),
+                SerializedItem::new("TestItem", 3, false, false),
+            ],
+            true,
+            0,
+        );
+        let (pane, task) = workspace.update_in(cx, |workspace, window, cx| {
+            let pane = workspace.add_pane(window, cx);
+            let weak_pane = pane.downgrade();
+            let project = workspace.project().clone();
+            let workspace = cx.entity().downgrade();
+            let task = window.spawn(cx, async move |cx| {
+                serialized_pane
+                    .deserialize_to(
+                        &project,
+                        &weak_pane,
+                        WorkspaceId::from_i64(1),
+                        workspace,
+                        cx,
+                    )
+                    .await
+            });
+            (pane, task)
+        });
+        let labels = |cx: &mut VisualTestContext| {
+            pane.read_with(cx, |pane, cx| {
+                pane.items()
+                    .map(|item| item.downcast::<TestItem>().unwrap().read(cx).label.clone())
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        cx.run_until_parked();
+        assert_eq!(labels(cx), ["1", "3"]);
+
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        task.await.unwrap();
+        assert_eq!(labels(cx), ["1", slow.to_string().as_str(), "3"]);
+        let active_label = pane.read_with(cx, |pane, cx| {
+            let item = pane.active_item().unwrap().downcast::<TestItem>().unwrap();
+            item.read(cx).label.clone()
+        });
+        assert_eq!(active_label, slow.to_string());
+    }
+
+    #[gpui::test]
     async fn test_restoring_pinned_tabs_when_items_fail_to_deserialize(cx: &mut TestAppContext) {
         init_test(cx);
         cx.update(|cx| {
