@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.4.0 - 2026-11-20
+
 - Add branch graph to the Git panel's History tab. Pick Graph in Settings → Panels → Git Panel section → History Style to enable it.
 - Support Mermaid diagrams in Markdown preview.
 - Fix terminal on Windows not picking new env vars without Wu restart.
