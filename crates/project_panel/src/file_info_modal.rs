@@ -12,7 +12,7 @@ use ui::{ElevationIndex, Modal, ModalFooter, ModalHeader, Section, prelude::*};
 use util::size::format_file_size;
 use workspace::ModalView;
 
-const PROGRESS_INTERVAL: usize = 256;
+const CLOSED_CHECK_INTERVAL: usize = 256;
 
 enum Kind {
     File,
@@ -32,7 +32,6 @@ struct FolderTotals {
     size: u64,
     files: usize,
     folders: usize,
-    scanning: bool,
 }
 
 enum State {
@@ -99,16 +98,10 @@ impl FileInfoModal {
         match progress {
             Progress::Details(Err(error), _) => self.state = State::Failed(error),
             Progress::Details(Ok(details), size) => {
-                let totals = matches!(details.kind, Kind::Folder).then(|| FolderTotals {
-                    size: 0,
-                    files: 0,
-                    folders: 0,
-                    scanning: true,
-                });
                 self.state = State::Loaded {
                     details,
                     size,
-                    totals,
+                    totals: None,
                 };
             }
             Progress::Totals(new_totals) => {
@@ -167,12 +160,7 @@ impl FileInfoModal {
 
         match totals {
             Some(totals) => {
-                let size_text = if totals.scanning {
-                    t!("{size} (calculating…)", size = format_size(totals.size)).to_string()
-                } else {
-                    format_size(totals.size)
-                };
-                rows.push((t!("Size"), size_text));
+                rows.push((t!("Size"), format_size(totals.size)));
                 rows.push((
                     t!("Contains"),
                     t!(
@@ -182,6 +170,10 @@ impl FileInfoModal {
                     )
                     .to_string(),
                 ));
+            }
+            None if matches!(details.kind, Kind::Folder) => {
+                rows.push((t!("Size"), t!("Calculating…").to_string()));
+                rows.push((t!("Contains"), t!("Calculating…").to_string()));
             }
             None => rows.push((t!("Size"), format_size(*size))),
         }
@@ -295,7 +287,6 @@ fn load(path: PathBuf, progress_tx: mpsc::UnboundedSender<Progress>) {
         size: 0,
         files: 0,
         folders: 0,
-        scanning: true,
     };
     let mut visited = 0;
     for entry in walkdir::WalkDir::new(&path).min_depth(1).into_iter() {
@@ -312,22 +303,10 @@ fn load(path: PathBuf, progress_tx: mpsc::UnboundedSender<Progress>) {
             }
         }
         visited += 1;
-        if visited % PROGRESS_INTERVAL == 0 {
-            let snapshot = FolderTotals {
-                size: totals.size,
-                files: totals.files,
-                folders: totals.folders,
-                scanning: true,
-            };
-            if progress_tx
-                .unbounded_send(Progress::Totals(snapshot))
-                .is_err()
-            {
-                return;
-            }
+        if visited % CLOSED_CHECK_INTERVAL == 0 && progress_tx.is_closed() {
+            return;
         }
     }
-    totals.scanning = false;
     progress_tx.unbounded_send(Progress::Totals(totals)).ok();
 }
 

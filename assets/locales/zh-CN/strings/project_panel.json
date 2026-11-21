@@ -13,6 +13,7 @@
   "Are you sure you want to delete {name}?": "确定要删除 {name} 吗？",
   "Are you sure you want to permanently delete the following {count} files?\n{files}": "确定要永久删除以下 {count} 个文件吗？\n{files}",
   "Are you sure you want to permanently delete {name}?": "确定要永久删除 {name} 吗？",
+  "Calculating…": "正在计算…",
   "Cancel": "取消",
   "Collapse All": "全部折叠",
   "Compare Marked Files": "比较选中的文件",
@@ -107,6 +108,5 @@
   "{count} of these have unsaved changes, which will be lost.": "其中 {count} 个有未保存的更改，这些更改将会丢失。",
   "{files}, {folders}": "{files}，{folders}",
   "{path} is not shared by the host. This could be because it has been marked as `private`": "主机未共享 {path}。这可能是因为它被标记为 `private`",
-  "{size} (calculating…)": "{size}（正在计算…）",
   "{size} ({count} bytes)": "{size}（{count} 字节）"
 }
