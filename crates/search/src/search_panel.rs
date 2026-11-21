@@ -28,7 +28,7 @@ use menu::{Cancel, Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious}
 use project::{Project, ProjectPath, search::SearchQuery};
 use settings::{DockSide, IntoGpui, RegisterSetting, Settings, SettingsStore};
 use std::{ops::Range, sync::Arc, time::Duration};
-use text::ToPoint as _;
+use text::{Bias, ToPoint as _};
 use ui::{Icon, IconButton, IconButtonShape, IconName, Label, ListItem, Tooltip, prelude::*};
 use util::paths::{PathMatcher, PathStyle};
 use workspace::{
@@ -63,6 +63,8 @@ const SEARCH_PANEL_KEY: &str = "SearchPanel";
 const SEARCH_ON_TYPE_DEBOUNCE: Duration = Duration::from_millis(250);
 const LEFT_CONTEXT_CHARS: usize = 24;
 const RIGHT_CONTEXT_CHARS: usize = 160;
+const MAX_MATCH_CHARS: usize = 256;
+const MATCH_LINE_BEFORE_WINDOW_BYTES: usize = 1024;
 const INDENT_STEP: Pixels = px(22.);
 
 #[derive(Debug, Clone, Copy, PartialEq, RegisterSetting)]
@@ -135,6 +137,12 @@ enum Entry {
 struct MatchLine {
     text: String,
     match_range: Range<usize>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AfterReplace {
+    RemoveReplacedMatches,
+    SearchAgain,
 }
 
 impl SearchPanel {
@@ -722,7 +730,7 @@ impl SearchPanel {
             return;
         }
         let match_ranges = self.search.read(cx).match_ranges.clone();
-        self.replace_matches(match_ranges, window, cx);
+        self.replace_matches(match_ranges, AfterReplace::SearchAgain, window, cx);
     }
 
     fn replace_next(&mut self, _: &ReplaceNext, window: &mut Window, cx: &mut Context<Self>) {
@@ -748,14 +756,14 @@ impl SearchPanel {
         else {
             return;
         };
-        self.replace_matches(vec![range], window, cx);
+        self.replace_matches(vec![range], AfterReplace::RemoveReplacedMatches, window, cx);
     }
 
     fn replace_file(&mut self, file_index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ranges) = self.files.get(file_index).map(|file| file.matches.clone()) else {
             return;
         };
-        self.replace_matches(ranges, window, cx);
+        self.replace_matches(ranges, AfterReplace::RemoveReplacedMatches, window, cx);
     }
 
     /// Applies the replacement to the underlying buffers, then saves the ones
@@ -764,12 +772,15 @@ impl SearchPanel {
     fn replace_matches(
         &mut self,
         ranges: Vec<Range<Anchor>>,
+        after_replace: AfterReplace,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if ranges.is_empty() {
             return;
         }
+        let search_again = after_replace == AfterReplace::SearchAgain
+            || self.search.read(cx).pending_search.is_some();
         let Some(query) = self.search.read(cx).active_query.clone() else {
             return;
         };
@@ -793,9 +804,22 @@ impl SearchPanel {
         let save = self
             .project
             .update(cx, |project, cx| project.save_buffers(clean_buffers, cx));
+        if !search_again {
+            self.clear_match_highlights(cx);
+            self.search.update(cx, |search, cx| {
+                let replaced_ranges: HashSet<&Range<Anchor>> = ranges.iter().collect();
+                search
+                    .match_ranges
+                    .retain(|range| !replaced_ranges.contains(range));
+                cx.notify();
+            });
+        }
         cx.spawn(async move |this, cx| {
             save.await?;
-            this.update(cx, |this, cx| this.search(SearchMode::Refresh, cx))
+            if search_again {
+                this.update(cx, |this, cx| this.search(SearchMode::Refresh, cx))?;
+            }
+            anyhow::Ok(())
         })
         .detach_and_log_err(cx);
     }
@@ -1513,46 +1537,63 @@ fn parse_path_matches(text: &str, path_style: PathStyle) -> Result<PathMatcher> 
 fn match_line(buffer: &BufferSnapshot, range: &Range<Anchor>) -> MatchLine {
     let start = range.start.text_anchor_in(buffer).to_point(buffer);
     let end = range.end.text_anchor_in(buffer).to_point(buffer);
+    match_line_between(buffer, start, end)
+}
+
+fn match_line_between(buffer: &text::BufferSnapshot, start: Point, end: Point) -> MatchLine {
     let row = start.row;
-    let line = buffer
-        .text_for_range(Point::new(row, 0)..Point::new(row, buffer.line_len(row)))
-        .collect::<String>();
-    let match_start = (start.column as usize).min(line.len());
+    let line_start = buffer.point_to_offset(Point::new(row, 0));
+    let line_len = buffer.line_len(row) as usize;
+    let match_start = (start.column as usize).min(line_len);
     let match_end = if end.row == row {
-        (end.column as usize).clamp(match_start, line.len())
+        (end.column as usize).clamp(match_start, line_len)
     } else {
-        line.len()
+        line_len
+    };
+    let read_columns = |columns: Range<usize>| {
+        let start = buffer.clip_offset(line_start + columns.start, Bias::Left);
+        let end = buffer.clip_offset(line_start + columns.end, Bias::Left);
+        buffer.text_for_range(start..end).collect::<String>()
     };
 
-    let leading_whitespace = line.len() - line.trim_start().len();
-    let mut cut_start = leading_whitespace.min(match_start);
-    let before = &line[cut_start..match_start];
+    let before_window =
+        read_columns(match_start.saturating_sub(MATCH_LINE_BEFORE_WINDOW_BYTES)..match_start);
+    let before = before_window.trim_start();
     let before_chars = before.chars().count();
     let mut text = String::new();
     if before_chars > LEFT_CONTEXT_CHARS {
-        let skipped_bytes = before
-            .chars()
-            .take(before_chars - LEFT_CONTEXT_CHARS)
-            .map(char::len_utf8)
-            .sum::<usize>();
-        cut_start += skipped_bytes;
         text.push('…');
+        text.push_str(split_at_char(before, before_chars - LEFT_CONTEXT_CHARS).1);
+    } else {
+        text.push_str(before);
     }
-    let prefix_len = text.len();
-    let cut_end = match_end
-        + line[match_end..]
-            .chars()
-            .take(RIGHT_CONTEXT_CHARS)
-            .map(char::len_utf8)
-            .sum::<usize>();
-    text.push_str(&line[cut_start..cut_end]);
-    if cut_end < line.len() {
+
+    let matched_window =
+        read_columns(match_start..match_end.min(match_start + MAX_MATCH_CHARS * 4));
+    let matched = split_at_char(&matched_window, MAX_MATCH_CHARS).0;
+    let match_range = text.len()..text.len() + matched.len();
+    text.push_str(matched);
+
+    if match_start + matched.len() < match_end {
         text.push('…');
+    } else {
+        let after_window =
+            read_columns(match_end..line_len.min(match_end + RIGHT_CONTEXT_CHARS * 4));
+        let after = split_at_char(&after_window, RIGHT_CONTEXT_CHARS).0;
+        text.push_str(after);
+        if match_end + after.len() < line_len {
+            text.push('…');
+        }
     }
-    MatchLine {
-        text,
-        match_range: match_start - cut_start + prefix_len..match_end - cut_start + prefix_len,
-    }
+    MatchLine { text, match_range }
+}
+
+fn split_at_char(text: &str, char_count: usize) -> (&str, &str) {
+    let index = text
+        .char_indices()
+        .nth(char_count)
+        .map_or(text.len(), |(index, _)| index);
+    text.split_at(index)
 }
 
 impl EventEmitter<PanelEvent> for SearchPanel {}
@@ -2135,5 +2176,151 @@ mod tests {
                 "replaced matches are gone after the refresh"
             );
         });
+    }
+
+    #[gpui::test]
+    async fn test_replacing_one_match_or_file_does_not_search_again(cx: &mut TestAppContext) {
+        let (fs, _, panel, mut cx) = setup(cx).await;
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.replace_enabled = true;
+            panel.search_options = SearchOptions::CASE_SENSITIVE;
+            panel
+                .query_editor
+                .update(cx, |editor, cx| editor.set_text("ONE", window, cx));
+            panel
+                .replacement_editor
+                .update(cx, |editor, cx| editor.set_text("UNO", window, cx));
+            panel.search(SearchMode::Manual, cx);
+        });
+        cx.run_until_parked();
+
+        let search_id = panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.match_count(), 4);
+            panel.search.read(cx).search_id
+        });
+        let file_index = |panel: &SearchPanel, name: &str| {
+            panel
+                .files
+                .iter()
+                .position(|file| file.file_name.as_ref() == name)
+                .unwrap()
+        };
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            let two = file_index(panel, "two.rs");
+            panel.replace_match(two, 1, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.load(path!("/dir/two.rs").as_ref()).await.unwrap(),
+            "const TWO: usize = one::ONE + one::UNO;"
+        );
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.search.read(cx).search_id, search_id);
+            assert_eq!(panel.match_count(), 3);
+            assert_eq!(panel.files[file_index(panel, "two.rs")].matches.len(), 1);
+            assert_eq!(panel.entries.len(), 6);
+        });
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            let three = file_index(panel, "three.rs");
+            panel.replace_file(three, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.load(path!("/dir/three.rs").as_ref()).await.unwrap(),
+            "const THREE: usize = one::UNO + two::TWO;"
+        );
+        assert_eq!(
+            fs.load(path!("/dir/one.rs").as_ref()).await.unwrap(),
+            "const ONE: usize = 1;"
+        );
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.search.read(cx).search_id, search_id);
+            assert_eq!(panel.match_count(), 2);
+            let mut names = file_names(panel);
+            names.sort();
+            assert_eq!(names, vec!["one.rs", "two.rs"]);
+        });
+    }
+
+    fn match_line_in(text: &str, start: (u32, usize), end: (u32, usize)) -> MatchLine {
+        let buffer = text::Buffer::new(
+            text::ReplicaId::LOCAL,
+            BufferId::new(1).unwrap(),
+            text.to_string(),
+        );
+        match_line_between(
+            buffer.snapshot(),
+            Point::new(start.0, start.1 as u32),
+            Point::new(end.0, end.1 as u32),
+        )
+    }
+
+    #[test]
+    fn test_match_line_keeps_short_lines_whole() {
+        let line = match_line_in("    let value = compute(input);", (0, 16), (0, 23));
+        assert_eq!(line.text, "let value = compute(input);");
+        assert_eq!(&line.text[line.match_range], "compute");
+
+        let line = match_line_in("first\n\t\tNEEDLE\nlast", (1, 2), (1, 8));
+        assert_eq!(line.text, "NEEDLE");
+        assert_eq!(line.match_range, 0..6);
+
+        let line = match_line_in("  start NEEDLE\nrest", (0, 8), (1, 2));
+        assert_eq!(line.text, "start NEEDLE");
+        assert_eq!(&line.text[line.match_range], "NEEDLE");
+    }
+
+    #[test]
+    fn test_match_line_trims_context_around_the_match() {
+        let text = format!("{}NEEDLE{}", "a".repeat(40), "b".repeat(200));
+        let line = match_line_in(&text, (0, 40), (0, 46));
+        assert_eq!(
+            line.text,
+            format!(
+                "…{}NEEDLE{}…",
+                "a".repeat(LEFT_CONTEXT_CHARS),
+                "b".repeat(RIGHT_CONTEXT_CHARS)
+            )
+        );
+        assert_eq!(&line.text[line.match_range], "NEEDLE");
+
+        let text = format!("{}  NEEDLE", " ".repeat(2000));
+        let line = match_line_in(&text, (0, 2002), (0, 2008));
+        assert_eq!(line.text, "NEEDLE");
+    }
+
+    #[test]
+    fn test_match_line_reads_a_bounded_part_of_huge_lines() {
+        let text = format!("{}NEEDLE{}", "€".repeat(300_000), "€".repeat(300_000));
+        let line = match_line_in(&text, (0, 900_000), (0, 900_006));
+        assert_eq!(
+            line.text,
+            format!(
+                "…{}NEEDLE{}…",
+                "€".repeat(LEFT_CONTEXT_CHARS),
+                "€".repeat(RIGHT_CONTEXT_CHARS)
+            )
+        );
+        assert_eq!(&line.text[line.match_range], "NEEDLE");
+
+        let line = match_line_in(&text, (0, 300), (0, 1_500_000));
+        assert_eq!(
+            line.text,
+            format!(
+                "…{}{}…",
+                "€".repeat(LEFT_CONTEXT_CHARS),
+                "€".repeat(MAX_MATCH_CHARS)
+            )
+        );
+        assert_eq!(
+            line.match_range,
+            "…".len() + LEFT_CONTEXT_CHARS * 3
+                ..("…".len() + (LEFT_CONTEXT_CHARS + MAX_MATCH_CHARS) * 3)
+        );
     }
 }

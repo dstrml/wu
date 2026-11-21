@@ -66,6 +66,8 @@ pub mod unstaged_diff;
 
 pub use blame_ui::GitBlameStatus;
 
+const WINDOW_ACTIVATION_RESCAN_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub fn init(cx: &mut App) {
     editor::set_blame_renderer(blame_ui::GitBlameRenderer, cx);
     commit_view::init(cx);
@@ -392,7 +394,9 @@ pub fn init(cx: &mut App) {
                     return;
                 }
                 if let Some(repository) = workspace.project().read(cx).active_repository(cx) {
-                    repository.update(cx, |repository, cx| repository.rescan(cx));
+                    repository.update(cx, |repository, cx| {
+                        repository.rescan_if_stale(WINDOW_ACTIVATION_RESCAN_COOLDOWN, cx)
+                    });
                 }
             })
             .detach();

@@ -12,7 +12,7 @@ use agent_harness::{
     TodoItem, TodoStatus, ToolCall, UserInputAnswer, UserInputQuestion,
 };
 use agent_harness::{
-    CancellationToken, CodexHarness, Harness, HarnessError, RunControls, SteerMessage,
+    CancellationToken, CodexHarness, Harness, HarnessError, RunControls, Steer, SteerMessage,
 };
 
 fn fixture_path() -> PathBuf {
@@ -54,9 +54,7 @@ fn request(prompt: &str) -> RunRequest {
     }
 }
 
-fn controls(
-    answer_label: &'static str,
-) -> (RunControls, mpsc::Sender<SteerMessage>, CancellationToken) {
+fn controls(answer_label: &'static str) -> (RunControls, mpsc::Sender<Steer>, CancellationToken) {
     let (steer_tx, steer_rx) = mpsc::channel(8);
     let token = CancellationToken::new();
     let controls = RunControls {
@@ -292,12 +290,13 @@ async fn happy_path_maps_deltas_items_usage_and_done() {
 async fn steering_uses_turn_steer_with_expected_turn_id() {
     let (controls, steer, _token) = controls("Yes");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "redirect please".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .expect("steer queued");
     let events = run_to_end(&harness(), request("scenario:steer"), controls).await;
@@ -337,12 +336,13 @@ async fn steering_uses_turn_steer_with_expected_turn_id() {
 async fn rejected_steer_falls_back_to_a_follow_up_turn() {
     let (controls, steer, _token) = controls("Yes");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "redirect please".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .expect("steer queued");
     let events = run_to_end(&harness(), request("scenario:steer-race"), controls).await;
@@ -962,12 +962,13 @@ async fn live_subagent_spawn_and_followup_keep_one_transcript() {
     let mut events = Vec::new();
     for turn in 0..3 {
         if turn == 1 {
-            steer.send(SteerMessage {
+            steer.send(Steer::Message(SteerMessage {
                 prompt: "Reuse the SAME existing subagent for one more task: reply exactly child-second. Use followup_task if available, otherwise send_input. Do not spawn a new agent. Wait for it to finish, then reply exactly parent-second. Do not inspect or change files.".into(),
                 message_id: None,
                 attachments: Vec::new(),
                 skills: Vec::new(),
-            }).await.unwrap();
+                settings: None,
+            })).await.unwrap();
         }
         if turn == 2 {
             interrupt.cancel();
@@ -1246,12 +1247,13 @@ async fn native_command_during_a_turn_waits_for_its_boundary() {
                     steer
                         .take()
                         .unwrap()
-                        .send(SteerMessage {
+                        .send(Steer::Message(SteerMessage {
                             prompt: "/review".into(),
                             message_id: None,
                             attachments: Vec::new(),
                             skills: Vec::new(),
-                        })
+                            settings: None,
+                        }))
                         .await
                         .unwrap();
                 }
@@ -1287,12 +1289,13 @@ async fn ordinary_followup_cannot_overtake_a_queued_native_command() {
                     let sender = sender.take().unwrap();
                     for prompt in ["/review", "Follow up after review"] {
                         sender
-                            .send(SteerMessage {
+                            .send(Steer::Message(SteerMessage {
                                 prompt: prompt.into(),
                                 message_id: None,
                                 attachments: Vec::new(),
                                 skills: Vec::new(),
-                            })
+                                settings: None,
+                            }))
                             .await
                             .unwrap();
                     }
@@ -1415,12 +1418,13 @@ async fn skills_list_parses_dedupes_and_keeps_disabled_and_pathless() {
 async fn image_attachments_become_local_image_inputs_on_start_and_steer() {
     let (controls, steer, _) = controls("Yes");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "and this".into(),
             message_id: None,
             attachments: vec!["/tmp/steer.png".into()],
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .unwrap();
     drop(steer);
@@ -1437,12 +1441,13 @@ async fn image_attachments_become_local_image_inputs_on_start_and_steer() {
 async fn selected_skills_become_skill_inputs_on_start_and_steer() {
     let (controls, steer, _) = controls("Yes");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "Also this".into(),
             message_id: Some("skill-steer".into()),
             attachments: Vec::new(),
             skills: vec![skill_ref("review", "/repo/other/SKILL.md")],
-        })
+            settings: None,
+        }))
         .await
         .unwrap();
     drop(steer);
@@ -1459,12 +1464,13 @@ async fn selected_skills_become_skill_inputs_on_start_and_steer() {
 async fn skills_survive_a_rejected_steer_falling_back_to_a_new_turn() {
     let (controls, steer, _) = controls("Yes");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "redirect please".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: vec![skill_ref("followup", "/repo/followup/SKILL.md")],
-        })
+            settings: None,
+        }))
         .await
         .unwrap();
     let events = run_to_end(&harness(), request("scenario:steer-race"), controls).await;
@@ -1482,4 +1488,353 @@ async fn commands_reject_attachments_and_skills() {
     let mut req = request("/review");
     req.skills.push(skill_ref("review", "/repo/SKILL.md"));
     assert!(harness().run(req, ctl).await.is_err());
+}
+
+fn stop() -> Steer {
+    Steer::StopTurn(oneshot::channel().0)
+}
+
+fn message(prompt: &str) -> Steer {
+    Steer::Message(SteerMessage {
+        prompt: prompt.into(),
+        message_id: None,
+        attachments: Vec::new(),
+        skills: Vec::new(),
+        settings: None,
+    })
+}
+
+type EventStream = futures::stream::BoxStream<'static, Result<AgentEvent, HarnessError>>;
+
+async fn events_through(
+    stream: &mut EventStream,
+    last: impl Fn(&AgentEvent) -> bool,
+) -> Vec<AgentEvent> {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            let event = event.expect("stream event");
+            let found = last(&event);
+            events.push(event);
+            if found {
+                break;
+            }
+        }
+        events
+    })
+    .await
+    .expect("the awaited event arrived in time")
+}
+
+async fn turn_events(stream: &mut EventStream) -> Vec<AgentEvent> {
+    events_through(stream, |event| matches!(event, AgentEvent::Done { .. })).await
+}
+
+fn reply_text(events: &[AgentEvent]) -> String {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::TextDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn done_statuses(events: &[AgentEvent]) -> Vec<DoneStatus> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::Done { status, .. } => Some(*status),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_stopped_turn_ends_and_the_same_process_answers_the_next_message() {
+    let harness = harness().with_graces(Duration::from_secs(8), Duration::from_secs(1));
+    assert!(harness.stops_turn_in_place());
+    let (controls, steer, _token) = controls("Yes");
+    let mut stream = harness
+        .run(request("scenario:stop"), controls)
+        .await
+        .expect("run starts");
+
+    let first = events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::TextDelta { .. })
+    })
+    .await;
+    let first_text = reply_text(&first);
+    let process = first_text
+        .strip_prefix("turn 1 in ")
+        .expect("the fake reports its process id");
+
+    let (acknowledge, mut acknowledged) = oneshot::channel();
+    for sent in [
+        message("/review"),
+        Steer::StopTurn(acknowledge),
+        message("after the stop"),
+    ] {
+        steer.send(sent).await.expect("queued");
+    }
+
+    let stopped = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&stopped), [DoneStatus::Interrupted]);
+    assert!(
+        acknowledged.try_recv().is_ok(),
+        "the stop is confirmed first"
+    );
+    assert_eq!(reply_text(&stopped), "", "{stopped:?}");
+
+    let second = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&second), [DoneStatus::Completed]);
+    assert_eq!(
+        reply_text(&second),
+        format!("turn 2 in {process}: after the stop model=gpt-5.6-sol effort=ultra tier=")
+    );
+
+    let idle = tokio::time::timeout(Duration::from_millis(300), stream.next()).await;
+    assert!(idle.is_err(), "the run stays open after a stop: {idle:?}");
+}
+
+#[tokio::test]
+async fn a_stop_withdraws_the_question_the_turn_was_waiting_on() {
+    let waiting = Arc::new(Mutex::new(Vec::new()));
+    let (steer, steer_rx) = mpsc::channel(8);
+    let controls = RunControls {
+        request_input: Box::new({
+            let waiting = waiting.clone();
+            move |_questions| {
+                let (answer_tx, answer_rx) = oneshot::channel();
+                waiting.lock().unwrap().push(answer_tx);
+                answer_rx
+            }
+        }),
+        steering: steer_rx,
+        interrupt: CancellationToken::new(),
+        permission: tokio::sync::watch::channel(PermissionMode::Ask).1,
+    };
+    let mut req = request("scenario:stop-asking");
+    req.permission = PermissionMode::Ask;
+    let mut stream = harness()
+        .with_graces(Duration::from_secs(8), Duration::from_secs(1))
+        .run(req, controls)
+        .await
+        .expect("run starts");
+    events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::TextDelta { .. })
+    })
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while waiting.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the turn asked its question");
+
+    steer.send(stop()).await.expect("stop queued");
+    let stopped = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&stopped), [DoneStatus::Interrupted]);
+    waiting.lock().unwrap().clear();
+
+    steer.send(message("after")).await.expect("message queued");
+    let second = turn_events(&mut stream).await;
+    assert!(reply_text(&second).starts_with("turn 2 in "), "{second:?}");
+    let late = tokio::time::timeout(Duration::from_millis(300), stream.next()).await;
+    assert!(
+        late.is_err(),
+        "nothing answers the withdrawn question: {late:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_between_turns_is_ignored() {
+    let (controls, steer, _token) = controls("Yes");
+    let mut stream = harness()
+        .run(request("scenario:stop-idle"), controls)
+        .await
+        .expect("run starts");
+    let first = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&first), [DoneStatus::Completed]);
+
+    steer.send(stop()).await.expect("stop queued");
+    steer.send(message("next")).await.expect("message queued");
+    let second = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&second), [DoneStatus::Completed]);
+    assert!(reply_text(&second).contains(": next model="), "{second:?}");
+    assert!(
+        !second
+            .iter()
+            .any(|event| matches!(event, AgentEvent::Error { .. })),
+        "{second:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_answered_with_an_aborted_turn_reports_one_interrupted_done() {
+    let (controls, steer, _token) = controls("Yes");
+    let mut stream = harness()
+        .run(request("scenario:interrupt"), controls)
+        .await
+        .expect("run starts");
+    events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::TextDelta { .. })
+    })
+    .await;
+    steer.send(stop()).await.expect("stop queued");
+    let rest = tokio::time::timeout(
+        Duration::from_secs(10),
+        stream
+            .map(|event| event.expect("stream event"))
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("the fake exits after the aborted turn");
+    assert_eq!(done_statuses(&rest), [DoneStatus::Interrupted]);
+}
+
+#[tokio::test]
+async fn a_stop_the_agent_ignores_ends_the_run() {
+    let harness = CodexHarness::new()
+        .with_executable(fixture_path())
+        .with_graces(Duration::from_millis(100), Duration::from_millis(500));
+    let (controls, steer, _token) = controls("Yes");
+    let mut stream = harness
+        .run(request("scenario:wedge"), controls)
+        .await
+        .expect("run starts");
+
+    let events = tokio::time::timeout(Duration::from_secs(10), async move {
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            let event = event.expect("stream event");
+            if matches!(&event, AgentEvent::TextDelta { text } if text == "working") {
+                steer.send(stop()).await.expect("stop queued");
+            }
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("the run ended in time");
+
+    assert_eq!(done_statuses(&events), [DoneStatus::Interrupted]);
+    assert_eq!(
+        events.last(),
+        Some(&AgentEvent::Done {
+            status: DoneStatus::Interrupted,
+            result: None,
+            error: None,
+            session_id: Some("th-1".into()),
+        })
+    );
+}
+
+#[tokio::test]
+async fn changed_settings_ride_the_next_turn_without_a_restart() {
+    let settings =
+        |model: Option<&str>, reasoning, options: serde_json::Value| agent_harness::TurnSettings {
+            model: model.map(str::to_owned),
+            reasoning,
+            model_options: options.as_object().cloned().unwrap_or_default(),
+        };
+    let none = serde_json::json!({});
+    let launched = settings(
+        Some("gpt-5.6-sol"),
+        Some(ReasoningLevel::Ultra),
+        none.clone(),
+    );
+    let changed = settings(
+        Some("gpt-6-astra"),
+        Some(ReasoningLevel::High),
+        serde_json::json!({ "serviceTier": "fast" }),
+    );
+    let harness = harness();
+    assert!(harness.applies_settings_live(&launched, &changed));
+    for cleared in [
+        settings(
+            None,
+            Some(ReasoningLevel::High),
+            serde_json::json!({ "serviceTier": "fast" }),
+        ),
+        settings(
+            Some("gpt-6-astra"),
+            None,
+            serde_json::json!({ "serviceTier": "fast" }),
+        ),
+        settings(Some("gpt-6-astra"), Some(ReasoningLevel::High), none),
+        settings(
+            Some("gpt-6-astra"),
+            Some(ReasoningLevel::High),
+            serde_json::json!({ "serviceTier": "fast", "other": "on" }),
+        ),
+    ] {
+        assert!(
+            !harness.applies_settings_live(&changed, &cleared),
+            "{cleared:?}"
+        );
+    }
+
+    let (controls, steer, _token) = controls("Yes");
+    let mut stream = harness
+        .run(request("scenario:stop"), controls)
+        .await
+        .expect("run starts");
+    events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::TextDelta { .. })
+    })
+    .await;
+
+    steer
+        .send(Steer::Message(SteerMessage {
+            prompt: "use the other model".into(),
+            message_id: None,
+            attachments: Vec::new(),
+            skills: Vec::new(),
+            settings: Some(changed),
+        }))
+        .await
+        .expect("queued");
+    events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::Steered { .. })
+    })
+    .await;
+    steer.send(stop()).await.expect("stop queued");
+    let stopped = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&stopped), [DoneStatus::Interrupted]);
+
+    for turn in [2, 3] {
+        steer.send(message("go on")).await.expect("queued");
+        let next = turn_events(&mut stream).await;
+        let text = reply_text(&next);
+        assert!(
+            text.starts_with(&format!("turn {turn} in "))
+                && text.ends_with(": go on model=gpt-6-astra effort=high tier=fast"),
+            "{text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_reply_behind_a_burst_of_notifications_still_arrives() {
+    let (controls, steer, _token) = controls("Yes");
+    steer.send(message("redirect")).await.expect("steer queued");
+    let events = run_to_end(&harness(), request("scenario:flood"), controls).await;
+    assert_eq!(reply_text(&events), "x".repeat(600));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::Steered { .. })),
+        "the steer was acknowledged"
+    );
+    assert_eq!(done_statuses(&events), [DoneStatus::Completed]);
+}
+
+#[tokio::test]
+async fn a_chatty_server_does_not_stall_a_lookup() {
+    let cwd = tempfile::tempdir().unwrap();
+    std::fs::write(cwd.path().join(".chatty"), "").unwrap();
+    let skills = harness().skills(cwd.path()).await.expect("skills");
+    assert_eq!(skills.len(), 4);
 }

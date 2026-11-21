@@ -74,10 +74,11 @@ use std::{
         Arc, Once, Weak,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const WINDOW_STATE_IVAR: &str = "windowState";
+const FRAME_PAUSE_GRACE: Duration = Duration::from_millis(200);
 
 static RESTORES_WORKSPACE_AT_LAUNCH_DEFAULT: Once = Once::new();
 
@@ -670,6 +671,7 @@ struct MacWindowState {
     frame_source: Option<WindowFrameSource>,
     frame_requested: Arc<AtomicBool>,
     frame_requests_paused: bool,
+    last_draw: Option<Instant>,
     idle_trim_task: Option<Task<()>>,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
@@ -1108,6 +1110,7 @@ impl MacWindow {
                 frame_source: None,
                 frame_requested: Arc::new(AtomicBool::new(true)),
                 frame_requests_paused: false,
+                last_draw: None,
                 idle_trim_task: None,
                 renderer: renderer::new_renderer(
                     renderer_context,
@@ -2101,6 +2104,13 @@ impl PlatformWindow for MacWindow {
 
     fn pause_frame_requests(&self) {
         let mut state = self.0.lock();
+        // Restarting the display link costs more than ticking idle through a short gap.
+        if state
+            .last_draw
+            .is_some_and(|last_draw| last_draw.elapsed() < FRAME_PAUSE_GRACE)
+        {
+            return;
+        }
         state.frame_requested.store(false, Ordering::Release);
         state.stop_display_link();
         state.frame_requests_paused = true;
@@ -2210,6 +2220,7 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
+        this.last_draw = Some(Instant::now());
         this.renderer.draw(scene);
     }
 

@@ -119,7 +119,7 @@ struct TurnWire {
     requests: mpsc::UnboundedReceiver<String>,
     events: mpsc::Receiver<Result<AgentEvent, HarnessError>>,
     interrupt: tokio_util::sync::CancellationToken,
-    steering: Option<mpsc::Sender<crate::SteerMessage>>,
+    steering: Option<mpsc::Sender<crate::Steer>>,
     _permission: tokio::sync::watch::Sender<crate::PermissionMode>,
     polls: Arc<std::sync::atomic::AtomicUsize>,
     command_failure_release: Option<tokio::sync::oneshot::Sender<()>>,
@@ -136,13 +136,18 @@ impl Drop for TurnWire {
     }
 }
 
-fn steer(prompt: &str) -> crate::SteerMessage {
-    crate::SteerMessage {
+fn stop() -> crate::Steer {
+    crate::Steer::StopTurn(tokio::sync::oneshot::channel().0)
+}
+
+fn steer(prompt: &str) -> crate::Steer {
+    crate::Steer::Message(crate::SteerMessage {
         prompt: prompt.into(),
         message_id: None,
         attachments: Vec::new(),
         skills: Vec::new(),
-    }
+        settings: None,
+    })
 }
 
 impl TurnWire {
@@ -3658,4 +3663,371 @@ async fn unreadable_rules_warn_and_fall_back_to_opencodes_own() {
         AgentEvent::Error { message } if message.contains("Couldn't read OpenCode's permission rules")
     ));
     assert!(wire.posted("/session").await.get("permission").is_none());
+}
+
+fn assistant_text(message: &str, text: &str) -> [Value; 2] {
+    [
+        json!({"type":"message.updated", "properties":{"info":{"id":message, "sessionID":"fixture", "role":"assistant"}}}),
+        json!({"type":"message.part.updated", "properties":{"part":{"id":format!("{message}-text"), "messageID":message, "sessionID":"fixture", "type":"text", "text":text}}}),
+    ]
+}
+
+fn steer_with(prompt: &str, model: &str, reasoning: Option<ReasoningLevel>) -> crate::Steer {
+    crate::Steer::Message(crate::SteerMessage {
+        prompt: prompt.into(),
+        message_id: None,
+        attachments: Vec::new(),
+        skills: Vec::new(),
+        settings: Some(TurnSettings {
+            model: Some(model.into()),
+            reasoning,
+            model_options: serde_json::Map::new(),
+        }),
+    })
+}
+
+fn posts_to(wire: &TurnWire, suffix: &str) -> Vec<Value> {
+    wire.posts
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(path, _)| path.ends_with(suffix))
+        .map(|(_, body)| body.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn stopping_a_turn_keeps_the_server_for_the_next_message() {
+    let mut wire = TurnWire::start_config(false, "1.18.21", json!({ "keepSteering": true })).await;
+    let steering = wire.steering.clone().unwrap();
+    wire.request("/prompt_async").await;
+    wire.status("busy");
+    for event in assistant_text("stopped", "PARTIAL") {
+        wire.bus.send(event).unwrap();
+    }
+    loop {
+        if let AgentEvent::TextDelta { text } = wire.next_event().await {
+            assert_eq!(text, "PARTIAL");
+            break;
+        }
+    }
+    steering.send(steer("dropped with the turn")).await.unwrap();
+    wire.request("/abort").await;
+    let (acknowledge, mut acknowledged) = tokio::sync::oneshot::channel();
+    steering
+        .send(crate::Steer::StopTurn(acknowledge))
+        .await
+        .unwrap();
+    steering.send(steer("next")).await.unwrap();
+    wire.request("/abort").await;
+    for event in assistant_text("stopped", "PARTIAL and more") {
+        wire.bus.send(event).unwrap();
+    }
+    wire.status("idle");
+    wire.idle();
+    let (status, text) = wire.done().await;
+    assert_eq!((status, text.as_str()), (DoneStatus::Interrupted, ""));
+    assert!(
+        acknowledged.try_recv().is_ok(),
+        "the stop is confirmed first"
+    );
+
+    wire.request("/prompt_async").await;
+    for event in assistant_text("stopped", "PARTIAL and more, LATE") {
+        wire.bus.send(event).unwrap();
+    }
+    wire.status("busy");
+    for event in assistant_text("answer", "NEXT") {
+        wire.bus.send(event).unwrap();
+    }
+    wire.status("idle");
+    wire.idle();
+    let (status, text) = wire.done().await;
+    assert_eq!((status, text.as_str()), (DoneStatus::Completed, "NEXT"));
+    assert!(!wire.run.is_finished());
+    let prompts = posts_to(&wire, "/prompt_async");
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    assert_eq!(prompts[1]["parts"][0]["text"], "next");
+}
+
+#[tokio::test]
+async fn stopping_between_turns_does_nothing() {
+    let mut wire = TurnWire::start_config(false, "1.18.21", json!({ "keepSteering": true })).await;
+    let steering = wire.steering.clone().unwrap();
+    wire.request("/prompt_async").await;
+    wire.status("busy");
+    wire.status("idle");
+    wire.idle();
+    assert_eq!(wire.done().await.0, DoneStatus::Completed);
+    steering.send(stop()).await.unwrap();
+    steering.send(steer("after")).await.unwrap();
+    wire.request("/prompt_async").await;
+    assert!(matches!(
+        wire.next_event().await,
+        AgentEvent::Steered { .. }
+    ));
+    assert!(posts_to(&wire, "/abort").is_empty());
+    wire.status("busy");
+    wire.status("idle");
+    wire.idle();
+    assert_eq!(wire.done().await.0, DoneStatus::Completed);
+}
+
+#[tokio::test]
+async fn a_stop_opencode_never_settles_ends_the_run() {
+    let mut wire = TurnWire::start_config(false, "1.18.21", json!({ "keepSteering": true })).await;
+    let steering = wire.steering.clone().unwrap();
+    wire.request("/prompt_async").await;
+    wire.status("busy");
+    let (acknowledge, mut acknowledged) = tokio::sync::oneshot::channel();
+    steering
+        .send(crate::Steer::StopTurn(acknowledge))
+        .await
+        .unwrap();
+    wire.request("/abort").await;
+    assert_eq!(wire.done().await.0, DoneStatus::Interrupted);
+    assert!(
+        acknowledged.try_recv().is_err(),
+        "a killed agent confirms nothing"
+    );
+    tokio::time::timeout(Duration::from_secs(5), &mut wire.run)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn v2_stop_settles_on_the_interrupt_and_keeps_the_run() {
+    let mut wire = TurnWire::start_config(true, "2.0.3", json!({ "keepSteering": true })).await;
+    let steering = wire.steering.clone().unwrap();
+    wire.request("/api/model").await;
+    wire.request("/prompt").await;
+    wire.v2("session.execution.started", json!({"sessionID":"fixture"}));
+    steering.send(stop()).await.unwrap();
+    wire.request("/interrupt").await;
+    wire.v2(
+        "session.execution.interrupted",
+        json!({"sessionID":"fixture","reason":"user"}),
+    );
+    assert_eq!(wire.done().await.0, DoneStatus::Interrupted);
+    steering.send(steer("next")).await.unwrap();
+    wire.request("/prompt").await;
+    wire.v2(
+        "session.execution.succeeded",
+        json!({"sessionID": "fixture"}),
+    );
+    assert_eq!(wire.done().await.0, DoneStatus::Completed);
+}
+
+#[tokio::test]
+async fn a_queued_message_brings_its_model_to_the_next_turn() {
+    let mut wire = TurnWire::start_config(false, "1.18.21", json!({ "keepSteering": true })).await;
+    let steering = wire.steering.clone().unwrap();
+    wire.request("/prompt_async").await;
+    wire.status("busy");
+    steering
+        .send(steer_with("second", "anthropic/sonnet", None))
+        .await
+        .unwrap();
+    wire.request("/abort").await;
+    wire.status("idle");
+    wire.idle();
+    wire.request("/prompt_async").await;
+    wire.status("busy");
+    wire.status("idle");
+    wire.idle();
+    assert_eq!(wire.done().await.0, DoneStatus::Completed);
+    steering.send(steer("third")).await.unwrap();
+    wire.request("/prompt_async").await;
+    let prompts = posts_to(&wire, "/prompt_async");
+    let sonnet = json!({"providerID": "anthropic", "modelID": "sonnet"});
+    assert_eq!(prompts[0].get("model"), None);
+    assert_eq!(prompts[1]["model"], sonnet);
+    assert_eq!(prompts[2]["model"], sonnet, "later turns keep the model");
+}
+
+#[tokio::test]
+async fn v2_settings_change_the_session_model_before_the_prompt() {
+    let mut wire = TurnWire::start_config(true, "2.0.3", json!({ "keepSteering": true })).await;
+    let steering = wire.steering.clone().unwrap();
+    wire.request("/api/model").await;
+    wire.request("/prompt").await;
+    wire.v2(
+        "session.execution.succeeded",
+        json!({"sessionID": "fixture"}),
+    );
+    assert_eq!(wire.done().await.0, DoneStatus::Completed);
+    steering
+        .send(steer_with(
+            "second",
+            "opencode/long-context",
+            Some(ReasoningLevel::Low),
+        ))
+        .await
+        .unwrap();
+    wire.request("/api/model").await;
+    wire.request("/prompt").await;
+    assert_eq!(
+        posts_to(&wire, "/api/session/fixture/model"),
+        [
+            json!({"model":{"providerID":"opencode","id":"muse","variant":"low"}}),
+            json!({"model":{"providerID":"opencode","id":"long-context"}}),
+        ]
+    );
+}
+
+#[test]
+fn only_model_and_effort_changes_apply_live() {
+    let harness = OpencodeHarness::new();
+    let settings = |model: Option<&str>, reasoning| TurnSettings {
+        model: model.map(str::to_owned),
+        reasoning,
+        model_options: serde_json::Map::new(),
+    };
+    let before = settings(Some("opencode/muse"), Some(ReasoningLevel::Low));
+    assert!(harness.stops_turn_in_place());
+    assert!(harness.applies_settings_live(&before, &settings(Some("opencode/muse"), None)));
+    assert!(harness.applies_settings_live(&settings(None, None), &before));
+    assert!(!harness.applies_settings_live(&before, &settings(None, None)));
+    let mut other_agent = before.clone();
+    other_agent
+        .model_options
+        .insert("agent".into(), "plan".into());
+    assert!(!harness.applies_settings_live(&before, &other_agent));
+}
+
+#[cfg(unix)]
+fn lookup_fake(directory: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let executable = directory.join("opencode");
+    std::fs::write(
+        &executable,
+        r#"#!/usr/bin/env python3
+import json, os, sys, urllib.parse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port = int(sys.argv[sys.argv.index("--port") + 1])
+state = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(state, "boots"), "a") as boots:
+    boots.write(f"{os.getpid()}\n")
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        url = urllib.parse.urlparse(self.path)
+        folder = os.path.basename(urllib.parse.parse_qs(url.query).get("directory", [""])[0])
+        if url.path == "/global/health":
+            body = {"healthy": True, "version": "1.18.20"}
+        elif url.path == "/command":
+            body = [{"name": folder}]
+        elif url.path == "/session":
+            body = [{"id": "saved", "title": folder, "time": {"updated": 1000}}]
+        elif url.path == "/session/saved/message":
+            body = []
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        if url.path != "/global/health":
+            with open(os.path.join(state, "requests"), "a") as requests:
+                requests.write(f"{url.path} {folder}\n")
+        data = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+    def log_message(self, *args):
+        pass
+HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    executable
+}
+
+#[cfg(unix)]
+fn booted(fixture: &Path) -> Vec<i32> {
+    std::fs::read_to_string(fixture.join("boots"))
+        .unwrap_or_default()
+        .lines()
+        .map(|pid| pid.parse().unwrap())
+        .collect()
+}
+
+#[cfg(unix)]
+async fn wait_for_exit(pid: i32) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        // SAFETY: signal 0 only checks that the process still exists.
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the lookup server was not stopped");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn lookups_for_every_folder_share_one_server() {
+    let fixture = tempfile::tempdir().unwrap();
+    let first = tempfile::Builder::new().prefix("first").tempdir().unwrap();
+    let second = tempfile::Builder::new().prefix("second").tempdir().unwrap();
+    let folder = |path: &Path| path.file_name().unwrap().to_string_lossy().into_owned();
+    let harness = OpencodeHarness::new()
+        .with_executable(lookup_fake(fixture.path()))
+        .with_graces(Duration::from_millis(100), Duration::from_millis(100));
+
+    let (commands, sessions, history) = tokio::join!(
+        harness.commands(first.path()),
+        harness.external_sessions(second.path()),
+        harness.external_history(first.path(), "saved"),
+    );
+    assert_eq!(commands.unwrap()[0].name, folder(first.path()));
+    assert_eq!(sessions.unwrap()[0].title, folder(second.path()));
+    assert_eq!(history.unwrap(), Vec::new());
+    assert_eq!(
+        harness.commands(second.path()).await.unwrap()[0].name,
+        folder(second.path())
+    );
+    assert_eq!(
+        harness.commands(first.path()).await.unwrap()[0].name,
+        folder(first.path())
+    );
+    assert!(harness.skills(second.path()).await.unwrap().is_empty());
+    assert_eq!(booted(fixture.path()).len(), 1);
+    let requests = std::fs::read_to_string(fixture.path().join("requests")).unwrap();
+    let command_requests = requests
+        .lines()
+        .filter(|request| request.starts_with("/command "))
+        .count();
+    assert_eq!(command_requests, 2, "one per folder: {requests}");
+
+    let missing = harness.external_history(first.path(), "missing").await;
+    assert!(missing.is_err());
+    harness.external_sessions(first.path()).await.unwrap();
+    let boots = booted(fixture.path());
+    assert_eq!(boots.len(), 2, "a failed lookup starts over");
+    wait_for_exit(boots[0]).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_lookup_server_stops_when_idle_or_with_the_harness() {
+    let fixture = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let mut harness = OpencodeHarness::new()
+        .with_executable(lookup_fake(fixture.path()))
+        .with_graces(Duration::from_millis(100), Duration::from_millis(100));
+    harness.lookup_idle = Duration::from_millis(300);
+
+    harness.external_sessions(project.path()).await.unwrap();
+    wait_for_exit(booted(fixture.path())[0]).await;
+
+    harness.lookup_idle = Duration::from_secs(600);
+    harness.external_sessions(project.path()).await.unwrap();
+    let boots = booted(fixture.path());
+    assert_eq!(boots.len(), 2);
+    // SAFETY: signal 0 only checks that the process still exists.
+    assert_eq!(unsafe { libc::kill(boots[1], 0) }, 0);
+    drop(harness);
+    wait_for_exit(boots[1]).await;
 }

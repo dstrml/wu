@@ -18,7 +18,7 @@ use crate::{
     AgentChatSettings, MoveChatToPanel, MoveChatToTab, RenameChat, Send, Stop, SubmitAnswer,
     chat_style::{
         Chip, accent, flavour_seed, flavour_word, format_elapsed, gradient_spinner, hairline, ink,
-        mix, page, text_faint, ui, wash,
+        mix, page, text_faint, ui, wash, working_animation,
     },
     model_picker::{ModelPicker, Selection, agent_icon},
     session::{AgentSession, AgentStore, Entry, PendingQuestion, Prompt, ToolEntry, ToolStatus},
@@ -38,7 +38,8 @@ use gpui::{
     Hsla, IntoElement, ParentElement, KeyContext, PathBuilder, PathStyle, Pixels, Point, Render,
     ScrollHandle, SharedString, StyleRefinement, Styled, ObjectFit, Subscription, Svg,
     ease_out_quint, Task, TextAlign, TextRun, TextStyleRefinement, Transformation,
-    UnderlineStyle, WeakEntity, Window, canvas, div, img, point, px, radians, size, svg,
+    UnderlineStyle, WeakEntity, Window, canvas, div, img, percentage, point, px, radians, size,
+    svg,
 };
 use markdown::{
     CodeBlockRenderer, HeadingLevelStyles, Markdown, MarkdownElement, MarkdownFont, MarkdownOptions,
@@ -51,13 +52,14 @@ use gpui::{FollowMode, ListAlignment, ListState, list};
 use gpui::ListOffset;
 use std::{
     cell::Cell,
+    ops::Range,
     rc::Rc,
     {sync::Arc, time::Duration},
 };
 use theme::ActiveTheme as _;
 use util::ResultExt as _;
 use ui::{
-    CommonAnimationExt as _, Icon, IconName, IconSize, Label, PopoverMenu, PopoverMenuHandle,
+    Icon, IconName, IconSize, Label, PopoverMenu, PopoverMenuHandle,
     Tooltip, prelude::*,
 };
 use std::time::Instant;
@@ -128,6 +130,7 @@ const DOWNLOADED_FEEDBACK: Duration = Duration::from_secs(3);
 const REVEALED_HIGHLIGHT: Duration = Duration::from_secs(2);
 const AUTO_ADVANCE: Duration = Duration::from_millis(220);
 const USAGE_POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const SEARCH_REFRESH_DELAY: Duration = Duration::from_millis(250);
 const GROUP_SHIMMER: Duration = Duration::from_millis(3400);
 const FADE_IN: Duration = Duration::from_millis(260);
 const GLIDE: Duration = Duration::from_millis(280);
@@ -153,7 +156,20 @@ pub struct ChatView {
     project: Entity<Project>,
     composer: Entity<Editor>,
     list: ListState,
-    turns: Vec<Turn>,
+    transcript: Transcript,
+    hovered_row: Option<Row>,
+    frame_message_style: Option<MarkdownStyle>,
+    scanned_entries: usize,
+    scanned_regroups: usize,
+    scanned_tail: Option<(gpui::EntityId, usize)>,
+    latest_todo: Option<usize>,
+    tab_state: Option<TabState>,
+    search_refresh_pending: bool,
+    _search_refresh: Task<()>,
+    has_rendered: bool,
+    update_check_due: bool,
+    window_active: bool,
+    images: Entity<image_viewer::ChatImageCache>,
     show_scroll_button: bool,
     expanded_rows: HashSet<String>,
     group_overrides: HashMap<String, bool>,
@@ -182,7 +198,7 @@ pub struct ChatView {
     _glide: Task<()>,
     container_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     root_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    painted_turns: Rc<std::cell::RefCell<HashMap<usize, Bounds<Pixels>>>>,
+    painted_rows: Rc<std::cell::RefCell<HashMap<Row, Bounds<Pixels>>>>,
     this: WeakEntity<ChatView>,
     rename_editor: Option<Entity<Editor>>,
     _rename_subscription: Option<Subscription>,
@@ -193,10 +209,12 @@ pub struct ChatView {
     expanded_work: HashSet<usize>,
     todo_panel: todo_panel::TodoPanelState,
     known_paths: HashMap<std::path::PathBuf, links::PathState>,
-    scanned_sources: HashMap<gpui::EntityId, usize>,
+    next_path_recheck: Option<Instant>,
     link_menu: Option<links::LinkMenu>,
     diagrams: Entity<MermaidDiagrams>,
-    diagram_scan: (Option<(DiagramTheme, usize)>, HashMap<gpui::EntityId, usize>),
+    diagram_theme: Option<(Arc<theme::Theme>, DiagramTheme)>,
+    diagram_images: HashMap<u64, Arc<gpui::Image>>,
+    diagram_sources: HashSet<String>,
     diagram_sources_shown: HashSet<String>,
     editing_queued: Option<queue_panel::QueuedEdit>,
     lightbox_focus: FocusHandle,
@@ -236,7 +254,6 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let kind = session.read(cx).kind();
         let flavour = flavour_seed(&session.read(cx).metadata().id);
         let composer = cx.new(|cx| {
             let mut editor = Editor::auto_height(1, 10, window, cx);
@@ -248,10 +265,6 @@ impl ChatView {
                 ..Default::default()
             });
             editor
-        });
-        store.update(cx, |store, cx| {
-            store.ensure_models(kind, cx);
-            store.refresh_plan_usage(kind, false, cx);
         });
         let markdown = store.read(cx).languages().language_for_name("Markdown");
         cx.spawn({
@@ -268,35 +281,22 @@ impl ChatView {
             }
         })
         .detach();
-        let poll_usage = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(USAGE_POLL_INTERVAL).await;
-                let refreshed = this.update(cx, |this, cx| {
-                    this.store
-                        .update(cx, |store, cx| store.refresh_plan_usage(kind, false, cx))
-                });
-                if refreshed.is_err() {
-                    return;
-                }
-            }
-        });
         let list = ListState::new(0, ListAlignment::Top, px(LIST_OVERDRAW));
         list.set_follow_mode(FollowMode::Tail);
         let diagrams = cx.new(|_| MermaidDiagrams::default());
+        let images = image_viewer::ChatImageCache::new(cx);
         let subscriptions = vec![
             cx.observe_in(&session, window, |this, session, window, cx| {
                 if session.read(cx).is_deleted() {
                     cx.emit(ItemEvent::CloseItem);
                     return;
                 }
-                this.sync_turns(cx);
-                if !this.search.is_empty() {
-                    cx.emit(workspace::searchable::SearchEvent::MatchesInvalidated);
-                }
+                this.sync_transcript(cx);
+                this.schedule_search_refresh(cx);
                 if this.subagent.is_none() {
                     this.sync_answer_editors(window, cx);
                 }
-                cx.emit(ItemEvent::UpdateTab);
+                this.sync_tab(cx);
                 cx.notify();
             }),
             cx.subscribe(&composer, |this, _, event: &EditorEvent, cx| match event {
@@ -307,15 +307,29 @@ impl ChatView {
                 EditorEvent::SelectionsChanged { .. } => this.update_command_menu(cx),
                 _ => {}
             }),
-            cx.on_release(|this, cx| this.clear_search_highlights(cx)),
-            cx.observe_window_activation(window, |_, _, cx| cx.notify()),
+            cx.on_release(|this, cx| {
+                this.clear_search_highlights(cx);
+                this.release_diagram_images(None, cx);
+            }),
+            cx.observe_window_activation(window, |this, window, cx| {
+                this.window_active = window.is_window_active();
+                if this.window_active && this.has_rendered && this.subagent.is_none() {
+                    let kind = this.session.read(cx).kind();
+                    this.store
+                        .update(cx, |store, cx| store.refresh_plan_usage(kind, false, cx));
+                }
+                cx.notify();
+            }),
             cx.observe(&store, |this, _, cx| {
                 if this.subagent.is_none() {
                     this.pin_default_settings(cx);
                 }
                 cx.notify();
             }),
-            cx.observe(&diagrams, |_, _, cx| cx.notify()),
+            cx.observe(&diagrams, |this, _, cx| {
+                this.track_diagram_images(cx);
+                cx.notify();
+            }),
         ];
         let mut view = Self {
             session,
@@ -331,7 +345,20 @@ impl ChatView {
             project,
             composer,
             list,
-            turns: Vec::new(),
+            transcript: Transcript::default(),
+            hovered_row: None,
+            frame_message_style: None,
+            scanned_entries: 0,
+            scanned_regroups: 0,
+            scanned_tail: None,
+            latest_todo: None,
+            tab_state: None,
+            search_refresh_pending: false,
+            _search_refresh: Task::ready(()),
+            has_rendered: false,
+            update_check_due: false,
+            window_active: window.is_window_active(),
+            images,
             show_scroll_button: false,
             expanded_rows: HashSet::default(),
             group_overrides: HashMap::default(),
@@ -360,7 +387,7 @@ impl ChatView {
             _glide: Task::ready(()),
             container_bounds: Default::default(),
             root_bounds: Default::default(),
-            painted_turns: Default::default(),
+            painted_rows: Default::default(),
             this: cx.entity().downgrade(),
             rename_editor: None,
             _rename_subscription: None,
@@ -371,10 +398,12 @@ impl ChatView {
             expanded_work: HashSet::default(),
             todo_panel: Default::default(),
             known_paths: HashMap::default(),
-            scanned_sources: HashMap::default(),
+            next_path_recheck: None,
             link_menu: None,
             diagrams,
-            diagram_scan: Default::default(),
+            diagram_theme: None,
+            diagram_images: HashMap::default(),
+            diagram_sources: HashSet::default(),
             diagram_sources_shown: HashSet::default(),
             editing_queued: None,
             lightbox_focus: cx.focus_handle(),
@@ -389,13 +418,77 @@ impl ChatView {
             _copied_reset: Task::ready(()),
             _revealed_reset: Task::ready(()),
             _auto_advance: Task::ready(()),
-            _poll_usage: poll_usage,
+            _poll_usage: Task::ready(()),
             _subscriptions: subscriptions,
         };
         view.pin_default_settings(cx);
         view.sync_answer_editors(window, cx);
-        view.sync_turns(cx);
+        view.sync_transcript(cx);
+        view.tab_state = Some(view.current_tab_state(cx));
         view
+    }
+
+    fn start_lookups(&mut self, cx: &mut Context<Self>) {
+        let kind = self.session.read(cx).kind();
+        let check_update = std::mem::take(&mut self.update_check_due);
+        let store = self.store.clone();
+        cx.defer(move |cx| {
+            store.update(cx, |store, cx| {
+                store.ensure_models(kind, cx);
+                store.refresh_plan_usage(kind, false, cx);
+                if check_update {
+                    store.update_agent_if_due(kind, cx);
+                }
+            })
+        });
+        self._poll_usage = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(USAGE_POLL_INTERVAL).await;
+                let polled = this.update(cx, |this, cx| {
+                    if this.window_active {
+                        this.store
+                            .update(cx, |store, cx| store.refresh_plan_usage(kind, false, cx));
+                    }
+                });
+                if polled.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn current_tab_state(&self, cx: &App) -> TabState {
+        TabState {
+            title: self.title(cx),
+            working: self.is_working(cx),
+            needs_input: self.subagent.is_none()
+                && !self.session.read(cx).pending_questions().is_empty(),
+        }
+    }
+
+    fn sync_tab(&mut self, cx: &mut Context<Self>) {
+        let state = self.current_tab_state(cx);
+        if self.tab_state.as_ref() != Some(&state) {
+            self.tab_state = Some(state);
+            cx.emit(ItemEvent::UpdateTab);
+        }
+    }
+
+    fn schedule_search_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.search.is_empty() || self.search_refresh_pending {
+            return;
+        }
+        self.search_refresh_pending = true;
+        self._search_refresh = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SEARCH_REFRESH_DELAY).await;
+            this.update(cx, |this, cx| {
+                this.search_refresh_pending = false;
+                if !this.search.is_empty() {
+                    cx.emit(workspace::searchable::SearchEvent::MatchesInvalidated);
+                }
+            })
+            .ok();
+        });
     }
 
     fn sync_answer_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -849,7 +942,7 @@ impl ChatView {
         text: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.sync_turns(cx);
+        self.sync_transcript(cx);
         let count = self.entries(cx).len();
         let Some(target) = std::iter::once(entry)
             .chain(0..count)
@@ -857,12 +950,12 @@ impl ChatView {
         else {
             return false;
         };
-        let Some(turn) = self.turn_for_entry(target) else {
+        let Some(turn) = self.transcript.turn_for_entry(target) else {
             return false;
         };
         self.list.pause_following_tail();
         self.list.scroll_to(gpui::ListOffset {
-            item_ix: turn,
+            item_ix: self.transcript.turn_rows(turn).start,
             offset_in_item: px(0.),
         });
         if matches!(self.entries(cx).get(target), Some(Entry::User { .. })) {
@@ -886,15 +979,12 @@ impl ChatView {
         match entries.get(entry)? {
             Entry::User { text, .. } => Some(text.to_string()),
             Entry::Assistant { .. } => {
-                let turn = self.turns.get(self.turn_for_entry(entry)?)?;
-                let messages: Vec<usize> = turn
-                    .items
-                    .iter()
-                    .copied()
-                    .filter(|index| matches!(entries.get(*index), Some(Entry::Assistant { .. })))
-                    .collect();
-                (messages.first() == Some(&entry))
-                    .then(|| CopySource::Messages(messages).text(self, cx))
+                let turn = self
+                    .transcript
+                    .turns
+                    .get(self.transcript.turn_for_entry(entry)?)?;
+                (turn.first_reply == Some(entry))
+                    .then(|| CopySource::Messages(turn.items.clone()).text(self, cx))
             }
             _ => None,
         }
@@ -1294,73 +1384,226 @@ impl ChatView {
         }
     }
 
-    fn sync_turns(&mut self, cx: &App) {
-        let turns = group_turns(self.entries(cx));
-        let old_count = self.turns.len();
-        let unchanged = self
-            .turns
-            .iter()
-            .zip(&turns)
-            .take_while(|(old, new)| old.user == new.user)
-            .count();
-        // The growing last turn re-measures itself while visible; splicing it would reset the scroll.
-        if unchanged < old_count || turns.len() > old_count {
-            let start = unchanged.min(old_count);
-            self.list.splice(start..old_count, turns.len() - start);
+    fn row_flags(&self, cx: &App) -> RowFlags {
+        RowFlags {
+            working: self.is_working(cx),
+            compact: AgentChatSettings::get_global(cx).compact_transcript,
+            standalone: self.subagent.is_none(),
         }
-        self.turns = turns;
     }
 
-    fn render_turn(&mut self, turn_index: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(Turn { user, items }) = self.turns.get(turn_index).cloned() else {
+    fn sync_turns(&mut self, cx: &App) {
+        let flags = self.row_flags(cx);
+        let entries = self.entries(cx);
+        let edits = self.transcript.sync(entries, flags, &self.expanded_work);
+        self.apply_row_edits(edits);
+    }
+
+    fn rebuild_rows(&mut self, from_turn: usize, cx: &App) {
+        let entries = self.entries(cx);
+        let edits = self
+            .transcript
+            .rebuild_rows(from_turn, entries, &self.expanded_work);
+        self.apply_row_edits(edits);
+    }
+
+    fn apply_row_edits(&self, edits: RowEdits) {
+        if let Some((range, count)) = edits.splice {
+            self.list.splice(range, count);
+        }
+        // A list following its tail never uses the scroll anchor a remeasure leaves behind.
+        if self.list.is_following_tail() {
+            return;
+        }
+        for row in edits.remeasure {
+            self.list.remeasure_items(row..row + 1);
+        }
+    }
+
+    fn sync_transcript(&mut self, cx: &mut Context<Self>) {
+        self.sync_turns(cx);
+        self.scan_new_entries(cx);
+    }
+
+    fn scan_new_entries(&mut self, cx: &mut Context<Self>) {
+        let entries = self.entries(cx);
+        if self.scanned_regroups != self.transcript.regroups || entries.len() < self.scanned_entries
+        {
+            self.scanned_regroups = self.transcript.regroups;
+            self.scanned_entries = 0;
+            self.scanned_tail = None;
+            self.latest_todo = None;
+        }
+        let cwd = &self.session.read(cx).metadata().cwd;
+        let wants_links = self.has_rendered;
+        let wants_diagrams = self.diagram_theme.is_some();
+        let mut paths = Vec::new();
+        let mut diagrams = Vec::new();
+        let mut tail = None;
+        let first = self.scanned_entries.saturating_sub(1);
+        for (index, entry) in entries.iter().enumerate().skip(first) {
+            tail = None;
+            match entry {
+                Entry::Tool(tool) if matches!(tool.call, ToolCall::Todo { .. }) => {
+                    self.latest_todo = Some(index);
+                }
+                Entry::Assistant { markdown, .. } => {
+                    let source = markdown.read(cx).source();
+                    tail = Some((markdown.entity_id(), source.len()));
+                    if self.scanned_tail == tail {
+                        continue;
+                    }
+                    if wants_links {
+                        links::path_candidates(source, cwd, &mut paths);
+                    }
+                    if wants_diagrams && source.contains("```mermaid") {
+                        diagrams.extend(mermaid::mermaid_sources(source));
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.scanned_tail = tail;
+        self.scanned_entries = entries.len();
+        self.check_paths(paths, cx);
+        self.request_diagrams(diagrams, None, cx);
+    }
+
+    fn message_style_for_frame(&mut self, window: &Window, cx: &App) -> MarkdownStyle {
+        self.frame_message_style
+            .get_or_insert_with(|| Self::message_style(window, cx))
+            .clone()
+    }
+
+    fn set_row_hovered(&mut self, row: Row, hovered: bool, cx: &mut Context<Self>) {
+        let turn_before = self.hovered_row.map(|row| row.turn);
+        if hovered {
+            self.hovered_row = Some(row);
+        } else if self.hovered_row == Some(row) {
+            self.hovered_row = None;
+        }
+        if self.hovered_row.map(|row| row.turn) != turn_before {
+            cx.notify();
+        }
+    }
+
+    fn render_row(
+        &mut self,
+        row_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(row) = self.transcript.rows.get(row_index).copied() else {
             return div().into_any_element();
         };
-        let entries = self.entries(cx);
-        let is_working = self.is_working(cx);
-        let is_first_turn = turn_index == 0;
-        let is_last_turn = turn_index + 1 == self.turns.len();
-        let leading_gap = if is_first_turn && user.is_none() {
-            0.
-        } else {
-            SPACE_LG
+        let Some(turn) = self.transcript.turns.get(row.turn).cloned() else {
+            return div().into_any_element();
         };
-        let undelivered = user.filter(|index| {
-            self.subagent.is_none()
-                && matches!(entries.get(*index), Some(Entry::User { undelivered: true, .. }))
-        });
-        let message_style = Self::message_style(window, cx);
-        let user_text = user.and_then(|index| self.user_markdown(index, cx));
-        let user_style = Self::user_style(window, cx);
-        let painted_turns = self.painted_turns.clone();
-        let top_pad = if is_first_turn {
-            self.first_row_inset()
-        } else {
-            SPACE_LG
+        let is_first_turn = row.turn == 0;
+        let is_last_turn = row.turn + 1 == self.transcript.turns.len();
+        let previous = row_index
+            .checked_sub(1)
+            .and_then(|previous| self.transcript.rows.get(previous))
+            .filter(|previous| previous.turn == row.turn)
+            .copied();
+        let is_last_in_turn = self
+            .transcript
+            .rows
+            .get(row_index + 1)
+            .is_none_or(|next| next.turn != row.turn);
+        let top_pad = match previous {
+            Some(_) => 0.,
+            None if is_first_turn => self.first_row_inset(),
+            None => SPACE_LG,
         };
-        let bottom_pad = if is_last_turn {
+        let bottom_pad = if is_last_turn && is_last_in_turn {
             TRANSCRIPT_BOTTOM_PAD
         } else {
             0.
         };
-        let turn = v_flex()
+        let gap = match (
+            previous.and_then(|row| row.kind.spacing()),
+            row.kind.spacing(),
+        ) {
+            (Some(previous), Some(current)) => top_gap(previous, current),
+            (None, Some(_)) if is_first_turn && turn.user.is_none() => 0.,
+            (None, Some(_)) => SPACE_LG,
+            (_, None) => 0.,
+        };
+        let content = match row.kind {
+            RowKind::User(index) => {
+                let user_text = self.user_markdown(index, cx);
+                let user_style = Self::user_style(self.message_style_for_frame(window, cx));
+                self.render_user_message(index, user_text, user_style, cx)
+            }
+            RowKind::Worked => self.render_worked_header(row.turn, &turn, cx),
+            RowKind::ToolGroup { start, end } => {
+                let last_entry = self.entries(cx).len().saturating_sub(1);
+                let is_live = self.is_working(cx) && (start..end).contains(&last_entry);
+                self.render_tool_group(start..end, is_live, window, cx)
+            }
+            RowKind::Message(index) => {
+                let style = self.message_style_for_frame(window, cx);
+                self.render_reply(index, style, cx)
+            }
+            RowKind::Notice(index) => self.render_notice(index, cx),
+            RowKind::Image(index) => self.render_generated_image(index, cx),
+            RowKind::Actions => self.render_turn_actions(row.turn, &turn, cx),
+            RowKind::Working => self.render_working_trailer(cx),
+            RowKind::Retry(index) => self.render_retry(index, cx),
+        };
+        let content = match row.kind.hover_id(row.turn) {
+            Some(id) => {
+                let hovered_row = row.identity();
+                let wrapper = if row.kind.spacing().is_some() {
+                    div()
+                } else {
+                    v_flex()
+                };
+                wrapper
+                    .id(id)
+                    .w_full()
+                    .pt(px(gap))
+                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        this.set_row_hovered(hovered_row, *hovered, cx)
+                    }))
+                    .child(content)
+                    .into_any_element()
+            }
+            None => content,
+        };
+        let painted_rows = self.painted_rows.clone();
+        let painted_row = row.identity();
+        let row_element = v_flex()
             .relative()
             .w_full()
-            .when(self.revealed_turn == Some(turn_index), |this| {
+            .when(self.revealed_turn == Some(row.turn), |this| {
+                let top = if previous.is_none() {
+                    top_pad - REVEALED_HIGHLIGHT_PAD
+                } else {
+                    0.
+                };
+                let bottom = if is_last_in_turn {
+                    bottom_pad - REVEALED_HIGHLIGHT_PAD
+                } else {
+                    0.
+                };
                 this.child(
                     div()
                         .absolute()
-                        .top(px(top_pad - REVEALED_HIGHLIGHT_PAD))
-                        .bottom(px(bottom_pad - REVEALED_HIGHLIGHT_PAD))
+                        .top(px(top))
+                        .bottom(px(bottom))
                         .left(px(-REVEALED_HIGHLIGHT_PAD))
                         .right(px(-REVEALED_HIGHLIGHT_PAD))
-                        .rounded(px(12.))
+                        .when(previous.is_none(), |this| this.rounded_t(px(12.)))
+                        .when(is_last_in_turn, |this| this.rounded_b(px(12.)))
                         .bg(accent(cx).opacity(0.08)),
                 )
             })
             .child(
                 canvas(
                     move |bounds, _, _| {
-                        painted_turns.borrow_mut().insert(turn_index, bounds);
+                        painted_rows.borrow_mut().insert(painted_row, bounds);
                     },
                     |_, _, _, _| {},
                 )
@@ -1369,32 +1612,13 @@ impl ChatView {
             )
             .pt(px(top_pad))
             .pb(px(bottom_pad))
-            .when_some(user, |this, index| {
-                this.child(self.render_user_message(index, user_text, user_style, cx))
-            })
-            .when(
-                !items.is_empty() || (is_last_turn && is_working),
-                |this| {
-                    this.child(self.render_assistant_turn(
-                        turn_index,
-                        &items,
-                        is_last_turn,
-                        leading_gap,
-                        &message_style,
-                        window,
-                        cx,
-                    ))
-                },
-            )
-            .when_some(undelivered, |this, index| {
-                this.child(self.render_retry(index, cx))
-            });
-        column(turn, self.gutter()).into_any_element()
+            .child(content);
+        column(row_element, self.gutter()).into_any_element()
     }
 
     fn hover_strip(
         &self,
-        group: SharedString,
+        reveal: StripReveal,
         at: i64,
         copy: Option<(SharedString, CopySource)>,
         save: Option<SaveTarget>,
@@ -1417,9 +1641,8 @@ impl ChatView {
             .when(align_end, |this| this.justify_end())
             .gap(px(SPACE_SM))
             .child(
-                h_flex()
-                    .gap(px(SPACE_SM))
-                    .visible_on_hover(group.clone())
+                reveal
+                    .apply(h_flex().gap(px(SPACE_SM)))
                     .when_some(timestamp, |this, timestamp| {
                         this.child(
                             div()
@@ -1487,15 +1710,17 @@ impl ChatView {
                     .saved_text(&chat_id, target.entry)
                     .is_some_and(|saved| saved == target.source.text(self, cx));
                 this.child(
-                    div()
-                        .id(("save-message", target.entry))
-                        .size(px(SPACE_MD * 2.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(6.))
-                        .cursor_pointer()
-                        .visible_on_hover(group)
+                    reveal
+                        .apply(
+                            div()
+                                .id(("save-message", target.entry))
+                                .size(px(SPACE_MD * 2.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.))
+                                .cursor_pointer(),
+                        )
                         .hover(|style| style.bg(ink(0.08, cx)))
                         .tooltip(Tooltip::text(if saved {
                             tc!("chat", "Remove from saved")
@@ -1562,8 +1787,7 @@ impl ChatView {
         Some(markdown)
     }
 
-    fn user_style(window: &Window, cx: &App) -> MarkdownStyle {
-        let mut style = Self::message_style(window, cx);
+    fn user_style(mut style: MarkdownStyle) -> MarkdownStyle {
         style.base_text_style.line_height = ui(USER_LINE_HEIGHT).into();
         style.container_style.text.font_size = Some(ui(14.).into());
         style.container_style.text.line_height = Some(ui(USER_LINE_HEIGHT).into());
@@ -1650,6 +1874,7 @@ impl ChatView {
                                 .cursor_pointer()
                                 .child(
                                     img(path.clone())
+                                        .image_cache(&self.images)
                                         .w(px(ATTACHMENT_THUMB_WIDTH - 2.))
                                         .h(px(ATTACHMENT_THUMB_HEIGHT - 2.))
                                         .rounded(px(7.))
@@ -1727,7 +1952,15 @@ impl ChatView {
                         )
                     }),
             )
-            .child(self.hover_strip(group, *at, copy, save, editable, true, cx))
+            .child(self.hover_strip(
+                StripReveal::OnGroupHover(group),
+                *at,
+                copy,
+                save,
+                editable,
+                true,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1799,287 +2032,218 @@ impl ChatView {
             )
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn render_assistant_turn(
+    fn render_worked_header(
         &self,
         turn_index: usize,
-        items: &[usize],
-        is_last_turn: bool,
-        leading_gap: f32,
-        message_style: &MarkdownStyle,
-        window: &Window,
+        turn: &Turn,
         cx: &Context<Self>,
     ) -> AnyElement {
         let entries = self.entries(cx);
-        let is_working = self.is_working(cx);
-        let last_entry = entries.len().saturating_sub(1);
-        let group: SharedString = format!("agent-turn-{turn_index}").into();
-        let mut rows: Vec<(TranscriptRow, AnyElement)> = Vec::new();
-        let all_items = items;
-        let reply_position = items
-            .iter()
-            .rposition(|index| matches!(entries[*index], Entry::Assistant { .. }));
-        let compact = AgentChatSettings::get_global(cx).compact_transcript
-            && !(is_working && is_last_turn)
-            && reply_position.is_some_and(|position| position > 0);
-        let items = match reply_position {
-            Some(position) if compact && !self.expanded_work.contains(&turn_index) => {
-                &items[position..]
-            }
-            _ => items,
+        let started = turn.user.and_then(|index| match entries.get(index) {
+            Some(Entry::User { at, .. }) => Some(*at),
+            _ => None,
+        });
+        let finished = turn.last_reply.and_then(|index| match entries.get(index) {
+            Some(Entry::Assistant { at, .. }) => Some(*at),
+            _ => None,
+        });
+        let label = match (started, finished) {
+            (Some(started), Some(finished)) if finished > started => t!(
+                "Worked for {duration}",
+                duration = format_elapsed((finished - started) as u64)
+            )
+            .to_string(),
+            _ => t!("Worked").to_string(),
         };
-        if compact {
-            let started = all_items
-                .first()
-                .and_then(|first| first.checked_sub(1))
-                .and_then(|index| match &entries[index] {
-                    Entry::User { at, .. } => Some(*at),
-                    _ => None,
-                });
-            let finished = all_items.iter().rev().find_map(|index| match &entries[*index] {
-                Entry::Assistant { at, .. } | Entry::User { at, .. } => Some(*at),
-                _ => None,
-            });
-            let label = match (started, finished) {
-                (Some(started), Some(finished)) if finished > started => t!(
-                    "Worked for {duration}",
-                    duration = format_elapsed((finished - started) as u64)
-                )
-                .to_string(),
-                _ => t!("Worked").to_string(),
-            };
-            let open = self.expanded_work.contains(&turn_index);
-            rows.push((
-                TranscriptRow::ToolGroup,
-                self.group_header(
-                    ("agent-worked", turn_index).into(),
-                    open,
-                    SharedString::from(label).into_any_element(),
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.expanded_work.remove(&turn_index) {
-                        this.expanded_work.insert(turn_index);
-                    }
-                    cx.notify();
-                }))
-                .into_any_element(),
-            ));
-        }
-        let is_agent = |index: usize| {
-            matches!(&entries[index], Entry::Tool(tool) if tool.call.is_subagent_spawn())
-        };
-        let mut cursor = 0;
-        while cursor < items.len() {
-            let index = items[cursor];
-            match &entries[index] {
-                Entry::Tool(_) | Entry::Thinking(_) => {
-                    let genus = is_agent(index);
-                    let end = items[cursor..]
-                        .iter()
-                        .position(|index| {
-                            !matches!(entries[*index], Entry::Tool(_) | Entry::Thinking(_))
-                                || is_agent(*index) != genus
-                        })
-                        .map_or(items.len(), |offset| cursor + offset);
-                    let group_items = &items[cursor..end];
-                    let is_live = is_working && group_items.contains(&last_entry);
-                    rows.push((
-                        TranscriptRow::ToolGroup,
-                        self.render_tool_group(group_items, is_live, window, cx),
-                    ));
-                    cursor = end;
-                }
-                Entry::Assistant { markdown, .. } => {
-                    let view = cx.entity().downgrade();
-                    let link_view = view.clone();
-                    let cwd = self.session.read(cx).metadata().cwd.clone();
-                    let menu_markdown = markdown.clone();
-                    rows.push((
-                        TranscriptRow::Other,
-                        div()
-                            .w_full()
-                            .on_mouse_down(
-                                gpui::MouseButton::Right,
-                                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                                    if let Some(url) =
-                                        menu_markdown.read(cx).context_menu_link().cloned()
-                                    {
-                                        this.show_link_menu(url, event.position, window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            )
-                            .with_animation(
-                                ("agent-reply-fade", index),
-                                Animation::new(FADE_IN).with_easing(ease_out_quint()),
-                                |this, delta| this.opacity(delta),
-                            )
-                            .child(
-                                MarkdownElement::new(markdown.clone(), message_style.clone())
-                                    .code_block_renderer(self.code_block_renderer(index, cx))
-                                    .table_actions(self.table_actions(index, cx))
-                                    .on_url_click(move |url, window, cx| {
-                                        link_view
-                                            .update(cx, |this, cx| this.open_link(url, window, cx))
-                                            .ok();
-                                    })
-                                    .on_code_span_link(move |text, cx| {
-                                        view.upgrade()?.read(cx).code_span_url(text, &cwd)
-                                    }),
-                            )
-                            .into_any_element(),
-                    ));
-                    cursor += 1;
-                }
-                Entry::Notice { text, is_error } => {
-                    let text = crate::session::translated_notice(text);
-                    rows.push((
-                        TranscriptRow::Other,
-                        if *is_error {
-                            self.render_error(index, text, cx)
-                        } else {
-                            div()
-                                .text_size(ui(12.))
-                                .text_color(cx.theme().colors().text_muted)
-                                .child(text)
-                                .into_any_element()
-                        },
-                    ));
-                    cursor += 1;
-                }
-                Entry::Image { path } => {
-                    let path = path.clone();
-                    let layout = self.generated_image_layout(&path);
-                    let group = SharedString::from(format!("agent-generated-image-{index}"));
-                    let download = {
-                        let image = image_viewer::ChatImage::File(path.clone());
-                        let downloaded = self.copied.as_ref() == Some(&image.download_key());
-                        div()
-                            .id(("agent-generated-image-download", index))
-                            .absolute()
-                            .top(px(8.))
-                            .right(px(8.))
-                            .size(px(28.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .bg(gpui::hsla(0., 0., 0., 0.55))
-                            .cursor_pointer()
-                            .hover(|style| style.bg(gpui::hsla(0., 0., 0., 0.75)))
-                            .when(!downloaded, |this| this.visible_on_hover(group.clone()))
-                            .tooltip(Tooltip::text(if downloaded {
-                                t!("Saved to Downloads")
-                            } else {
-                                t!("Download")
-                            }))
-                            .child(
-                                ui::Icon::new(if downloaded {
-                                    IconName::Check
-                                } else {
-                                    IconName::Download
-                                })
-                                .size(ui::IconSize::Small)
-                                .color(Color::Custom(gpui::white())),
-                            )
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.download_image(image.clone(), window, cx)
-                            }))
-                    };
-                    rows.push((
-                        TranscriptRow::Other,
-                        div()
-                            .id(("agent-generated-image", index))
-                            .group(group)
-                            .relative()
-                            .max_w(px(GENERATED_IMAGE_MAX_WIDTH))
-                            .max_h(px(GENERATED_IMAGE_MAX_HEIGHT))
-                            .when_some(layout, |this, (width, aspect_ratio)| {
-                                this.w_full().max_w(width).aspect_ratio(aspect_ratio)
-                            })
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(12.))
-                            .overflow_hidden()
-                            .bg(ink(0.045, cx))
-                            .cursor_pointer()
-                            .child(
-                                img(path.clone())
-                                    .map(|image| match layout {
-                                        Some(_) => image.size_full(),
-                                        None => image
-                                            .max_w(px(GENERATED_IMAGE_MAX_WIDTH))
-                                            .max_h(px(GENERATED_IMAGE_MAX_HEIGHT)),
-                                    })
-                                    .rounded(px(12.))
-                                    .object_fit(ObjectFit::Contain),
-                            )
-                            .child(download)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.open_image(path.clone(), window, cx)
-                            }))
-                            .into_any_element(),
-                    ));
-                    cursor += 1;
-                }
-                Entry::User { .. } => cursor += 1,
+        let open = self.expanded_work.contains(&turn_index);
+        self.group_header(
+            ("agent-worked", turn_index).into(),
+            open,
+            SharedString::from(label).into_any_element(),
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if !this.expanded_work.remove(&turn_index) {
+                this.expanded_work.insert(turn_index);
             }
-        }
+            this.rebuild_rows(turn_index, cx);
+            cx.notify();
+        }))
+        .into_any_element()
+    }
 
-        let settled = !(is_working && is_last_turn);
-        let message_items: Vec<usize> = all_items
-            .iter()
-            .copied()
-            .filter(|index| matches!(entries[*index], Entry::Assistant { .. }))
-            .collect();
-        let last_at = all_items
-            .iter()
-            .rev()
-            .find_map(|index| match &entries[*index] {
-                Entry::Assistant { at, .. } => Some(*at),
+    fn render_reply(&self, index: usize, style: MarkdownStyle, cx: &Context<Self>) -> AnyElement {
+        let Some(Entry::Assistant { markdown, .. }) = self.entries(cx).get(index) else {
+            return div().into_any_element();
+        };
+        let view = cx.entity().downgrade();
+        let link_view = view.clone();
+        let cwd = self.session.read(cx).metadata().cwd.clone();
+        let menu_markdown = markdown.clone();
+        div()
+            .w_full()
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    if let Some(url) = menu_markdown.read(cx).context_menu_link().cloned() {
+                        this.show_link_menu(url, event.position, window, cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .with_animation(
+                ("agent-reply-fade", index),
+                Animation::new(FADE_IN).with_easing(ease_out_quint()),
+                |this, delta| this.opacity(delta),
+            )
+            .child(
+                MarkdownElement::new(markdown.clone(), style)
+                    .code_block_renderer(self.code_block_renderer(index, cx))
+                    .table_actions(self.table_actions(index, cx))
+                    .on_url_click(move |url, window, cx| {
+                        link_view
+                            .update(cx, |this, cx| this.open_link(url, window, cx))
+                            .ok();
+                    })
+                    .on_code_span_link(move |text, cx| {
+                        view.upgrade()?.read(cx).code_span_url(text, &cwd)
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_notice(&self, index: usize, cx: &Context<Self>) -> AnyElement {
+        let Some(Entry::Notice { text, is_error }) = self.entries(cx).get(index) else {
+            return div().into_any_element();
+        };
+        let text = crate::session::translated_notice(text);
+        if *is_error {
+            self.render_error(index, text, cx)
+        } else {
+            div()
+                .text_size(ui(12.))
+                .text_color(cx.theme().colors().text_muted)
+                .child(text)
+                .into_any_element()
+        }
+    }
+
+    fn render_generated_image(&self, index: usize, cx: &Context<Self>) -> AnyElement {
+        let Some(Entry::Image { path }) = self.entries(cx).get(index) else {
+            return div().into_any_element();
+        };
+        let path = path.clone();
+        let layout = self.generated_image_layout(&path);
+        let group = SharedString::from(format!("agent-generated-image-{index}"));
+        let download = {
+            let image = image_viewer::ChatImage::File(path.clone());
+            let downloaded = self.copied.as_ref() == Some(&image.download_key());
+            div()
+                .id(("agent-generated-image-download", index))
+                .absolute()
+                .top(px(8.))
+                .right(px(8.))
+                .size(px(28.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(gpui::hsla(0., 0., 0., 0.55))
+                .cursor_pointer()
+                .hover(|style| style.bg(gpui::hsla(0., 0., 0., 0.75)))
+                .when(!downloaded, |this| this.visible_on_hover(group.clone()))
+                .tooltip(Tooltip::text(if downloaded {
+                    t!("Saved to Downloads")
+                } else {
+                    t!("Download")
+                }))
+                .child(
+                    ui::Icon::new(if downloaded {
+                        IconName::Check
+                    } else {
+                        IconName::Download
+                    })
+                    .size(ui::IconSize::Small)
+                    .color(Color::Custom(gpui::white())),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.download_image(image.clone(), window, cx)
+                }))
+        };
+        div()
+            .id(("agent-generated-image", index))
+            .group(group)
+            .relative()
+            .max_w(px(GENERATED_IMAGE_MAX_WIDTH))
+            .max_h(px(GENERATED_IMAGE_MAX_HEIGHT))
+            .when_some(layout, |this, (width, aspect_ratio)| {
+                this.w_full().max_w(width).aspect_ratio(aspect_ratio)
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(12.))
+            .overflow_hidden()
+            .bg(ink(0.045, cx))
+            .cursor_pointer()
+            .child(
+                img(path.clone())
+                    .image_cache(&self.images)
+                    .map(|image| match layout {
+                        Some(_) => image.size_full(),
+                        None => image
+                            .max_w(px(GENERATED_IMAGE_MAX_WIDTH))
+                            .max_h(px(GENERATED_IMAGE_MAX_HEIGHT)),
+                    })
+                    .rounded(px(12.))
+                    .object_fit(ObjectFit::Contain),
+            )
+            .child(download)
+            .on_click(
+                cx.listener(move |this, _, window, cx| this.open_image(path.clone(), window, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_turn_actions(
+        &self,
+        turn_index: usize,
+        turn: &Turn,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let last_at = turn
+            .last_reply
+            .and_then(|index| match self.entries(cx).get(index) {
+                Some(Entry::Assistant { at, .. }) => Some(*at),
                 _ => None,
             })
             .unwrap_or_default();
-        let save = message_items
-            .first()
+        let save = turn
+            .first_reply
             .filter(|_| self.subagent.is_none())
             .map(|entry| SaveTarget {
-                entry: *entry,
-                source: CopySource::Messages(message_items.clone()),
+                entry,
+                source: CopySource::Messages(turn.items.clone()),
                 from_agent: true,
             });
-        let copy = (!message_items.is_empty()).then(|| {
+        let copy = turn.first_reply.map(|_| {
             (
                 SharedString::from(format!("copy-turn-{turn_index}")),
-                CopySource::Messages(message_items),
+                CopySource::Messages(turn.items.clone()),
             )
         });
-        let show_strip = settled && !rows.is_empty() && (copy.is_some() || last_at > 0);
-
-        let mut previous = None;
-        let rows = rows.into_iter().map(|(kind, element)| {
-            let gap = match previous {
-                None => leading_gap,
-                Some(previous) => top_gap(previous, kind),
-            };
-            previous = Some(kind);
-            div().w_full().pt(px(gap)).child(element)
-        });
-
-        v_flex()
-            .group(group.clone())
-            .w_full()
-            .children(rows)
-            .when(show_strip, |this| {
-                this.child(self.hover_strip(group, last_at, copy, save, false, false, cx))
-            })
-            .when(is_working && is_last_turn, |this| {
-                this.child(self.render_working_trailer(cx))
-            })
-            .into_any_element()
+        let hovered = self.hovered_row.is_some_and(|row| row.turn == turn_index);
+        self.hover_strip(
+            StripReveal::When(hovered),
+            last_at,
+            copy,
+            save,
+            false,
+            false,
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_working_trailer(&self, cx: &Context<Self>) -> AnyElement {
@@ -2207,15 +2371,12 @@ impl ChatView {
             .into_any_element()
     }
 
-    fn group_summary(&self, items: &[usize], cx: &App) -> String {
-        let entries = self.entries(cx);
+    fn group_summary(&self, items: Range<usize>, cx: &App) -> String {
         let mut tools = Vec::new();
         let mut thoughts = 0;
-        for index in items {
-            match &entries[*index] {
-                Entry::Tool(tool) => {
-                    tools.push((tool.call.clone(), tool.status == ToolStatus::Failed))
-                }
+        for entry in self.entries(cx).get(items).unwrap_or_default() {
+            match entry {
+                Entry::Tool(tool) => tools.push((&tool.call, tool.status == ToolStatus::Failed)),
                 Entry::Thinking(_) => thoughts += 1,
                 _ => {}
             }
@@ -2238,13 +2399,14 @@ impl ChatView {
 
     fn render_tool_group(
         &self,
-        items: &[usize],
+        items: Range<usize>,
         is_live: bool,
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
         let entries = self.entries(cx);
-        let collapses = items.iter().any(|index| match &entries[*index] {
+        let group = entries.get(items.clone()).unwrap_or_default();
+        let collapses = group.iter().any(|entry| match entry {
             Entry::Tool(tool) => !tool.call.is_subagent_spawn(),
             _ => true,
         });
@@ -2252,23 +2414,19 @@ impl ChatView {
             return v_flex()
                 .w_full()
                 .pt(px(CHIPS_TOP_PAD))
-                .children(
-                    items
-                        .iter()
-                        .map(|index| self.render_subagent_chip(*index, cx)),
-                )
+                .children(items.map(|index| self.render_subagent_chip(index, cx)))
                 .into_any_element();
         }
-        let group_key = match items.first().map(|index| &entries[*index]) {
+        let group_key = match group.first() {
             Some(Entry::Tool(tool)) => format!("tools-{}", tool.id),
-            _ => format!("tools-at-{}", items.first().copied().unwrap_or_default()),
+            _ => format!("tools-at-{}", items.start),
         };
         let open = self
             .group_overrides
             .get(&group_key)
             .copied()
             .unwrap_or(is_live);
-        let summary: SharedString = self.group_summary(items, cx).into();
+        let summary: SharedString = self.group_summary(items.clone(), cx).into();
         let colors = cx.theme().colors();
         let title = if is_live {
             shimmer_title(
@@ -2295,9 +2453,7 @@ impl ChatView {
                 }
             }));
 
-        if let [index] = items
-            && let Entry::Thinking(markdown) = &entries[*index]
-        {
+        if let [Entry::Thinking(markdown)] = group {
             return v_flex()
                 .w_full()
                 .child(header)
@@ -2317,23 +2473,14 @@ impl ChatView {
                 })
                 .into_any_element();
         }
-        let row_count = items.len();
+        let last = items.end.saturating_sub(1);
         v_flex()
             .w_full()
             .child(header)
             .when(open, |this| {
-                this.child(
-                    v_flex()
-                        .pt(px(CHIPS_TOP_PAD))
-                        .children(items.iter().enumerate().map(|(position, index)| {
-                            self.render_tree_row(
-                                *index,
-                                position + 1 < row_count,
-                                window,
-                                cx,
-                            )
-                        })),
-                )
+                this.child(v_flex().pt(px(CHIPS_TOP_PAD)).children(
+                    items.map(|index| self.render_tree_row(index, index < last, window, cx)),
+                ))
             })
             .into_any_element()
     }
@@ -2345,11 +2492,13 @@ impl ChatView {
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let entries = self.entries(cx);
+        let Some(entry) = self.entries(cx).get(index) else {
+            return div().into_any_element();
+        };
         let colors = cx.theme().colors();
         let danger = cx.theme().status().error;
         let (key, icon_name, label, detail, failed): (String, IconName, SharedString, String, bool) =
-            match &entries[index] {
+            match entry {
                 Entry::Tool(tool) => {
                     let (label, detail) = view::tool_chip_content(&tool.call);
                     (
@@ -2369,7 +2518,7 @@ impl ChatView {
                 ),
                 _ => return div().into_any_element(),
             };
-        let stats = match &entries[index] {
+        let stats = match entry {
             Entry::Tool(tool) => tool
                 .diff
                 .as_ref()
@@ -2378,7 +2527,7 @@ impl ChatView {
             _ => None,
         };
         let expanded = self.expanded_rows.contains(&key);
-        let body = expanded.then(|| match &entries[index] {
+        let body = expanded.then(|| match entry {
             Entry::Tool(tool) => self.render_tool_detail(tool, cx),
             Entry::Thinking(markdown) => v_flex()
                 .w_full()
@@ -2899,7 +3048,29 @@ fn icon(name: IconName, size: f32) -> Svg {
 
 enum CopySource {
     Text(SharedString),
-    Messages(Vec<usize>),
+    Messages(Range<usize>),
+}
+
+enum StripReveal {
+    OnGroupHover(SharedString),
+    When(bool),
+}
+
+impl StripReveal {
+    fn apply<E: gpui::InteractiveElement + Styled>(&self, element: E) -> E {
+        match self {
+            StripReveal::OnGroupHover(group) => element.visible_on_hover(group.clone()),
+            StripReveal::When(true) => element,
+            StripReveal::When(false) => element.invisible(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TabState {
+    title: SharedString,
+    working: bool,
+    needs_input: bool,
 }
 
 struct SaveTarget {
@@ -2912,19 +3083,20 @@ impl CopySource {
     fn text(&self, chat: &ChatView, cx: &App) -> String {
         match self {
             CopySource::Text(text) => text.to_string(),
-            CopySource::Messages(indices) => {
-                let entries = chat.entries(cx);
-                indices
-                    .iter()
-                    .filter_map(|index| match entries.get(*index) {
-                        Some(Entry::Assistant { markdown, .. }) => {
-                            Some(markdown.read(cx).source().to_string())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            }
+            CopySource::Messages(entries) => chat
+                .entries(cx)
+                .get(entries.clone())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|entry| match entry {
+                    Entry::Assistant { markdown, .. } => {
+                        let source: &str = markdown.read(cx).source();
+                        Some(source)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n"),
         }
     }
 }
@@ -3023,7 +3195,7 @@ fn shimmer_title(text: SharedString, id: ElementId, base: Hsla, peak: Hsla) -> A
         .child(text.clone())
         .with_animation(
             id,
-            Animation::new(GROUP_SHIMMER).repeat(),
+            working_animation(GROUP_SHIMMER),
             move |title, phase| title.child(shimmer_overlay(text.clone(), phase, base, peak)),
         )
         .into_any_element()
@@ -3240,7 +3412,7 @@ fn subagent_spinner(id: SharedString, accent: Hsla, is_light: bool) -> impl Into
                         .bg(tint)
                         .with_animation(
                             ElementId::Name(format!("{id}-{row}-{column}").into()),
-                            Animation::new(SUBAGENT_SPINNER_PERIOD).repeat(),
+                            working_animation(SUBAGENT_SPINNER_PERIOD),
                             move |cell, delta| cell.opacity(spinner_opacity(delta + phase)),
                         )
                 }))
@@ -3263,30 +3435,431 @@ fn tool_icon(call: &ToolCall) -> IconName {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Turn {
     user: Option<usize>,
-    items: Vec<usize>,
+    items: Range<usize>,
+    first_reply: Option<usize>,
+    last_reply: Option<usize>,
+}
+
+impl Turn {
+    fn first_entry(&self) -> usize {
+        self.user.unwrap_or(self.items.start)
+    }
+}
+
+fn extend_turns(turns: &mut Vec<Turn>, entries: &[Entry], from: usize) {
+    for (index, entry) in entries.iter().enumerate().skip(from) {
+        if matches!(entry, Entry::User { .. }) {
+            turns.push(Turn {
+                user: Some(index),
+                items: index + 1..index + 1,
+                first_reply: None,
+                last_reply: None,
+            });
+            continue;
+        }
+        if turns.is_empty() {
+            turns.push(Turn {
+                user: None,
+                items: index..index,
+                first_reply: None,
+                last_reply: None,
+            });
+        }
+        if let Some(turn) = turns.last_mut() {
+            turn.items.end = index + 1;
+            if matches!(entry, Entry::Assistant { .. }) {
+                turn.first_reply.get_or_insert(index);
+                turn.last_reply = Some(index);
+            }
+        }
+    }
 }
 
 fn group_turns(entries: &[Entry]) -> Vec<Turn> {
-    let mut turns: Vec<Turn> = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
-        match entry {
-            Entry::User { .. } => turns.push(Turn {
-                user: Some(index),
-                items: Vec::new(),
-            }),
-            _ => match turns.last_mut() {
-                Some(turn) => turn.items.push(index),
-                None => turns.push(Turn {
-                    user: None,
-                    items: vec![index],
-                }),
-            },
+    let mut turns = Vec::new();
+    extend_turns(&mut turns, entries, 0);
+    turns
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum RowKind {
+    User(usize),
+    Worked,
+    ToolGroup { start: usize, end: usize },
+    Message(usize),
+    Notice(usize),
+    Image(usize),
+    Actions,
+    Working,
+    Retry(usize),
+}
+
+impl RowKind {
+    fn spacing(self) -> Option<TranscriptRow> {
+        match self {
+            RowKind::Worked | RowKind::ToolGroup { .. } => Some(TranscriptRow::ToolGroup),
+            RowKind::Message(_) | RowKind::Notice(_) | RowKind::Image(_) => {
+                Some(TranscriptRow::Other)
+            }
+            RowKind::User(_) | RowKind::Actions | RowKind::Working | RowKind::Retry(_) => None,
         }
     }
-    turns
+
+    fn hover_id(self, turn: usize) -> Option<ElementId> {
+        match self {
+            RowKind::Worked => Some(("agent-row-worked", turn).into()),
+            RowKind::ToolGroup { start, .. } => Some(("agent-row-tools", start).into()),
+            RowKind::Message(entry) => Some(("agent-row-message", entry).into()),
+            RowKind::Notice(entry) => Some(("agent-row-notice", entry).into()),
+            RowKind::Image(entry) => Some(("agent-row-image", entry).into()),
+            RowKind::Actions => Some(("agent-row-actions", turn).into()),
+            RowKind::Working => Some(("agent-row-working", turn).into()),
+            RowKind::User(_) | RowKind::Retry(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Row {
+    turn: usize,
+    kind: RowKind,
+}
+
+impl Row {
+    fn identity(self) -> Row {
+        match self.kind {
+            RowKind::ToolGroup { start, .. } => Row {
+                turn: self.turn,
+                kind: RowKind::ToolGroup { start, end: start },
+            },
+            _ => self,
+        }
+    }
+
+    fn first_entry(self, turn: &Turn) -> usize {
+        match self.kind {
+            RowKind::User(entry)
+            | RowKind::Message(entry)
+            | RowKind::Notice(entry)
+            | RowKind::Image(entry) => entry,
+            RowKind::ToolGroup { start, .. } => start,
+            RowKind::Worked => turn.items.start,
+            RowKind::Actions | RowKind::Working | RowKind::Retry(_) => turn.items.end,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RowFlags {
+    working: bool,
+    compact: bool,
+    standalone: bool,
+}
+
+fn push_turn_rows(
+    rows: &mut Vec<Row>,
+    turn_index: usize,
+    turn: &Turn,
+    entries: &[Entry],
+    live: bool,
+    expanded: bool,
+    flags: RowFlags,
+) {
+    let mut push = |kind| {
+        rows.push(Row {
+            turn: turn_index,
+            kind,
+        })
+    };
+    if let Some(user) = turn.user {
+        push(RowKind::User(user));
+    }
+    let hidden_until = turn
+        .last_reply
+        .filter(|reply| flags.compact && !live && *reply > turn.items.start);
+    if hidden_until.is_some() {
+        push(RowKind::Worked);
+    }
+    let shown = match hidden_until {
+        Some(reply) if !expanded => reply..turn.items.end,
+        _ => turn.items.clone(),
+    };
+    let mut group: Option<(usize, bool)> = None;
+    for index in shown.start..shown.end.min(entries.len()) {
+        let Some(entry) = entries.get(index) else {
+            break;
+        };
+        let spawns_subagent = match entry {
+            Entry::Tool(tool) => Some(tool.call.is_subagent_spawn()),
+            Entry::Thinking(_) => Some(false),
+            _ => None,
+        };
+        if let Some((start, group_spawns_subagent)) = group
+            && spawns_subagent != Some(group_spawns_subagent)
+        {
+            push(RowKind::ToolGroup { start, end: index });
+            group = None;
+        }
+        match entry {
+            Entry::Tool(_) | Entry::Thinking(_) => {
+                if group.is_none() {
+                    group = spawns_subagent.map(|spawns_subagent| (index, spawns_subagent));
+                }
+            }
+            Entry::Assistant { .. } => push(RowKind::Message(index)),
+            Entry::Notice { .. } => push(RowKind::Notice(index)),
+            Entry::Image { .. } => push(RowKind::Image(index)),
+            Entry::User { .. } => {}
+        }
+    }
+    if let Some((start, _)) = group {
+        push(RowKind::ToolGroup {
+            start,
+            end: shown.end.min(entries.len()),
+        });
+    }
+    if live {
+        push(RowKind::Working);
+    } else if turn.last_reply.is_some() {
+        push(RowKind::Actions);
+    }
+    if let Some(user) = turn.user
+        && flags.standalone
+        && matches!(
+            entries.get(user),
+            Some(Entry::User {
+                undelivered: true,
+                ..
+            })
+        )
+    {
+        push(RowKind::Retry(user));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EntryStamp {
+    User { at: i64, length: usize },
+    Assistant(gpui::EntityId),
+    Thinking(gpui::EntityId),
+    Tool { id: u64, spawns_subagent: bool },
+    Notice { length: usize, is_error: bool },
+    Image(u64),
+}
+
+impl EntryStamp {
+    fn of(entry: &Entry) -> Self {
+        match entry {
+            Entry::User { text, at, .. } => EntryStamp::User {
+                at: *at,
+                length: text.len(),
+            },
+            Entry::Assistant { markdown, .. } => EntryStamp::Assistant(markdown.entity_id()),
+            Entry::Thinking(markdown) => EntryStamp::Thinking(markdown.entity_id()),
+            Entry::Tool(tool) => EntryStamp::Tool {
+                id: gpui::hash(&tool.id),
+                spawns_subagent: tool.call.is_subagent_spawn(),
+            },
+            Entry::Notice { text, is_error } => EntryStamp::Notice {
+                length: text.len(),
+                is_error: *is_error,
+            },
+            Entry::Image { path } => EntryStamp::Image(gpui::hash(path)),
+        }
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct RowEdits {
+    splice: Option<(Range<usize>, usize)>,
+    remeasure: Vec<usize>,
+}
+
+#[derive(Default)]
+struct Transcript {
+    turns: Vec<Turn>,
+    rows: Vec<Row>,
+    turn_rows: Vec<usize>,
+    regroups: usize,
+    entry_count: usize,
+    last_entry: Option<EntryStamp>,
+    last_turn_start: Option<EntryStamp>,
+    flags: Option<RowFlags>,
+    last_user_undelivered: bool,
+}
+
+impl Transcript {
+    fn sync(
+        &mut self,
+        entries: &[Entry],
+        flags: RowFlags,
+        expanded_work: &HashSet<usize>,
+    ) -> RowEdits {
+        let previous_last_turn = self.turns.len().saturating_sub(1);
+        let mut stale_from = self.sync_turns(entries);
+        let last_user_undelivered = self.turns.last().is_some_and(|turn| {
+            turn.user.is_some_and(|user| {
+                matches!(
+                    entries.get(user),
+                    Some(Entry::User {
+                        undelivered: true,
+                        ..
+                    })
+                )
+            })
+        });
+        let stale_flags = match self.flags {
+            Some(known) if known.compact != flags.compact => Some(0),
+            Some(known) if known.standalone != flags.standalone => Some(0),
+            Some(known)
+                if known.working != flags.working
+                    || last_user_undelivered != self.last_user_undelivered =>
+            {
+                Some(previous_last_turn)
+            }
+            Some(_) => None,
+            None => Some(0),
+        };
+        self.flags = Some(flags);
+        self.last_user_undelivered = last_user_undelivered;
+        if let Some(turn) = stale_flags {
+            stale_from = Some(stale_from.map_or(turn, |stale| stale.min(turn)));
+        }
+        match stale_from {
+            Some(turn) => self.rebuild_rows(turn, entries, expanded_work),
+            None => RowEdits::default(),
+        }
+    }
+
+    fn sync_turns(&mut self, entries: &[Entry]) -> Option<usize> {
+        let stamp = |index: Option<usize>| {
+            index
+                .and_then(|index| entries.get(index))
+                .map(EntryStamp::of)
+        };
+        let last_turn_start = self.turns.last().map(Turn::first_entry);
+        let only_appended = self.entry_count <= entries.len()
+            && stamp(self.entry_count.checked_sub(1)) == self.last_entry
+            && stamp(last_turn_start) == self.last_turn_start;
+        let stale_from = if !only_appended {
+            self.turns = group_turns(entries);
+            self.regroups += 1;
+            Some(0)
+        } else if self.entry_count < entries.len() {
+            let last_turn = self.turns.len().saturating_sub(1);
+            extend_turns(&mut self.turns, entries, self.entry_count);
+            Some(last_turn)
+        } else {
+            None
+        };
+        self.entry_count = entries.len();
+        self.last_entry = stamp(entries.len().checked_sub(1));
+        self.last_turn_start = stamp(self.turns.last().map(Turn::first_entry));
+        stale_from
+    }
+
+    fn rebuild_rows(
+        &mut self,
+        from_turn: usize,
+        entries: &[Entry],
+        expanded_work: &HashSet<usize>,
+    ) -> RowEdits {
+        let Some(flags) = self.flags else {
+            return RowEdits::default();
+        };
+        let from_turn = from_turn.min(self.turn_rows.len()).min(self.turns.len());
+        let start = self
+            .turn_rows
+            .get(from_turn)
+            .copied()
+            .unwrap_or(self.rows.len());
+        let old = self.rows.split_off(start);
+        self.turn_rows.truncate(from_turn);
+        let last_turn = self.turns.len().saturating_sub(1);
+        for (turn_index, turn) in self.turns.iter().enumerate().skip(from_turn) {
+            self.turn_rows.push(self.rows.len());
+            push_turn_rows(
+                &mut self.rows,
+                turn_index,
+                turn,
+                entries,
+                flags.working && turn_index == last_turn,
+                expanded_work.contains(&turn_index),
+                flags,
+            );
+        }
+        let new = self.rows.get(start..).unwrap_or_default();
+        let same_row = |(old, new): &(&Row, &Row)| old.identity() == new.identity();
+        let prefix = old.iter().zip(new).take_while(same_row).count();
+        let suffix = old
+            .iter()
+            .skip(prefix)
+            .rev()
+            .zip(new.iter().skip(prefix).rev())
+            .take_while(same_row)
+            .count();
+        let removed = old.len() - prefix - suffix;
+        let inserted = new.len() - prefix - suffix;
+        let mut edits = RowEdits::default();
+        let kept_before = old.iter().zip(new).take(prefix);
+        let kept_after = old.iter().rev().zip(new.iter().rev()).take(suffix);
+        for (offset, (before, after)) in kept_before.enumerate() {
+            if before != after {
+                edits.remeasure.push(start + offset);
+            }
+        }
+        for (offset, (before, after)) in kept_after.enumerate() {
+            if before != after {
+                edits.remeasure.push(start + new.len() - 1 - offset);
+            }
+        }
+        if removed > 0 || inserted > 0 {
+            let first_changed = start + prefix;
+            edits.splice = Some((first_changed..first_changed + removed, inserted));
+            edits.remeasure.extend(first_changed.checked_sub(1));
+            if suffix > 0 {
+                edits.remeasure.push(first_changed + inserted);
+            }
+        }
+        edits
+    }
+
+    fn turn_for_entry(&self, entry: usize) -> Option<usize> {
+        let turn = self
+            .turns
+            .partition_point(|turn| turn.first_entry() <= entry)
+            .checked_sub(1)?;
+        (entry < self.turns.get(turn)?.items.end).then_some(turn)
+    }
+
+    fn turn_rows(&self, turn: usize) -> Range<usize> {
+        let start = self.turn_rows.get(turn).copied().unwrap_or(self.rows.len());
+        let end = self
+            .turn_rows
+            .get(turn + 1)
+            .copied()
+            .unwrap_or(self.rows.len());
+        start..end
+    }
+
+    fn row_for_entry(&self, entry: usize) -> Option<usize> {
+        let turn_index = self.turn_for_entry(entry)?;
+        let turn = self.turns.get(turn_index)?;
+        let rows = self.turn_rows(turn_index);
+        let before = self
+            .rows
+            .get(rows.clone())?
+            .partition_point(|row| row.first_entry(turn) <= entry);
+        Some(rows.start + before.saturating_sub(1))
+    }
+
+    fn entry_for_row(&self, row: usize) -> Option<usize> {
+        let row = self.rows.get(row)?;
+        Some(row.first_entry(self.turns.get(row.turn)?))
+    }
 }
 
 fn column(content: impl IntoElement, gutter: f32) -> impl IntoElement {
@@ -3316,6 +3889,32 @@ impl ChatView {
         }
     }
 
+    fn begin_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .hovered_row
+            .is_some_and(|row| !self.painted_rows.borrow().contains_key(&row))
+        {
+            self.hovered_row = None;
+        }
+        self.painted_rows.borrow_mut().clear();
+        self.frame_message_style = None;
+        self.ensure_background_tick(cx);
+        if !self.has_rendered {
+            self.has_rendered = true;
+            self.scanned_entries = 0;
+            self.scanned_tail = None;
+            if self.subagent.is_none() {
+                self.start_lookups(cx);
+            }
+        }
+        self.sync_transcript(cx);
+        self.update_scroll_state();
+        self.refresh_diagrams(window, cx);
+        self.observe_todo(cx);
+        self.images
+            .update(cx, |images, cx| images.start_frame(window, cx));
+    }
+
     fn render_transcript(&self, cx: &Context<Self>) -> impl IntoElement {
         let container = self.container_bounds.clone();
         div()
@@ -3333,8 +3932,8 @@ impl ChatView {
             .child(
                 list(
                     self.list.clone(),
-                    cx.processor(|this, turn_index, window, cx| {
-                        this.render_turn(turn_index, window, cx)
+                    cx.processor(|this, row_index, window, cx| {
+                        this.render_row(row_index, window, cx)
                     }),
                 )
                 .size_full(),
@@ -3380,12 +3979,7 @@ impl ChatView {
 
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.painted_turns.borrow_mut().clear();
-        self.ensure_background_tick(cx);
-        self.update_scroll_state();
-        self.request_visible_diagrams(cx);
-        self.refresh_path_links(cx);
-        self.observe_todo(cx);
+        self.begin_frame(window, cx);
         if self.subagent.is_none()
             && window.is_window_active()
             && self.session.read(cx).metadata().unseen
@@ -3567,10 +4161,18 @@ impl Item for ChatView {
             })
             .when(!needs_input && is_working, |this| {
                 this.child(
-                    Icon::new(IconName::LoadCircle)
-                        .size(IconSize::XSmall)
-                        .color(Color::Muted)
-                        .with_rotate_animation(2),
+                    svg()
+                        .path(IconName::LoadCircle.path())
+                        .flex_none()
+                        .size(IconSize::XSmall.rems())
+                        .text_color(Color::Muted.color(cx))
+                        .with_animation(
+                            "agent-chat-tab-working",
+                            working_animation(Duration::from_secs(2)),
+                            |icon, delta| {
+                                icon.with_transformation(Transformation::rotate(percentage(delta)))
+                            },
+                        ),
                 )
             })
             .into_any_element()
@@ -3722,6 +4324,410 @@ mod tests {
         view.read_with(cx, |view, cx| {
             view.completion_names(cx)
         })
+    }
+
+    const SHOWN_IN_FULL: RowFlags = RowFlags {
+        working: false,
+        compact: false,
+        standalone: true,
+    };
+
+    fn row(turn: usize, kind: RowKind) -> Row {
+        Row { turn, kind }
+    }
+
+    fn identities(rows: &[Row]) -> Vec<Row> {
+        rows.iter().map(|row| row.identity()).collect()
+    }
+
+    fn tool_call(id: &str, name: &str) -> agent_harness::AgentEvent {
+        agent_harness::AgentEvent::ToolCall {
+            id: id.into(),
+            call: ToolCall::Unknown {
+                name: name.into(),
+                input: None,
+            },
+        }
+    }
+
+    fn text(text: &str) -> agent_harness::AgentEvent {
+        agent_harness::AgentEvent::TextDelta { text: text.into() }
+    }
+
+    struct ShownRows {
+        transcript: Transcript,
+        list: Vec<Row>,
+    }
+
+    impl ShownRows {
+        fn sync(
+            &mut self,
+            session: &Entity<AgentSession>,
+            flags: RowFlags,
+            expanded_work: &HashSet<usize>,
+            cx: &mut TestAppContext,
+        ) -> RowEdits {
+            session.read_with(cx, |session, _| {
+                let entries = session.entries();
+                let edits = self.transcript.sync(entries, flags, expanded_work);
+                self.apply(&edits);
+                let mut rebuilt = Transcript::default();
+                rebuilt.sync(entries, flags, expanded_work);
+                assert_eq!(self.transcript.turns, group_turns(entries));
+                assert_eq!(self.transcript.turns, rebuilt.turns);
+                assert_eq!(self.transcript.rows, rebuilt.rows);
+                assert_eq!(self.transcript.turn_rows, rebuilt.turn_rows);
+                assert_eq!(identities(&self.list), identities(&rebuilt.rows));
+                edits
+            })
+        }
+
+        fn apply(&mut self, edits: &RowEdits) {
+            if let Some((range, count)) = edits.splice.clone() {
+                let inserted = self.transcript.rows[range.start..range.start + count].to_vec();
+                self.list.splice(range, inserted);
+            }
+            for row in &edits.remeasure {
+                assert!(
+                    *row < self.list.len(),
+                    "remeasured a row that does not exist"
+                );
+            }
+        }
+    }
+
+    #[gpui::test]
+    async fn rows_follow_the_chat_without_rebuilding_earlier_rows(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let working = RowFlags {
+            working: true,
+            ..SHOWN_IN_FULL
+        };
+        let mut expanded_work = HashSet::default();
+        let mut shown = ShownRows {
+            transcript: Transcript::default(),
+            list: Vec::new(),
+        };
+
+        crate::session::tests::feed_user(&session, "first", cx);
+        shown.sync(&session, SHOWN_IN_FULL, &expanded_work, cx);
+        assert_eq!(shown.transcript.rows, [row(0, RowKind::User(0))]);
+
+        crate::session::tests::feed_events(&session, vec![text("On it.")], cx);
+        let edits = shown.sync(&session, working, &expanded_work, cx);
+        assert_eq!(edits.splice, Some((1..1, 2)));
+        assert_eq!(
+            shown.transcript.rows,
+            [
+                row(0, RowKind::User(0)),
+                row(0, RowKind::Message(1)),
+                row(0, RowKind::Working),
+            ]
+        );
+
+        crate::session::tests::feed_events(&session, vec![text(" Looking around.")], cx);
+        let edits = shown.sync(&session, working, &expanded_work, cx);
+        assert_eq!(edits, RowEdits::default(), "streamed text changes no rows");
+
+        crate::session::tests::feed_events(&session, vec![tool_call("a", "Bash")], cx);
+        let edits = shown.sync(&session, working, &expanded_work, cx);
+        assert_eq!(edits.splice, Some((2..2, 1)));
+
+        crate::session::tests::feed_events(&session, vec![tool_call("b", "Bash")], cx);
+        let edits = shown.sync(&session, working, &expanded_work, cx);
+        assert_eq!(
+            edits,
+            RowEdits {
+                splice: None,
+                remeasure: vec![2],
+            },
+            "a tool joining the last group only remeasures that group"
+        );
+
+        crate::session::tests::feed_events(
+            &session,
+            vec![tool_call("c", "Agent: explore"), text("Done.")],
+            cx,
+        );
+        let edits = shown.sync(&session, working, &expanded_work, cx);
+        assert_eq!(edits.splice, Some((3..3, 2)));
+        assert_eq!(
+            shown.transcript.rows,
+            [
+                row(0, RowKind::User(0)),
+                row(0, RowKind::Message(1)),
+                row(0, RowKind::ToolGroup { start: 2, end: 4 }),
+                row(0, RowKind::ToolGroup { start: 4, end: 5 }),
+                row(0, RowKind::Message(5)),
+                row(0, RowKind::Working),
+            ]
+        );
+        for (entry, row) in [(0, 0), (1, 1), (2, 2), (3, 2), (4, 3), (5, 4)] {
+            assert_eq!(
+                shown.transcript.row_for_entry(entry),
+                Some(row),
+                "entry {entry}"
+            );
+            assert_eq!(shown.transcript.turn_for_entry(entry), Some(0));
+        }
+        assert_eq!(shown.transcript.row_for_entry(6), None);
+
+        let edits = shown.sync(&session, SHOWN_IN_FULL, &expanded_work, cx);
+        assert_eq!(edits.splice, Some((5..6, 1)));
+        assert_eq!(
+            shown.transcript.rows.last(),
+            Some(&row(0, RowKind::Actions))
+        );
+
+        let compact = RowFlags {
+            compact: true,
+            ..SHOWN_IN_FULL
+        };
+        shown.sync(&session, compact, &expanded_work, cx);
+        assert_eq!(
+            shown.transcript.rows,
+            [
+                row(0, RowKind::User(0)),
+                row(0, RowKind::Worked),
+                row(0, RowKind::Message(5)),
+                row(0, RowKind::Actions),
+            ]
+        );
+        assert_eq!(
+            shown.transcript.row_for_entry(3),
+            Some(1),
+            "a folded entry maps to the row that folds it"
+        );
+
+        expanded_work.insert(0);
+        let edits = session.read_with(cx, |session, _| {
+            shown
+                .transcript
+                .rebuild_rows(0, session.entries(), &expanded_work)
+        });
+        shown.apply(&edits);
+        assert_eq!(edits.splice, Some((2..2, 3)));
+        assert_eq!(shown.transcript.rows.len(), 7);
+        assert_eq!(identities(&shown.list), identities(&shown.transcript.rows));
+
+        crate::session::tests::feed_user(&session, "second", cx);
+        let edits = shown.sync(&session, compact, &expanded_work, cx);
+        assert_eq!(edits.splice, Some((7..7, 1)));
+        assert_eq!(
+            shown.transcript.rows.last(),
+            Some(&row(1, RowKind::User(6)))
+        );
+        assert_eq!(shown.transcript.turn_rows(1), 7..8);
+        assert_eq!(shown.transcript.entry_for_row(7), Some(6));
+
+        let other = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        crate::session::tests::feed_events(
+            &other,
+            vec![text("Hello."), tool_call("z", "Bash")],
+            cx,
+        );
+        let regroups = shown.transcript.regroups;
+        shown.sync(&other, compact, &expanded_work, cx);
+        assert_eq!(
+            shown.transcript.regroups,
+            regroups + 1,
+            "replaced entries fall back to a full regroup"
+        );
+        assert_eq!(shown.transcript.turns.len(), 1);
+        assert_eq!(shown.transcript.turns[0].user, None);
+    }
+
+    #[gpui::test]
+    async fn new_output_leaves_the_reading_position_alone(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| store.skip_plan_usage());
+        let project = project::Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        crate::session::tests::feed_user(&session, "a long task", cx);
+        for step in 0..40 {
+            crate::session::tests::feed_events(
+                &session,
+                vec![
+                    text(&format!("Step {step}.\n\nMore about it.")),
+                    tool_call(&format!("tool-{step}"), "Bash"),
+                ],
+                cx,
+            );
+        }
+        let (chat, cx) = cx.add_window_view(|window, cx| {
+            ChatView::new(
+                session.clone(),
+                store.clone(),
+                project,
+                WeakEntity::new_invalid(),
+                window,
+                cx,
+            )
+        });
+        let draw = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        let rows_in_sync = |cx: &mut VisualTestContext| {
+            chat.read_with(cx, |chat, _| {
+                (chat.list.item_count(), chat.transcript.rows.len())
+            })
+        };
+        assert_eq!(rows_in_sync(cx), (82, 82), "one long turn is many rows");
+        let painted = chat.read_with(cx, |chat, _| chat.painted_rows.borrow().len());
+        assert!(painted < 40, "only the rows on screen are drawn: {painted}");
+
+        chat.update(cx, |chat, cx| {
+            chat.list.scroll_to(ListOffset {
+                item_ix: 12,
+                offset_in_item: px(4.),
+            });
+            cx.notify();
+        });
+        draw(cx);
+        let reading_position = |cx: &mut VisualTestContext| {
+            chat.read_with(cx, |chat, _| {
+                let top = chat.list.logical_scroll_top();
+                (top.item_ix, top.offset_in_item)
+            })
+        };
+        assert_eq!(reading_position(cx), (12, px(4.)));
+        for step in 40..44 {
+            crate::session::tests::feed_events(
+                &session,
+                vec![
+                    text(&format!("Step {step}.")),
+                    tool_call(&format!("tool-{step}"), "Bash"),
+                    tool_call(&format!("tool-{step}-again"), "Bash"),
+                ],
+                cx,
+            );
+            draw(cx);
+        }
+        assert_eq!(rows_in_sync(cx), (90, 90));
+        assert_eq!(reading_position(cx), (12, px(4.)));
+    }
+
+    #[gpui::test]
+    async fn lookups_wait_until_the_chat_is_shown(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| store.skip_plan_usage());
+        let project = project::Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let (multi_workspace, cx) = cx.add_window_view(|window, cx| {
+            workspace::MultiWorkspace::test_new(project.clone(), window, cx)
+        });
+        let workspace = multi_workspace.read_with(cx, |multi, _| multi.workspace().clone());
+        let chat = workspace.update_in(cx, |_, window, cx| {
+            let weak = cx.entity().downgrade();
+            cx.new(|cx| {
+                ChatView::new(
+                    session.clone(),
+                    store.clone(),
+                    project.clone(),
+                    weak,
+                    window,
+                    cx,
+                )
+            })
+        });
+        let draw = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        assert!(!chat.read_with(cx, |chat, _| chat.has_rendered));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.add_item_to_active_pane(Box::new(chat.clone()), None, true, window, cx)
+        });
+        draw(cx);
+        assert!(chat.read_with(cx, |chat, _| chat.has_rendered));
+    }
+
+    #[gpui::test]
+    async fn the_tab_updates_only_when_what_it_shows_changes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| store.skip_plan_usage());
+        let project = project::Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            ChatView::new(
+                session.clone(),
+                store.clone(),
+                project,
+                WeakEntity::new_invalid(),
+                window,
+                cx,
+            )
+        });
+        let tab_updates = Rc::new(Cell::new(0));
+        cx.update(|_, cx| {
+            cx.subscribe(&view, {
+                let tab_updates = tab_updates.clone();
+                move |_, event: &ItemEvent, _| {
+                    if matches!(event, ItemEvent::UpdateTab) {
+                        tab_updates.set(tab_updates.get() + 1);
+                    }
+                }
+            })
+            .detach()
+        });
+        let notify = |cx: &mut VisualTestContext| {
+            session.update(cx, |_, cx| cx.notify());
+            cx.run_until_parked();
+        };
+
+        notify(cx);
+        assert_eq!(tab_updates.get(), 0);
+
+        crate::session::tests::feed_events(&session, vec![text("First words")], cx);
+        notify(cx);
+        assert_eq!(tab_updates.get(), 1, "the tab starts showing its spinner");
+
+        for _ in 0..5 {
+            crate::session::tests::feed_events(&session, vec![text(" and more")], cx);
+            notify(cx);
+        }
+        assert_eq!(tab_updates.get(), 1, "streamed text leaves the tab alone");
+
+        session.update(cx, |session, cx| {
+            session.update_metadata(|metadata| metadata.title = "Renamed".into(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(tab_updates.get(), 2, "a new title reaches the tab");
     }
 
     #[gpui::test]

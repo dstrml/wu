@@ -181,6 +181,9 @@ const SHA256_BYTE_LENGTH: usize = 32;
 const SHA1_HEX_LENGTH: usize = SHA1_BYTE_LENGTH * 2;
 const SHA256_HEX_LENGTH: usize = SHA256_BYTE_LENGTH * 2;
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+const SHA1_EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const SHA256_EMPTY_TREE_ID: &str =
+    "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct Oid {
@@ -246,6 +249,13 @@ impl Oid {
 
     pub fn is_zero(&self) -> bool {
         self.as_bytes().iter().all(|byte| *byte == 0)
+    }
+
+    pub fn empty_tree_id(&self) -> &'static str {
+        match self.format {
+            OidFormat::Sha1 => SHA1_EMPTY_TREE_ID,
+            OidFormat::Sha256 => SHA256_EMPTY_TREE_ID,
+        }
     }
 
     /// Returns this [`Oid`] as a short SHA.

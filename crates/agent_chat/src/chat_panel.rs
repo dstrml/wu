@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use db::kvp::KeyValueStore;
+use futures::{StreamExt as _, stream::FuturesUnordered};
 use gpui::{
     Action, App, AsyncWindowContext, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
     Focusable, Global, IntoElement, ParentElement, Pixels, Render, Styled, WeakEntity, Window, div,
@@ -474,65 +475,42 @@ impl ChatPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let openings: Vec<_> = saved
-            .chats
-            .iter()
-            .map(|id| {
-                store.update(cx, |store, cx| {
-                    store.open_saved_session(id.clone().into(), cx)
-                })
-            })
-            .collect();
         self.restoring = true;
         cx.spawn_in(window, async move |this, cx| {
-            let mut sessions = Vec::with_capacity(openings.len());
-            for opening in openings {
-                sessions.push(opening.await.log_err());
-            }
-            this.update_in(cx, |this, window, cx| {
-                this.restoring = false;
-                let workspace = this.workspace.clone();
-                let mut active = None;
-                if let Some(center) = workspace.upgrade().filter(|_| agent_chat_enabled(cx)) {
-                    let project = center.read(cx).project().clone();
-                    for (index, session) in sessions.into_iter().enumerate() {
-                        let Some(session) = session else {
-                            continue;
-                        };
-                        let shown_in_tab =
-                            center.read(cx).items_of_type::<ChatView>(cx).any(|view| {
-                                let view = view.read(cx);
-                                view.session() == &session && !view.is_subagent()
-                            });
-                        if shown_in_tab || chat_in_pane(&this.pane, &session, cx).is_some() {
-                            continue;
-                        }
-                        let kind = session.read(cx).kind();
-                        store.update(cx, |store, cx| store.update_agent_if_due(kind, cx));
-                        let view = cx.new(|cx| {
-                            ChatView::new(
-                                session,
-                                store.clone(),
-                                project.clone(),
-                                workspace.clone(),
-                                window,
-                                cx,
-                            )
-                        });
-                        view.update(cx, |view, cx| view.set_docked(true, window, cx));
-                        this.pane.update(cx, |pane, cx| {
-                            pane.add_item(Box::new(view), false, false, None, window, cx);
-                            if index == saved.active {
-                                active = Some(pane.items_len() - 1);
-                            }
-                        });
+            let open = |index: usize, cx: &mut AsyncWindowContext| {
+                let opening = saved.chats.get(index).map(|id| {
+                    store.update(cx, |store, cx| {
+                        store.open_saved_session(id.clone().into(), cx)
+                    })
+                });
+                async move {
+                    let session = match opening {
+                        Some(opening) => opening.await.log_err(),
+                        None => None,
+                    };
+                    (index, session)
+                }
+            };
+            let mut opening = FuturesUnordered::new();
+            opening.push(open(saved.active, cx));
+            let mut others_started = false;
+            while let Some((index, session)) = opening.next().await {
+                if let Some(session) = session {
+                    let restored = this.update_in(cx, |this, window, cx| {
+                        this.restore_chat(&saved, index, session, &store, window, cx)
+                    });
+                    if restored.is_err() {
+                        return;
                     }
                 }
-                if let Some(active) = active {
-                    this.pane.update(cx, |pane, cx| {
-                        pane.activate_item(active, false, false, window, cx)
-                    });
+                if !std::mem::replace(&mut others_started, true) {
+                    for index in (0..saved.chats.len()).filter(|index| *index != saved.active) {
+                        opening.push(open(index, cx));
+                    }
                 }
+            }
+            this.update_in(cx, |this, _, cx| {
+                this.restoring = false;
                 this.save(cx);
                 if !this.has_chats(cx) {
                     cx.emit(PanelEvent::Close);
@@ -541,6 +519,84 @@ impl ChatPanel {
             .log_err();
         })
         .detach();
+    }
+
+    fn restore_chat(
+        &mut self,
+        saved: &SavedChats,
+        index: usize,
+        session: Entity<AgentSession>,
+        store: &Entity<AgentStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(center) = self.workspace.upgrade().filter(|_| agent_chat_enabled(cx)) else {
+            return;
+        };
+        let shown_in_tab = center.read(cx).items_of_type::<ChatView>(cx).any(|view| {
+            let view = view.read(cx);
+            view.session() == &session && !view.is_subagent()
+        });
+        if shown_in_tab || chat_in_pane(&self.pane, &session, cx).is_some() {
+            return;
+        }
+        let kind = session.read(cx).kind();
+        store.update(cx, |store, cx| store.update_agent_if_due(kind, cx));
+        let project = center.read(cx).project().clone();
+        let workspace = self.workspace.clone();
+        let view =
+            cx.new(|cx| ChatView::new(session, store.clone(), project, workspace, window, cx));
+        view.update(cx, |view, cx| view.set_docked(true, window, cx));
+        let position = self.restored_position(saved, index, cx);
+        self.pane.update(cx, |pane, cx| {
+            let shown = pane.active_item().map(|item| item.item_id());
+            let activate = shown.is_none() || index == saved.active;
+            pane.add_item_inner(
+                Box::new(view),
+                false,
+                false,
+                activate,
+                Some(position),
+                window,
+                cx,
+            );
+            // The pane does not move its active index when a tab is inserted before it without activating.
+            let shown_at = shown
+                .filter(|_| !activate)
+                .and_then(|shown| pane.items().position(|item| item.item_id() == shown));
+            if let Some(shown_at) = shown_at
+                && shown_at != pane.active_item_index()
+            {
+                pane.activate_item(shown_at, false, false, window, cx);
+            }
+        });
+    }
+
+    fn restored_position(&self, saved: &SavedChats, index: usize, cx: &App) -> usize {
+        let saved_positions: Vec<Option<usize>> = self
+            .pane
+            .read(cx)
+            .items()
+            .map(|item| {
+                let id = &item
+                    .downcast::<ChatView>()?
+                    .read(cx)
+                    .session()
+                    .read(cx)
+                    .metadata()
+                    .id;
+                saved.chats.iter().position(|chat| chat == id)
+            })
+            .collect();
+        let comes_before = |position: &Option<usize>| position.is_some_and(|saved| saved < index);
+        let comes_after = |position: &Option<usize>| position.is_some_and(|saved| saved > index);
+        match saved_positions.iter().rposition(comes_before) {
+            Some(previous) => previous + 1,
+            None => saved_positions
+                .iter()
+                .position(comes_after)
+                .unwrap_or(saved_positions.len()),
+        }
     }
 
     pub(crate) fn pane(&self) -> &Entity<Pane> {
@@ -1093,6 +1149,68 @@ mod tests {
         assert_eq!(active_session, Some(second));
         assert!(docked(&setup, cx).iter().all(|view| is_docked(view, cx)));
         assert_eq!(tabs(&setup, cx), vec![in_tab]);
+    }
+
+    #[gpui::test]
+    async fn restoring_shows_the_active_chat_first_and_keeps_the_saved_order(
+        cx: &mut TestAppContext,
+    ) {
+        use std::{cell::RefCell, rc::Rc};
+
+        let (setup, cx) = setup(cx).await;
+        let sessions = [
+            new_session(&setup, cx),
+            new_session(&setup, cx),
+            new_session(&setup, cx),
+        ];
+        let ids: Vec<String> = sessions
+            .iter()
+            .map(|session| session.read_with(cx, |session, _| session.metadata().id.clone()))
+            .collect();
+        let panel_pane = setup.panel.read_with(cx, |panel, _| panel.pane.clone());
+        let added = Rc::new(RefCell::new(Vec::new()));
+        let _subscription = cx.update(|_, cx| {
+            let added = added.clone();
+            cx.subscribe(&panel_pane, move |_, event: &pane::Event, cx| {
+                if let pane::Event::AddItem { item } = event
+                    && let Some(view) = item.downcast::<ChatView>()
+                {
+                    let id = view.read(cx).session().read(cx).metadata().id.clone();
+                    added.borrow_mut().push(id);
+                }
+            })
+        });
+
+        let saved = SavedChats {
+            chats: ids.clone(),
+            active: 1,
+        };
+        setup.panel.update_in(cx, |panel, window, cx| {
+            panel.restore(saved, setup.store.clone(), window, cx)
+        });
+        cx.run_until_parked();
+
+        assert_eq!(added.borrow().first(), Some(&ids[1]));
+        assert_eq!(added.borrow().len(), 3);
+        let restored: Vec<_> = docked(&setup, cx)
+            .iter()
+            .map(|view| view.read_with(cx, |view, _| view.session().clone()))
+            .collect();
+        assert_eq!(restored, sessions.to_vec());
+        let active_session =
+            active(&setup, cx).map(|view| view.read_with(cx, |view, _| view.session().clone()));
+        assert_eq!(active_session, Some(sessions[1].clone()));
+        let saved = setup.panel.read_with(cx, |panel, cx| {
+            assert!(!panel.restoring);
+            panel.saved_chats(cx)
+        });
+        assert_eq!(
+            saved,
+            SavedChats {
+                chats: ids,
+                active: 1
+            }
+        );
     }
 
     #[gpui::test]

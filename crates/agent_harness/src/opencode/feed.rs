@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::Value;
 
@@ -20,6 +20,28 @@ pub(super) struct SessionFeed {
     pub(super) parts_awaiting_role: Vec<Value>,
     parts: HashMap<String, PartState>,
     pub(super) title: Option<String>,
+    retired_messages: HashSet<String>,
+}
+
+impl SessionFeed {
+    pub(super) fn retire_message(&mut self, message: &str) {
+        self.retired_messages.insert(message.to_owned());
+    }
+
+    pub(super) fn retire_messages(&mut self) {
+        self.retired_messages
+            .extend(self.message_is_assistant.keys().cloned());
+        let held = std::mem::take(&mut self.parts_awaiting_role);
+        self.retired_messages.extend(
+            held.iter()
+                .filter_map(|part| part.get("messageID").and_then(Value::as_str))
+                .map(str::to_owned),
+        );
+    }
+
+    pub(super) fn is_retired(&self, message: &str) -> bool {
+        self.retired_messages.contains(message)
+    }
 }
 
 pub(super) struct ChildRun {

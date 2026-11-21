@@ -22,6 +22,33 @@ read_reply() {
   return 1
 }
 
+request_id() { printf '%s\n' "$1" | sed 's/.*"request_id":"\([^"]*\)".*/\1/'; }
+text_of() { printf '%s\n' "$1" | sed 's/.*"content":"\([^"]*\)".*/\1/'; }
+text_delta() { emit "{\"type\":\"stream_event\",\"parent_tool_use_id\":null,\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"$1\"}}}"; }
+
+# Shape mirrors 2.1.228's control_response: commands under response.response.
+answer_initialize() {
+  rid=$(request_id "$1")
+  if [ -f .command-fixture ]; then
+    name=$(cat .command-fixture)
+    emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"commands\":[{\"name\":\"$name\"}]}}}"
+  else
+    emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"commands\":[{\"name\":\"review\",\"description\":\"Review a pull request\",\"argumentHint\":\"[pr number]\"},{\"name\":\"compact\",\"description\":\"Compact the conversation\",\"argumentHint\":\"\"},{\"name\":\"usage\",\"description\":\"Show plan usage\"},{\"name\":\"model\",\"description\":\"Set the AI model\"},{\"name\":\"\",\"description\":\"nameless: dropped\"}],\"output_style\":\"default\"}}}"
+  fi
+}
+
+# A run asks for its commands ahead of the first prompt; a probe sends nothing else.
+case "$first" in
+*'"subtype":"initialize"'*)
+  case " $* " in
+  *' --include-partial-messages '*)
+    answer_initialize "$first"
+    read -r first || exit 1
+    ;;
+  esac
+  ;;
+esac
+
 case "$first" in
 
 *scenario:fork-fallback*)
@@ -245,19 +272,86 @@ case "$first" in
   ;;
 
 *'"subtype":"initialize"'*)
-  if [ -f .command-fixture ]; then
-    rid=$(printf '%s' "$first" | sed 's/.*"request_id":"\([^"]*\)".*/\1/')
-    name=$(cat .command-fixture)
-    emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"commands\":[{\"name\":\"$name\"}]}}}"
-    exec sleep 30
-  fi
   # Command discovery: the initialize control request arrives as the FIRST
-  # stdin line (no user message ever follows). Shape mirrors 2.1.228's
-  # control_response: commands under response.response.
-  rid=$(printf '%s\n' "$first" | sed 's/.*"request_id":"\([^"]*\)".*/\1/')
-  emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"commands\":[{\"name\":\"review\",\"description\":\"Review a pull request\",\"argumentHint\":\"[pr number]\"},{\"name\":\"compact\",\"description\":\"Compact the conversation\",\"argumentHint\":\"\"},{\"name\":\"usage\",\"description\":\"Show plan usage\"},{\"name\":\"model\",\"description\":\"Set the AI model\"},{\"name\":\"\",\"description\":\"nameless: dropped\"}],\"output_style\":\"default\"}}}"
+  # stdin line (no user message ever follows).
+  answer_initialize "$first"
   # Stay alive until the driver tears us down, like the real CLI would.
   exec sleep 30
+  ;;
+
+*scenario:stop*)
+  # One process, many turns: an interrupt ends the running turn, a user line starts the next.
+  emit '{"type":"system","subtype":"init","model":"claude-fable-5","tools":[],"cwd":"/tmp","session_id":"sess-stop"}'
+  text_delta "turn 1 in $$"
+  turn=1
+  running=true
+  case "$first" in *scenario:stop-idle*)
+    emit '{"type":"result","subtype":"success","result":"first","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-stop"}'
+    running=false
+    ;;
+  *scenario:stop-asking*)
+    emit '{"type":"control_request","request_id":"ask-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}'
+    ;;
+  esac
+  while read -r line; do
+    case "$line" in
+    *'"type":"control_response"'*) text_delta "late answer" ;;
+    *'"subtype":"interrupt"'*)
+      emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$(request_id "$line")\"}}"
+      if [ "$running" = true ]; then
+        emit '{"type":"result","subtype":"error_during_execution","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-stop"}'
+      else
+        emit '{"type":"result","subtype":"error_during_execution","errors":["interrupted while idle"],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-stop"}'
+      fi
+      running=false
+      ;;
+    *'"type":"user"'*)
+      turn=$((turn + 1))
+      emit "$line"
+      text_delta "turn $turn in $$: $(text_of "$line")"
+      emit '{"type":"result","subtype":"success","result":"next","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-stop"}'
+      ;;
+    esac
+  done
+  ;;
+
+*scenario:models*)
+  model=default
+  while [ "$#" -gt 0 ]; do
+    case "$1" in --model) shift; model=$1 ;; esac
+    shift
+  done
+  switches=0
+  emit '{"type":"system","subtype":"init","model":"claude-fable-5","tools":[],"cwd":"/tmp","session_id":"sess-models"}'
+  text_delta "model=$model switches=$switches"
+  emit '{"type":"result","subtype":"success","result":"first","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-models"}'
+  while read -r line; do
+    case "$line" in
+    *'"subtype":"set_model"'*)
+      wanted=$(printf '%s\n' "$line" | sed 's/.*"model":"\([^"]*\)".*/\1/')
+      case "$wanted" in
+      *unknown*)
+        emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"$(request_id "$line")\",\"error\":\"no such model\"}}"
+        ;;
+      *)
+        model=$wanted
+        switches=$((switches + 1))
+        emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$(request_id "$line")\"}}"
+        ;;
+      esac
+      ;;
+    *'"type":"user"'*)
+      emit "$line"
+      text_delta "model=$model switches=$switches"
+      emit '{"type":"result","subtype":"success","result":"next","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-models"}'
+      ;;
+    esac
+  done
+  ;;
+
+*scenario:commands*)
+  emit '{"type":"system","subtype":"init","model":"claude-fable-5","tools":[],"cwd":"/tmp","session_id":"sess-commands"}'
+  emit '{"type":"result","subtype":"success","result":"done","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-commands"}'
   ;;
 
 *scenario:error*)

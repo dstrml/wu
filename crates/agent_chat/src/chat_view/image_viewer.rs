@@ -2,9 +2,12 @@ use super::{
     ChatView, DOWNLOADED_FEEDBACK, GENERATED_IMAGE_MAX_HEIGHT, GENERATED_IMAGE_MAX_WIDTH, ui,
 };
 use crate::chat_style::ink;
+use collections::HashMap;
+use futures::FutureExt as _;
 use gpui::{
-    AnyElement, App, Bounds, Context, DevicePixels, Image, ImageSource, ImgResourceLoader,
-    IntoElement, MouseButton, ObjectFit, ParentElement, Pixels, Point, ScrollWheelEvent,
+    AnyElement, App, AppContext as _, Asset as _, Bounds, Context, DevicePixels, Entity, Image,
+    ImageCache, ImageCacheError, ImageCacheItem, ImageSource, ImgResourceLoader, IntoElement,
+    MouseButton, ObjectFit, ParentElement, Pixels, Point, RenderImage, Resource, ScrollWheelEvent,
     SharedString, Size, Styled, Window, canvas, deferred, div, hsla, img, px, relative,
 };
 use i18n::t;
@@ -25,6 +28,94 @@ const MIN_ZOOM: f32 = 1.;
 const MAX_ZOOM: f32 = 6.;
 const SCRIM_ALPHA: f32 = 0.7;
 const SCRIM_ALPHA_DARK_DEFAULT: f32 = 0.6;
+const MAX_RETAINED_IMAGES: usize = 12;
+
+struct CachedImage {
+    item: ImageCacheItem,
+    used_in_frame: usize,
+}
+
+/// Holds the chat's decoded images, so they are freed with the chat instead of living until quit.
+pub(super) struct ChatImageCache {
+    images: HashMap<u64, CachedImage>,
+    frame: usize,
+}
+
+impl ChatImageCache {
+    pub(super) fn new(cx: &mut App) -> Entity<Self> {
+        let cache = cx.new(|_| Self {
+            images: HashMap::default(),
+            frame: 0,
+        });
+        cx.observe_release(&cache, |cache, cx| {
+            for (_, mut image) in cache.images.drain() {
+                if let Some(Ok(image)) = image.item.get() {
+                    cx.drop_image(image, None);
+                }
+            }
+        })
+        .detach();
+        cache
+    }
+
+    pub(super) fn start_frame(&mut self, window: &mut Window, cx: &mut App) {
+        self.frame += 1;
+        let excess = self.images.len().saturating_sub(MAX_RETAINED_IMAGES);
+        if excess == 0 {
+            return;
+        }
+        let mut not_drawn_last_frame: Vec<(usize, u64)> = self
+            .images
+            .iter()
+            .filter(|(_, image)| image.used_in_frame + 1 < self.frame)
+            .map(|(hash, image)| (image.used_in_frame, *hash))
+            .collect();
+        not_drawn_last_frame.sort_unstable();
+        for (_, hash) in not_drawn_last_frame.into_iter().take(excess) {
+            if let Some(mut image) = self.images.remove(&hash)
+                && let Some(Ok(image)) = image.item.get()
+            {
+                cx.drop_image(image, Some(window));
+            }
+        }
+    }
+
+    fn loaded(&mut self, resource: &Resource) -> Option<Arc<RenderImage>> {
+        self.images.get_mut(&gpui::hash(resource))?.item.get()?.ok()
+    }
+}
+
+impl ImageCache for ChatImageCache {
+    fn load(
+        &mut self,
+        resource: &Resource,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        let hash = gpui::hash(resource);
+        if let Some(image) = self.images.get_mut(&hash) {
+            image.used_in_frame = self.frame;
+            return image.item.get();
+        }
+        let load = ImgResourceLoader::load(resource.clone(), cx);
+        let task = cx.background_executor().spawn(load).shared();
+        self.images.insert(
+            hash,
+            CachedImage {
+                item: ImageCacheItem::Loading(task.clone()),
+                used_in_frame: self.frame,
+            },
+        );
+        let view = window.current_view();
+        window
+            .spawn(cx, async move |cx| {
+                task.await.ok();
+                cx.on_next_frame(move |_, cx| cx.notify(view));
+            })
+            .detach();
+        None
+    }
+}
 
 pub(super) struct Lightbox {
     pub source: ImageSource,
@@ -68,12 +159,13 @@ fn create_unused(directory: &Path, file_name: &str) -> std::io::Result<(PathBuf,
 
 fn loaded_image_size(
     source: &ImageSource,
+    images: &Entity<ChatImageCache>,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<Size<DevicePixels>> {
     let image = match source {
         ImageSource::Resource(resource) => {
-            window.get_asset::<ImgResourceLoader>(resource, cx)?.ok()?
+            images.update(cx, |images, _| images.loaded(resource))?
         }
         ImageSource::Image(image) => image.clone().get_render_image(window, cx)?,
         ImageSource::Render(image) => image.clone(),
@@ -298,9 +390,11 @@ impl ChatView {
                                     .on_mouse_down(MouseButton::Left, {
                                         let frame = frame.clone();
                                         let source = lightbox.source.clone();
+                                        let images = self.images.clone();
                                         move |event, window, cx| {
                                             let on_image = frame.get().is_none_or(|frame| {
-                                                let size = loaded_image_size(&source, window, cx);
+                                                let size =
+                                                    loaded_image_size(&source, &images, window, cx);
                                                 is_on_image(
                                                     object_fit(zoom),
                                                     frame,
@@ -323,6 +417,7 @@ impl ChatView {
                                     )
                                     .child(
                                         img(lightbox.source.clone())
+                                            .image_cache(&self.images)
                                             .size_full()
                                             .object_fit(object_fit(zoom)),
                                     ),

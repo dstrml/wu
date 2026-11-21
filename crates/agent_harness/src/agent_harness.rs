@@ -47,19 +47,58 @@ fn translated_detail(detail: &str) -> i18n::SharedString {
     i18n::lookup(detail).unwrap_or_else(|| detail.to_owned().into())
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TurnSettings {
+    pub model: Option<String>,
+    pub reasoning: Option<ReasoningLevel>,
+    pub model_options: serde_json::Map<String, serde_json::Value>,
+}
+
 pub struct SteerMessage {
     pub prompt: String,
     pub message_id: Option<String>,
     /// Absolute image file paths.
     pub attachments: Vec<String>,
     pub skills: Vec<SkillRef>,
+    /// Set when the settings changed since the run started; they apply from the next turn on.
+    pub settings: Option<TurnSettings>,
+}
+
+pub enum Steer {
+    Message(SteerMessage),
+    /// Stops the running turn only. The sender fires just before its `Done` if the run goes on.
+    StopTurn(oneshot::Sender<()>),
+}
+
+pub(crate) fn acknowledge_stop(stop: &mut Option<oneshot::Sender<()>>) {
+    if let Some(stop) = stop.take()
+        && stop.send(()).is_err()
+    {
+        log::debug!("nothing waited for the turn stop to land");
+    }
+}
+
+/// False once the kill timer may have signalled the agent: the run is then ending, not stopped.
+pub(crate) fn confirm_stop(
+    stop: &mut Option<oneshot::Sender<()>>,
+    kill_starts_at: Option<tokio::time::Instant>,
+    escalation: &mut Option<tokio::task::JoinHandle<()>>,
+) -> bool {
+    if !kill_starts_at.is_some_and(|kill_starts_at| tokio::time::Instant::now() < kill_starts_at) {
+        return false;
+    }
+    if let Some(escalation) = escalation.take() {
+        escalation.abort();
+    }
+    acknowledge_stop(stop);
+    true
 }
 
 pub struct RunControls {
     pub request_input: Box<
         dyn Fn(Vec<UserInputQuestion>) -> oneshot::Receiver<Vec<UserInputAnswer>> + Send + Sync,
     >,
-    pub steering: mpsc::Receiver<SteerMessage>,
+    pub steering: mpsc::Receiver<Steer>,
     pub interrupt: CancellationToken,
     /// Permission mode changes made while the run is going.
     pub permission: watch::Receiver<PermissionMode>,
@@ -85,6 +124,16 @@ pub trait Harness: Send + Sync {
     fn supports_steering(&self) -> bool;
     fn steering_mode(&self) -> SteeringMode;
     fn reasoning_levels(&self) -> &[ReasoningLevel];
+    /// Whether `Steer::StopTurn` ends a turn without ending the run.
+    fn stops_turn_in_place(&self) -> bool {
+        false
+    }
+    /// Whether a running agent can switch from `before` to `after` without a restart.
+    fn applies_settings_live(&self, _before: &TurnSettings, _after: &TurnSettings) -> bool {
+        false
+    }
+    /// The app is quitting, so helper processes that outlive a closed stdin must be killed now.
+    fn app_quitting(&self) {}
     fn installed(&self) -> bool {
         true
     }

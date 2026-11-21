@@ -64,8 +64,8 @@ use project::git_store::GitAccess;
 use project::{
     Fs, Project, ProjectPath,
     git_store::{
-        AbortableMerge, CommitDataState, CommitDiff, GitStoreEvent, Repository, RepositoryEvent,
-        RepositoryId, pending_op,
+        AbortableMerge, CommitDataState, GitStoreEvent, Repository, RepositoryEvent, RepositoryId,
+        pending_op,
     },
     project_settings::{GitPathStyle, ProjectSettings},
 };
@@ -773,23 +773,6 @@ fn history_files_from_tree_diff(tree_diff: TreeDiff) -> Vec<HistoryFile> {
         .collect::<Vec<_>>();
     files.sort_by(|a, b| a.path.cmp(&b.path));
     files
-}
-
-fn history_files_from_commit_diff(commit_diff: CommitDiff) -> Vec<HistoryFile> {
-    commit_diff
-        .files
-        .into_iter()
-        .map(|file| HistoryFile {
-            status: if file.old_text.is_none() {
-                StatusCode::Added
-            } else if file.new_text.is_none() {
-                StatusCode::Deleted
-            } else {
-                StatusCode::Modified
-            },
-            path: file.path,
-        })
-        .collect()
 }
 
 fn remote_branch_names(branches: &[Branch], remote_name: &str) -> Vec<SharedString> {
@@ -7460,19 +7443,25 @@ impl GitPanel {
                 )
             });
             let load_files = cx.spawn(async move |this, cx| {
-                let files = match tree_diff.await {
-                    Ok(Ok(tree_diff)) => Ok(history_files_from_tree_diff(tree_diff)),
+                let tree_diff = match tree_diff.await {
+                    Ok(Ok(tree_diff)) => Ok(tree_diff),
                     _ => {
-                        let commit_diff = repository.update(cx, |repository, _| {
-                            repository.load_commit_diff(sha.to_string(), false)
+                        let root_commit_tree_diff = repository.update(cx, |repository, cx| {
+                            repository.diff_tree(
+                                DiffTreeType::Since {
+                                    base: sha.empty_tree_id().into(),
+                                    head: sha.to_string().into(),
+                                },
+                                cx,
+                            )
                         });
-                        match commit_diff.await {
-                            Ok(Ok(commit_diff)) => Ok(history_files_from_commit_diff(commit_diff)),
-                            Ok(Err(error)) => Err(error),
+                        match root_commit_tree_diff.await {
+                            Ok(tree_diff) => tree_diff,
                             Err(canceled) => Err(canceled.into()),
                         }
                     }
                 };
+                let files = tree_diff.map(history_files_from_tree_diff);
                 this.update(cx, |this, cx| {
                     if !this.expanded_history_commits.contains_key(&sha) {
                         return;
@@ -7558,17 +7547,11 @@ impl GitPanel {
                 CommitView::open_at_file(sha, repository.downgrade(), workspace, path, window, cx)
             }
             GitPanelClickBehavior::ViewFile if file.status != StatusCode::Deleted => {
-                let commit_diff = repository.update(cx, |repository, _| {
-                    repository.load_commit_diff(sha.clone(), false)
+                let text = repository.update(cx, |repository, _| {
+                    repository.load_file_at_commit(sha.clone(), path.clone())
                 });
                 cx.spawn_in(window, async move |_, cx| {
-                    let commit_diff = commit_diff.await??;
-                    let text = commit_diff
-                        .files
-                        .into_iter()
-                        .find(|file| file.path == path)
-                        .filter(|file| !file.is_binary)
-                        .and_then(|file| file.new_text);
+                    let text = text.await??;
                     cx.update(|window, cx| match text {
                         Some(text) => {
                             open_file_at_commit(&sha, path, text, repository, workspace, window, cx)
@@ -11170,7 +11153,67 @@ mod tests {
         cx.deactivate_window();
         cx.update(|window, _| window.activate_window());
         cx.run_until_parked();
+        assert_eq!(
+            changed_files(&mut cx),
+            0,
+            "a focus right after a full scan does not scan again"
+        );
+
+        cx.executor()
+            .advance_clock(crate::WINDOW_ACTIVATION_RESCAN_COOLDOWN);
+        cx.deactivate_window();
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
         assert_eq!(changed_files(&mut cx), 1);
+
+        fs.set_status_for_repo(dot_git, &[]);
+        cx.dispatch_action(git::Refresh);
+        cx.run_until_parked();
+        assert_eq!(
+            changed_files(&mut cx),
+            0,
+            "an explicit refresh always scans again"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_load_file_at_commit_reads_one_text_file(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(path!("/project"), json!({".git": {}, "text.txt": "new\n"}))
+            .await;
+        let dot_git = Path::new(path!("/project/.git"));
+        let sha = "0123456789012345678901234567890123456789";
+        fs.set_head_and_index_for_repo(
+            dot_git,
+            &[
+                ("text.txt", "committed\n".into()),
+                ("binary.dat", "a\0b".into()),
+            ],
+        );
+        fs.with_git_state(dot_git, false, |state| {
+            state.refs.insert("HEAD".into(), sha.into());
+        })
+        .unwrap();
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        cx.run_until_parked();
+        let repository = project.read_with(cx, |project, cx| {
+            project
+                .active_repository(cx)
+                .expect("the project is a repository")
+        });
+        let load = |path: &str, cx: &mut TestAppContext| {
+            repository.update(cx, |repository, _| {
+                repository.load_file_at_commit(sha.to_string(), repo_path(path))
+            })
+        };
+
+        assert_eq!(
+            load("text.txt", cx).await.unwrap().unwrap(),
+            Some("committed\n".to_string())
+        );
+        assert_eq!(load("binary.dat", cx).await.unwrap().unwrap(), None);
+        assert_eq!(load("missing.txt", cx).await.unwrap().unwrap(), None);
     }
 
     #[gpui::test]

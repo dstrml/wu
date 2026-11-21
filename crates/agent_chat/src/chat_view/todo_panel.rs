@@ -67,15 +67,14 @@ impl TodoPanelState {
     }
 }
 
-fn latest_todo(entries: &[Entry]) -> Option<Vec<TodoItem>> {
-    let items = entries.iter().rev().find_map(|entry| match entry {
+fn todo_items(entry: &Entry) -> Option<&[TodoItem]> {
+    match entry {
         Entry::Tool(tool) => match &tool.call {
-            ToolCall::Todo { items } => Some(items),
+            ToolCall::Todo { items } if !items.is_empty() => Some(items.as_slice()),
             _ => None,
         },
         _ => None,
-    })?;
-    (!items.is_empty()).then(|| items.clone())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,11 +178,16 @@ fn signature(items: &[TodoItem]) -> u64 {
 }
 
 impl ChatView {
+    fn latest_todo<'a>(&self, cx: &'a App) -> Option<&'a [TodoItem]> {
+        todo_items(self.entries(cx).get(self.latest_todo?)?)
+    }
+
     pub(super) fn observe_todo(&mut self, cx: &App) {
         let working = self.is_working(cx);
         let settled = !working
-            && latest_todo(self.entries(cx))
-                .is_some_and(|items| TodoSummary::of(&items).finished());
+            && self
+                .latest_todo(cx)
+                .is_some_and(|items| TodoSummary::of(items).finished());
         let state = &mut self.todo_panel;
         state.observe_working(working);
         if settled && !state.was_settled {
@@ -193,10 +197,10 @@ impl ChatView {
     }
 
     pub(super) fn render_todo_panel(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        let items = latest_todo(self.entries(cx))?;
-        let summary = TodoSummary::of(&items);
+        let items = self.latest_todo(cx)?;
+        let summary = TodoSummary::of(items);
         let state = &self.todo_panel;
-        let signature = signature(&items);
+        let signature = signature(items);
         if state.hides(signature) {
             return None;
         }
@@ -300,7 +304,7 @@ impl ChatView {
             });
         let list = expanded.then(|| {
             v_flex().mt(px(2.)).pb(px(6.)).children(
-                rows(&items, state.show_earlier, state.show_later)
+                rows(items, state.show_earlier, state.show_later)
                     .into_iter()
                     .map(|row| match row {
                         Row::Item(index) => {

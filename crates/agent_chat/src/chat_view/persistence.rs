@@ -86,9 +86,11 @@ impl SerializableItem for ChatView {
                 .update(cx, |store, cx| store.open_saved_session(chat_id.into(), cx))
                 .await?;
             cx.update(|window, cx| {
-                let kind = session.read(cx).kind();
-                store.update(cx, |store, cx| store.update_agent_if_due(kind, cx));
-                cx.new(|cx| ChatView::new(session, store, project, workspace, window, cx))
+                cx.new(|cx| {
+                    let mut view = ChatView::new(session, store, project, workspace, window, cx);
+                    view.update_check_due = true;
+                    view
+                })
             })
         })
     }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     AgentKind,
-    chat_style::{composer_surface, icon, icon_size_px, tracked_upper},
+    chat_style::{composer_surface, icon, icon_size_px, tracked_upper, working_animation},
     session::AgentUpdateStatus,
 };
 use i18n::t;
@@ -318,7 +318,7 @@ impl ChatView {
                 icon(IconName::LoadCircle, px(12.), color)
                     .with_animation(
                         "agent-update-spinner",
-                        Animation::new(Duration::from_secs(1)).repeat(),
+                        working_animation(Duration::from_secs(1)),
                         |this, delta| {
                             this.with_transformation(Transformation::rotate(gpui::percentage(
                                 delta,

@@ -252,6 +252,18 @@ pub(crate) fn control_error(line: &str, request_id_prefix: &str) -> Option<Strin
     })
 }
 
+pub(crate) fn control_response_to(line: &str, request_id: &str) -> Option<Value> {
+    if !line.contains(request_id) {
+        return None;
+    }
+    let mut value: Value = serde_json::from_str(line).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("control_response") {
+        return None;
+    }
+    let response = value.get_mut("response")?.take();
+    (response.get("request_id").and_then(Value::as_str) == Some(request_id)).then_some(response)
+}
+
 pub(crate) fn parse_frame(line: &str) -> Result<Frame, serde_json::Error> {
     let value: Value = serde_json::from_str(line)?;
     let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
@@ -366,6 +378,24 @@ pub(crate) fn set_permission_mode_line(request_id: &str, mode: &str) -> String {
     .to_string()
 }
 
+pub(crate) fn set_model_line(request_id: &str, model: &str) -> String {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": { "subtype": "set_model", "model": model },
+    })
+    .to_string()
+}
+
+pub(crate) fn initialize_request_line(request_id: &str) -> String {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": { "subtype": "initialize" },
+    })
+    .to_string()
+}
+
 pub(crate) fn interrupt_request_line(request_id: &str) -> String {
     json!({
         "type": "control_request",
@@ -390,6 +420,16 @@ mod tests {
         assert_eq!(control_error(accepted, "wu-set-mode-"), None);
         let other = r#"{"type":"control_response","response":{"subtype":"error","request_id":"int_1","error":"x"}}"#;
         assert_eq!(control_error(other, "wu-set-mode-"), None);
+    }
+
+    #[test]
+    fn control_responses_are_matched_by_request_id() {
+        let answer = r#"{"type":"control_response","response":{"subtype":"success","request_id":"wu-run-initialize","response":{"commands":[]}}}"#;
+        let response = control_response_to(answer, "wu-run-initialize").expect("matched");
+        assert_eq!(response["response"]["commands"], json!([]));
+        assert_eq!(control_response_to(answer, "wu-other"), None);
+        let echoed = r#"{"type":"user","message":{"content":"wu-run-initialize"}}"#;
+        assert_eq!(control_response_to(echoed, "wu-run-initialize"), None);
     }
 
     #[test]

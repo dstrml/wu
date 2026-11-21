@@ -66,6 +66,10 @@ impl Feed {
         }
     }
 
+    pub(super) fn close_tools(&mut self) {
+        self.finished.extend(self.kinds.keys().cloned());
+    }
+
     pub(super) fn finish(&mut self) -> Vec<AgentEvent> {
         let mut events = Vec::new();
         if let Some(text) = self.pending_prompt.take() {
@@ -171,6 +175,13 @@ impl Feed {
             });
         }
     }
+}
+
+pub(super) fn is_turn_content(update: &Value) -> bool {
+    matches!(
+        str_at(update, "sessionUpdate"),
+        "agent_message_chunk" | "agent_thought_chunk" | "tool_call" | "tool_call_update" | "plan"
+    )
 }
 
 fn str_at<'a>(value: &'a Value, key: &str) -> &'a str {

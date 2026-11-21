@@ -5,18 +5,38 @@ use gpui::{
     Focusable as _, Pixels, Point, SharedString, Subscription, Window, anchored, deferred,
 };
 use i18n::t;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 use ui::{ContextMenu, prelude::*};
 use util::ResultExt as _;
 use workspace::{OpenOptions, OpenVisible};
 
 const FILE_SCHEME: &str = "wu-file:";
-const RECHECK_MISSING: std::time::Duration = std::time::Duration::from_secs(5);
+const RECHECK_MISSING: Duration = Duration::from_secs(5);
+const MAX_RECHECK_WAIT: Duration = Duration::from_secs(10 * 60);
+const MAX_KNOWN_PATHS: usize = 2000;
 
 pub(super) struct PathState {
     exists: bool,
-    checked: std::time::Instant,
     pending: bool,
+    misses: u32,
+    recheck_at: Instant,
+}
+
+fn recheck_wait(misses: u32) -> Duration {
+    let doublings = misses.saturating_sub(1).min(16);
+    (RECHECK_MISSING * 2u32.pow(doublings)).min(MAX_RECHECK_WAIT)
+}
+
+pub(super) fn path_candidates(markdown: &str, cwd: &Path, candidates: &mut Vec<PathBuf>) {
+    candidates.extend(
+        inline_code_spans(markdown)
+            .iter()
+            .filter_map(|span| file_target(span, cwd))
+            .map(|target| target.path),
+    );
 }
 
 fn inline_code_spans(markdown: &str) -> Vec<String> {
@@ -107,13 +127,6 @@ fn looks_like_path(text: &str) -> bool {
         }))
 }
 
-fn markdown_id(entry: &crate::session::Entry) -> gpui::EntityId {
-    match entry {
-        crate::session::Entry::Assistant { markdown, .. } => markdown.entity_id(),
-        _ => gpui::EntityId::default(),
-    }
-}
-
 impl ChatView {
     pub(super) fn code_span_url(&self, text: &str, cwd: &Path) -> Option<SharedString> {
         if !looks_like_path(text) {
@@ -126,64 +139,44 @@ impl ChatView {
             .then(|| format!("{FILE_SCHEME}{text}").into())
     }
 
-    pub(super) fn refresh_path_links(&mut self, cx: &mut Context<Self>) {
-        let cwd = self.session.read(cx).metadata().cwd.clone();
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        for entry in self.entries(cx) {
-            if let crate::session::Entry::Assistant { markdown, .. } = entry {
-                let markdown = markdown.read(cx);
-                let length = markdown.source().len();
-                if self.scanned_sources.get(&markdown_id(entry)) == Some(&length) {
+    pub(super) fn check_paths(&mut self, mut candidates: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        if self.next_path_recheck.is_some_and(|at| at <= now) {
+            self.next_path_recheck = None;
+            for (path, state) in &self.known_paths {
+                if state.exists || state.pending {
                     continue;
                 }
-                candidates.extend(
-                    inline_code_spans(markdown.source())
-                        .iter()
-                        .filter_map(|span| file_target(span, &cwd))
-                        .map(|target| target.path),
-                );
+                if state.recheck_at <= now {
+                    candidates.push(path.clone());
+                } else {
+                    self.next_path_recheck = Some(
+                        self.next_path_recheck
+                            .map_or(state.recheck_at, |at| at.min(state.recheck_at)),
+                    );
+                }
             }
         }
-        let scanned: Vec<(gpui::EntityId, usize)> = self
-            .entries(cx)
-            .iter()
-            .filter_map(|entry| match entry {
-                crate::session::Entry::Assistant { markdown, .. } => {
-                    Some((markdown_id(entry), markdown.read(cx).source().len()))
-                }
-                _ => None,
-            })
-            .collect();
-        self.scanned_sources.extend(scanned);
-        candidates.extend(self.known_paths.iter().filter_map(|(path, state)| {
-            (!state.exists && !state.pending && state.checked.elapsed() >= RECHECK_MISSING)
-                .then(|| path.clone())
-        }));
         candidates.retain(|path| {
             self.known_paths
                 .get(path)
-                .is_none_or(|state| !state.pending && !state.exists)
-        });
-        candidates.sort();
-        candidates.dedup();
-        candidates.retain(|path| {
-            self.known_paths.get(path).is_none_or(|state| {
-                state.checked.elapsed() >= RECHECK_MISSING
-            })
+                .is_none_or(|state| !state.exists && !state.pending && state.recheck_at <= now)
         });
         if candidates.is_empty() {
             return;
         }
+        candidates.sort();
+        candidates.dedup();
         for path in &candidates {
-            self.known_paths.insert(
-                path.clone(),
-                PathState {
-                    exists: false,
-                    checked: std::time::Instant::now(),
-                    pending: true,
-                },
-            );
+            let state = self.known_paths.entry(path.clone()).or_insert(PathState {
+                exists: false,
+                pending: true,
+                misses: 0,
+                recheck_at: now,
+            });
+            state.pending = true;
         }
+        self.trim_known_paths();
         let check = cx.background_spawn(async move {
             candidates
                 .into_iter()
@@ -196,16 +189,23 @@ impl ChatView {
         cx.spawn(async move |this, cx| {
             let results = check.await;
             this.update(cx, |this, cx| {
+                let now = Instant::now();
                 let mut found = false;
                 for (path, exists) in results {
-                    found |= exists;
-                    this.known_paths.insert(
-                        path,
-                        PathState {
-                            exists,
-                            checked: std::time::Instant::now(),
-                            pending: false,
-                        },
+                    let Some(state) = this.known_paths.get_mut(&path) else {
+                        continue;
+                    };
+                    state.pending = false;
+                    state.exists = exists;
+                    if exists {
+                        found = true;
+                        continue;
+                    }
+                    state.misses += 1;
+                    state.recheck_at = now + recheck_wait(state.misses);
+                    this.next_path_recheck = Some(
+                        this.next_path_recheck
+                            .map_or(state.recheck_at, |at| at.min(state.recheck_at)),
                     );
                 }
                 if found {
@@ -215,6 +215,23 @@ impl ChatView {
             .log_err();
         })
         .detach();
+    }
+
+    fn trim_known_paths(&mut self) {
+        if self.known_paths.len() <= MAX_KNOWN_PATHS {
+            return;
+        }
+        let mut removable: Vec<(bool, u32, PathBuf)> = self
+            .known_paths
+            .iter()
+            .filter(|(_, state)| !state.pending)
+            .map(|(path, state)| (state.exists, state.misses, path.clone()))
+            .collect();
+        removable.sort_by_key(|(exists, misses, _)| (*exists, std::cmp::Reverse(*misses)));
+        let excess = self.known_paths.len() - MAX_KNOWN_PATHS * 3 / 4;
+        for (_, _, path) in removable.into_iter().take(excess) {
+            self.known_paths.remove(&path);
+        }
     }
 
     pub(super) fn open_link(&mut self, url: SharedString, window: &mut Window, cx: &mut Context<Self>) {
@@ -392,5 +409,14 @@ mod tests {
         assert!(looks_like_path("Cargo.toml"));
         assert!(!looks_like_path("Vec<T>"));
         assert!(!looks_like_path("foo bar.rs"));
+    }
+
+    #[test]
+    fn missing_paths_are_rechecked_less_and_less_often() {
+        let waits: Vec<u64> = (1..=9)
+            .map(|misses| recheck_wait(misses).as_secs())
+            .collect();
+        assert_eq!(waits, [5, 10, 20, 40, 80, 160, 320, 600, 600]);
+        assert_eq!(recheck_wait(u32::MAX), MAX_RECHECK_WAIT);
     }
 }

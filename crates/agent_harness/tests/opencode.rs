@@ -12,7 +12,7 @@ use agent_harness::{
     UserInputAnswer,
 };
 use agent_harness::{
-    CancellationToken, Harness, HarnessError, OpencodeHarness, RunControls, SteerMessage,
+    CancellationToken, Harness, HarnessError, OpencodeHarness, RunControls, Steer, SteerMessage,
 };
 
 #[derive(Clone)]
@@ -268,12 +268,7 @@ type Answers = Arc<Mutex<Vec<String>>>;
 
 fn controls_answering(
     label: Option<&'static str>,
-) -> (
-    RunControls,
-    mpsc::Sender<SteerMessage>,
-    CancellationToken,
-    Answers,
-) {
+) -> (RunControls, mpsc::Sender<Steer>, CancellationToken, Answers) {
     let (steer_tx, steering) = mpsc::channel(8);
     let token = CancellationToken::new();
     let asked: Answers = Arc::default();
@@ -305,7 +300,7 @@ fn controls_answering(
     (controls, steer_tx, token, asked)
 }
 
-fn controls() -> (RunControls, mpsc::Sender<SteerMessage>, CancellationToken) {
+fn controls() -> (RunControls, mpsc::Sender<Steer>, CancellationToken) {
     let (controls, steer, token, _) = controls_answering(None);
     (controls, steer, token)
 }
@@ -549,12 +544,13 @@ async fn steer_queues_mid_turn_and_delivers_at_idle() {
     next_event(&mut stream).await;
 
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "also do this".into(),
             message_id: None,
             attachments: vec!["/tmp/extra.png".into()],
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;

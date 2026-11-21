@@ -167,25 +167,45 @@ pub(crate) fn invalidate_versions(names: &[&str]) {
     }
 }
 
-// The lock is held across the probe so concurrent requests coalesce.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "a bounded `--version` probe whose result is cached per executable"
-)]
 pub fn binary_version(path: &Path) -> Option<semver::Version> {
-    use std::time::Duration;
     let canonical = path.canonicalize().ok()?;
     let metadata = canonical.metadata().ok()?;
     let key = (canonical, metadata.modified().ok(), metadata.len());
-    let mut cache = VERSION_CACHE
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let alias = path
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
+    if let Ok(mut cache) = VERSION_CACHE.get_or_init(Default::default).try_lock()
+        && let Some((version, aliases)) = cache.get_mut(&key)
+    {
+        aliases.insert(alias);
+        return version.clone();
+    }
+    off_async_worker(|| probe_version(path, key, alias))
+}
+
+/// Tokio has two workers here, so a blocked one would stall every running chat.
+fn off_async_worker<T>(work: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(work)
+        }
+        _ => work(),
+    }
+}
+
+// The lock is held across the probe so concurrent requests coalesce.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a bounded `--version` probe whose result is cached per executable"
+)]
+fn probe_version(path: &Path, key: VersionKey, alias: String) -> Option<semver::Version> {
+    use std::time::Duration;
+    let mut cache = VERSION_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     if let Some((version, aliases)) = cache.get_mut(&key) {
         aliases.insert(alias);
         return version.clone();

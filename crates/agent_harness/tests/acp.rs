@@ -8,8 +8,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use agent_harness::{
     AcpAgent, AcpHarness, AgentEvent, CancellationToken, DoneStatus, Harness, HarnessId,
-    PermissionMode, ReasoningLevel, RunControls, RunRequest, SteerMessage, ToolCall,
-    UserInputAnswer,
+    PermissionMode, ReasoningLevel, RunControls, RunRequest, Steer, SteerMessage, ToolCall,
+    TurnSettings, UserInputAnswer,
 };
 
 fn as_is(text: &str) -> &str {
@@ -79,7 +79,7 @@ fn request(prompt: &str) -> RunRequest {
     }
 }
 
-fn controls(answer: &'static str) -> (RunControls, mpsc::Sender<SteerMessage>, CancellationToken) {
+fn controls(answer: &'static str) -> (RunControls, mpsc::Sender<Steer>, CancellationToken) {
     let (steer_tx, steer_rx) = mpsc::channel(8);
     let token = CancellationToken::new();
     let controls = RunControls {
@@ -236,12 +236,13 @@ async fn steering_mid_turn_ends_in_one_done() {
         }
     }
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "and more".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .unwrap();
     events.extend(collect_until_done(&mut stream).await);
@@ -442,12 +443,13 @@ async fn messages_wait_for_the_turn_when_the_agent_cant_steer() {
         }
     }
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "and more".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .unwrap();
     events.extend(collect_until_done(&mut stream).await);
@@ -499,4 +501,220 @@ async fn agents_without_resume_reopen_chats_by_loading_them_quietly() {
         AgentEvent::Error { .. } | AgentEvent::ToolCall { .. }
     )));
     assert_eq!(texts(&events), "said: again");
+}
+
+fn stop() -> Steer {
+    Steer::StopTurn(oneshot::channel().0)
+}
+
+fn message(prompt: &str, settings: Option<TurnSettings>) -> Steer {
+    Steer::Message(SteerMessage {
+        prompt: prompt.into(),
+        message_id: None,
+        attachments: Vec::new(),
+        skills: Vec::new(),
+        settings,
+    })
+}
+
+fn settings(model: Option<&str>, reasoning: Option<ReasoningLevel>) -> TurnSettings {
+    TurnSettings {
+        model: model.map(str::to_owned),
+        reasoning,
+        model_options: serde_json::Map::new(),
+    }
+}
+
+type Events = futures::stream::BoxStream<'static, Result<AgentEvent, agent_harness::HarnessError>>;
+
+async fn wait_for_text(stream: &mut Events, wanted: &str) {
+    while let Some(event) = tokio::time::timeout(Duration::from_secs(10), stream.next())
+        .await
+        .expect("the fake agent answers in time")
+    {
+        if matches!(event.unwrap(), AgentEvent::TextDelta { text } if text == wanted) {
+            return;
+        }
+    }
+    panic!("the stream ended before {wanted}");
+}
+
+async fn assert_quiet(stream: &mut Events) {
+    let event = tokio::time::timeout(Duration::from_millis(300), stream.next()).await;
+    assert!(event.is_err(), "unexpected event: {event:?}");
+}
+
+#[tokio::test]
+async fn stopping_a_turn_keeps_the_agent_for_the_next_message() {
+    let (run_controls, steer, _interrupt) = controls("Allow");
+    let mut stream = harness().run(request("pid"), run_controls).await.unwrap();
+    let first = collect_until_done(&mut stream).await;
+    assert_eq!(done(&first), (DoneStatus::Completed, None));
+
+    steer.send(message("wait", None)).await.unwrap();
+    wait_for_text(&mut stream, "waiting").await;
+    let (acknowledge, mut acknowledged) = oneshot::channel();
+    steer.send(Steer::StopTurn(acknowledge)).await.unwrap();
+    steer.send(message("pid", None)).await.unwrap();
+    let stopped = collect_until_done(&mut stream).await;
+    assert_eq!(done(&stopped), (DoneStatus::Interrupted, None));
+    assert!(
+        acknowledged.try_recv().is_ok(),
+        "the stop is confirmed first"
+    );
+    assert_eq!(texts(&stopped), "");
+
+    let next = collect_until_done(&mut stream).await;
+    assert_eq!(done(&next), (DoneStatus::Completed, None));
+    assert_eq!(texts(&next), texts(&first), "the same process answers");
+    assert_quiet(&mut stream).await;
+}
+
+#[tokio::test]
+async fn a_stopped_turn_withdraws_its_questions_and_drops_late_output() {
+    let (asked_tx, mut asked) = mpsc::unbounded_channel();
+    let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (steer, steer_rx) = mpsc::channel(8);
+    let run_controls = RunControls {
+        request_input: Box::new({
+            let held = held.clone();
+            move |_| {
+                let (tx, rx) = oneshot::channel();
+                held.lock().unwrap().push(tx);
+                asked_tx.send(()).unwrap();
+                rx
+            }
+        }),
+        steering: steer_rx,
+        interrupt: CancellationToken::new(),
+        permission: tokio::sync::watch::channel(PermissionMode::Ask).1,
+    };
+    let mut stream = harness().run(request("halt"), run_controls).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), asked.recv())
+        .await
+        .expect("the agent asks for permission")
+        .unwrap();
+    steer.send(stop()).await.unwrap();
+    let stopped = collect_until_done(&mut stream).await;
+    assert_eq!(done(&stopped), (DoneStatus::Interrupted, None));
+    assert_eq!(texts(&stopped), "halting");
+    assert_quiet(&mut stream).await;
+    assert!(held.lock().unwrap().iter().all(|answer| answer.is_closed()));
+
+    steer.send(message("pid", None)).await.unwrap();
+    let next = collect_until_done(&mut stream).await;
+    assert_eq!(done(&next), (DoneStatus::Completed, None));
+    assert!(texts(&next).starts_with("pid="), "{}", texts(&next));
+}
+
+#[tokio::test]
+async fn stopping_between_turns_does_nothing() {
+    let (run_controls, steer, _interrupt) = controls("Allow");
+    let mut stream = harness().run(request("pid"), run_controls).await.unwrap();
+    let first = collect_until_done(&mut stream).await;
+    steer.send(stop()).await.unwrap();
+    assert_quiet(&mut stream).await;
+    steer.send(message("pid", None)).await.unwrap();
+    let next = collect_until_done(&mut stream).await;
+    assert_eq!(done(&next), (DoneStatus::Completed, None));
+    assert_eq!(texts(&next), texts(&first));
+}
+
+#[tokio::test]
+async fn a_stop_the_agent_ignores_ends_the_run() {
+    let (run_controls, steer, _interrupt) = controls("Allow");
+    let mut stream = harness().run(request("deaf"), run_controls).await.unwrap();
+    wait_for_text(&mut stream, "stuck").await;
+    let (acknowledge, mut acknowledged) = oneshot::channel();
+    steer.send(Steer::StopTurn(acknowledge)).await.unwrap();
+    let events = collect_until_done(&mut stream).await;
+    assert_eq!(done(&events), (DoneStatus::Interrupted, None));
+    assert!(
+        acknowledged.try_recv().is_err(),
+        "a killed agent confirms nothing"
+    );
+    let end = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the run ends once the agent is killed");
+    assert!(end.is_none(), "{end:?}");
+}
+
+#[tokio::test]
+async fn new_settings_apply_to_the_turn_their_message_starts() {
+    let (run_controls, steer, _interrupt) = controls("Allow");
+    let mut stream = harness().run(request("hello"), run_controls).await.unwrap();
+    let first = collect_until_done(&mut stream).await;
+    assert!(texts(&first).starts_with("model=gemini-flash level=high"));
+
+    let changed = settings(Some("gemini-flash"), Some(ReasoningLevel::Low));
+    steer.send(message("hello", Some(changed))).await.unwrap();
+    let second = collect_until_done(&mut stream).await;
+    assert!(texts(&second).starts_with("model=gemini-flash level=low"));
+
+    steer.send(message("hello", None)).await.unwrap();
+    let third = collect_until_done(&mut stream).await;
+    assert!(texts(&third).starts_with("model=gemini-flash level=low"));
+}
+
+#[tokio::test]
+async fn settings_sent_mid_turn_wait_for_the_next_turn() {
+    let (run_controls, steer, _interrupt) = controls("Allow");
+    let mut stream = harness().run(request("steer"), run_controls).await.unwrap();
+    wait_for_text(&mut stream, "first").await;
+    let changed = settings(None, Some(ReasoningLevel::Low));
+    steer
+        .send(message("and more", Some(changed)))
+        .await
+        .unwrap();
+    assert_eq!(
+        done(&collect_until_done(&mut stream).await),
+        (DoneStatus::Completed, None)
+    );
+    steer.send(message("hello", None)).await.unwrap();
+    let next = collect_until_done(&mut stream).await;
+    assert!(texts(&next).starts_with("model=gemini-flash level=low"));
+
+    let (run_controls, steer, _interrupt) = controls("Allow");
+    let mut stream = older().run(request("slow"), run_controls).await.unwrap();
+    wait_for_text(&mut stream, "first").await;
+    steer
+        .send(message("hello", Some(settings(Some("m2"), None))))
+        .await
+        .unwrap();
+    collect_until_done(&mut stream).await;
+    let queued = collect_until_done(&mut stream).await;
+    assert!(texts(&queued).starts_with("model=m2 level=none"));
+}
+
+#[test]
+fn only_settings_the_agent_can_be_told_are_applied_live() {
+    let harness = harness();
+    let high = settings(Some("gemini-flash"), Some(ReasoningLevel::High));
+    let low = settings(Some("claude-opus"), Some(ReasoningLevel::Low));
+    assert!(harness.stops_turn_in_place());
+    assert!(harness.applies_settings_live(&high, &low));
+    assert!(harness.applies_settings_live(&settings(None, None), &low));
+    assert!(!harness.applies_settings_live(&high, &settings(None, Some(ReasoningLevel::High))));
+    assert!(!harness.applies_settings_live(&high, &settings(Some("gemini-flash"), None)));
+    let mut with_option = high.clone();
+    with_option
+        .model_options
+        .insert("agent".into(), "build".into());
+    assert!(!harness.applies_settings_live(&high, &with_option));
+}
+
+#[tokio::test]
+async fn lookups_return_before_the_helper_process_exits() {
+    let dir = tempfile::Builder::new()
+        .prefix("stubborn-commands")
+        .tempdir()
+        .unwrap();
+    let harness = harness().with_graces(Duration::from_millis(200), Duration::from_secs(30));
+    let started = std::time::Instant::now();
+    let commands = harness.commands(dir.path()).await.unwrap();
+    assert_eq!(commands[0].name, "goal");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the lookup waited for the helper to exit"
+    );
 }

@@ -722,6 +722,7 @@ pub struct Repository {
     // For a local repository, holds paths that have had worktree events since the last status scan completed,
     // and that should be examined during the next status scan.
     paths_needing_status_update: Vec<Vec<RepoPath>>,
+    last_full_scan_finished_at: Option<Instant>,
     job_sender: mpsc::UnboundedSender<GitJob>,
     _worker_task: Task<()>,
     active_jobs: HashMap<JobId, JobInfo>,
@@ -6635,6 +6636,7 @@ impl Repository {
             commit_message_buffer: None,
             askpass_delegates: Default::default(),
             paths_needing_status_update: Default::default(),
+            last_full_scan_finished_at: None,
             latest_askpass_id: 0,
             job_sender: mpsc::unbounded().0,
             job_id: 0,
@@ -6684,6 +6686,7 @@ impl Repository {
             blob_read_limiter,
             pending_ops: Default::default(),
             paths_needing_status_update: Default::default(),
+            last_full_scan_finished_at: None,
             job_sender,
             _worker_task: worker_task,
             repository_state,
@@ -7238,6 +7241,16 @@ impl Repository {
         }
     }
 
+    pub fn rescan_if_stale(&mut self, max_age: Duration, cx: &mut Context<Self>) {
+        let now = cx.background_executor().now();
+        let is_fresh = self
+            .last_full_scan_finished_at
+            .is_some_and(|finished_at| now.saturating_duration_since(finished_at) < max_age);
+        if !is_fresh {
+            self.rescan(cx);
+        }
+    }
+
     pub fn show(&mut self, commit: String) -> oneshot::Receiver<Result<CommitDetails>> {
         let id = self.id;
         self.send_job("show", None, move |git_repo, _cx| async move {
@@ -7307,6 +7320,51 @@ impl Repository {
                 }
             }
         })
+    }
+
+    /// Resolves to `None` when the file is missing from the commit or is binary.
+    pub fn load_file_at_commit(
+        &mut self,
+        commit: String,
+        path: RepoPath,
+    ) -> oneshot::Receiver<Result<Option<String>>> {
+        let id = self.id;
+        self.send_job(
+            "load_file_at_commit",
+            None,
+            move |git_repo, _cx| async move {
+                match git_repo {
+                    RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                        let content = backend
+                            .load_revisions(vec![format!("{commit}:{}", path.as_unix_str())])
+                            .await?
+                            .pop()
+                            .flatten();
+                        Ok(content
+                            .filter(|content| !is_binary_content(content))
+                            .and_then(|content| decode_git_text(content).ok()))
+                    }
+                    RepositoryState::Remote(RemoteRepositoryState {
+                        client, project_id, ..
+                    }) => {
+                        let response = client
+                            .request(proto::LoadCommitDiff {
+                                project_id: project_id.0,
+                                repository_id: id.to_proto(),
+                                commit,
+                                ignore_shallow_boundary: false,
+                            })
+                            .await?;
+                        Ok(response
+                            .files
+                            .into_iter()
+                            .find(|file| file.path == path.as_unix_str())
+                            .filter(|file| !file.is_binary)
+                            .and_then(|file| file.new_text))
+                    }
+                }
+            },
+        )
     }
 
     pub fn file_history_changed_files(
@@ -10314,6 +10372,7 @@ impl Repository {
                 };
                 let snapshot = compute_snapshot(this.clone(), backend.clone(), &mut cx).await;
                 this.update(&mut cx, |this, cx| {
+                    this.last_full_scan_finished_at = Some(cx.background_executor().now());
                     this.clear_pending_ops(cx);
                 });
                 if let Some(updates_tx) = updates_tx {

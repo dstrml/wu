@@ -4,6 +4,15 @@ emit() { printf '%s\n' "$1"; }
 rid() { printf '%s' "$1" | sed 's/.*"id":\([0-9]*\).*/\1/'; }
 has() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
 
+field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"; }
+flood() {
+  i=0
+  while [ "$i" -lt 600 ]; do
+    emit '{"method":"item/agentMessage/delta","params":{"itemId":"flood","delta":"x"}}'
+    i=$((i + 1))
+  done
+}
+
 fail_turn() { # $1 = request id, $2 = message
   emit "{\"id\":$1,\"result\":{\"turn\":{\"id\":\"t-bad\"}}}"
   emit "{\"method\":\"turn/failed\",\"params\":{\"turn\":{\"id\":\"t-bad\",\"error\":{\"message\":\"$2\"}}}}"
@@ -27,6 +36,8 @@ thread_line="$line"
 if has "$line" '"method":"skills/list"'; then
   has "$line" '"forceReload":true' && has "$line" '"cwds":["' ||
     { emit "{\"id\":$(rid "$line"),\"error\":{\"code\":-32602,\"message\":\"skills/list params missing\"}}"; exec sleep 30; }
+  # More notifications than the client buffers, sent ahead of the answer.
+  [ -f .chatty ] && flood
   emit "{\"id\":$(rid "$line"),\"result\":{\"data\":[{\"cwd\":\"/w\",\"skills\":[{\"name\":\"imagegen\",\"path\":\"/skills/imagegen/SKILL.md\",\"description\":\"Model-facing paragraph about images.\",\"interface\":{\"displayName\":\"Image Gen\",\"shortDescription\":\"Generate or edit images\"}},{\"name\":\"bare\",\"path\":\"/skills/bare/SKILL.md\",\"description\":\"No interface block\"}]},{\"cwd\":\"/x\",\"skills\":[{\"name\":\"imagegen\",\"path\":\"/skills/imagegen/SKILL.md\",\"description\":\"dupe\",\"interface\":{\"shortDescription\":\"dupe\"}},{\"name\":\"off\",\"path\":\"/skills/off/SKILL.md\",\"description\":\"Disabled\",\"enabled\":false},{\"name\":\"pathless\",\"description\":\"No path\"},{\"name\":\"two words\",\"path\":\"/skills/bad/SKILL.md\"}]}]}}"
   exec sleep 30
 fi
@@ -373,6 +384,61 @@ case "$turnline" in
   emit '{"method":"item/agentMessage/delta","params":{"itemId":"m1","delta":"working"}}'
   # Ignores turn/interrupt to force the SIGTERM escalation path.
   exec sleep 30
+  ;;
+
+*scenario:stop*)
+  # One app-server, many turns: an interrupt ends the running turn, turn/start begins the next.
+  turn=1
+  running=true
+  emit "{\"id\":$tid,\"result\":{\"turn\":{\"id\":\"t-1\"}}}"
+  emit '{"method":"turn/started","params":{"turn":{"id":"t-1"}}}'
+  emit "{\"method\":\"item/agentMessage/delta\",\"params\":{\"turnId\":\"t-1\",\"itemId\":\"m1\",\"delta\":\"turn 1 in $$\"}}"
+  if has "$turnline" 'scenario:stop-idle'; then
+    emit '{"method":"turn/completed","params":{"turn":{"id":"t-1","status":"completed"}}}'
+    running=false
+  fi
+  if has "$turnline" 'scenario:stop-asking'; then
+    emit '{"id":301,"method":"item/commandExecution/requestApproval","params":{"itemId":"c1","command":"ls"}}'
+  fi
+  while read -r line; do
+    id=$(rid "$line")
+    if has "$line" '"decision"'; then
+      emit '{"method":"item/agentMessage/delta","params":{"itemId":"late","delta":"late answer"}}'
+    elif has "$line" '"method":"turn/interrupt"'; then
+      if [ "$running" = true ] && has "$line" "\"turnId\":\"t-$turn\""; then
+        emit "{\"id\":$id,\"result\":{}}"
+        emit "{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"t-$turn\",\"status\":\"interrupted\"}}}"
+        emit "{\"method\":\"item/agentMessage/delta\",\"params\":{\"turnId\":\"t-$turn\",\"itemId\":\"late\",\"delta\":\"late output of the stopped turn\"}}"
+        running=false
+      else
+        emit "{\"id\":$id,\"error\":{\"code\":-32600,\"message\":\"no turn to interrupt\"}}"
+        emit '{"method":"error","params":{"message":"interrupted while idle"}}'
+      fi
+    elif has "$line" '"method":"turn/steer"'; then
+      emit "{\"id\":$id,\"result\":{}}"
+    elif has "$line" '"method":"review/start"'; then
+      turn=$((turn + 1))
+      emit "{\"id\":$id,\"result\":{\"turn\":{\"id\":\"t-$turn\"}}}"
+      emit "{\"method\":\"item/agentMessage/delta\",\"params\":{\"turnId\":\"t-$turn\",\"itemId\":\"m$turn\",\"delta\":\"review ran\"}}"
+      emit "{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"t-$turn\",\"status\":\"completed\"}}}"
+    elif has "$line" '"method":"turn/start"'; then
+      turn=$((turn + 1))
+      emit "{\"id\":$id,\"result\":{\"turn\":{\"id\":\"t-$turn\"}}}"
+      emit "{\"method\":\"turn/started\",\"params\":{\"turn\":{\"id\":\"t-$turn\"}}}"
+      emit "{\"method\":\"item/agentMessage/delta\",\"params\":{\"turnId\":\"t-$turn\",\"itemId\":\"m$turn\",\"delta\":\"turn $turn in $$: $(field "$line" text) model=$(field "$line" model) effort=$(field "$line" effort) tier=$(field "$line" serviceTier)\"}}"
+      emit "{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"t-$turn\",\"status\":\"completed\"}}}"
+    fi
+  done
+  ;;
+
+*scenario:flood*)
+  emit "{\"id\":$tid,\"result\":{\"turn\":{\"id\":\"t-1\"}}}"
+  emit '{"method":"turn/started","params":{"turn":{"id":"t-1"}}}'
+  read -r steerline || exit 1
+  # More notifications than the client buffers, sent ahead of the steer's answer.
+  flood
+  emit "{\"id\":$(rid "$steerline"),\"result\":{}}"
+  emit '{"method":"turn/completed","params":{"turn":{"id":"t-1","status":"completed"}}}'
   ;;
 
 *scenario:fail*)

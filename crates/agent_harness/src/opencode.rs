@@ -21,9 +21,10 @@ use tokio::sync::mpsc;
 
 use crate::{
     AgentEvent, DoneStatus, ExternalSession, HarnessId, Model, PermissionMode, ReasoningLevel,
-    RunRequest, Skill, SkillRef, SlashCommand, SteeringMode, UserInputAnswer, UserInputQuestion,
+    RunRequest, Skill, SkillRef, SlashCommand, SteeringMode, TurnSettings, UserInputAnswer,
+    UserInputQuestion,
 };
-use crate::{Harness, HarnessError, RunControls};
+use crate::{Harness, HarnessError, RunControls, Steer};
 use discovery::{
     ProviderCatalog, REASONING_LEVELS, agent_option, command_names, commands_from_wire,
     context_windows, models_from_providers, pick_variant, skills_from_wire,
@@ -39,7 +40,10 @@ const RETRY_REPORT_ATTEMPT: u64 = 3;
 const RETRY_ABORT_ATTEMPT: u64 = 8;
 const DEFAULT_STALL_BOUND: Duration = Duration::from_secs(60);
 const STALL_ENV: &str = "WU_OPENCODE_STALL_MS";
-const COMMAND_CACHE_TTL: Duration = Duration::from_secs(10);
+const COMMAND_CACHE_TTL: Duration = Duration::from_secs(120);
+const LOOKUP_SERVER_IDLE: Duration = Duration::from_secs(180);
+// opencode reads a folder's config once per process, so an old server answers with old commands.
+const LOOKUP_SERVER_MAX_AGE: Duration = Duration::from_secs(600);
 const UNSUPPORTED_FORM_MESSAGE: &str = "Wu can't show this kind of form, so it was skipped.";
 pub const UNTITLED_CHAT: &str = n!("Untitled chat");
 
@@ -342,9 +346,57 @@ fn default_model_id(
 }
 
 struct CachedCommands {
-    directory: PathBuf,
     fetched_at: Instant,
     wire: Value,
+}
+
+struct LookupServer {
+    server: Server,
+    context: String,
+    booted_at: Instant,
+    last_used: Instant,
+    runtime: tokio::runtime::Handle,
+}
+
+#[derive(Default)]
+struct Lookups {
+    server: Option<LookupServer>,
+    commands: HashMap<PathBuf, CachedCommands>,
+    idle_watch: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Lookups {
+    fn retire_server(&mut self, kill_grace: Duration) {
+        let Some(mut retired) = self.server.take() else {
+            return;
+        };
+        let runtime = retired.runtime.clone();
+        runtime.spawn(async move { retired.server.shutdown(kill_grace).await });
+    }
+}
+
+struct Lookup<'a> {
+    lookups: tokio::sync::MutexGuard<'a, Lookups>,
+    server: Server,
+    kill_grace: Duration,
+}
+
+impl Lookup<'_> {
+    /// A failed request may mean a broken server, so the next lookup starts a new one.
+    fn finish<T>(mut self, result: Result<T, HarnessError>) -> Result<T, HarnessError> {
+        if result.is_err() {
+            self.lookups.retire_server(self.kill_grace);
+        }
+        result
+    }
+}
+
+impl Drop for Lookup<'_> {
+    fn drop(&mut self) {
+        if let Some(server) = &mut self.lookups.server {
+            server.last_used = Instant::now();
+        }
+    }
 }
 
 pub struct OpencodeHarness {
@@ -354,8 +406,9 @@ pub struct OpencodeHarness {
     kill_grace: Duration,
     startup_timeout: Duration,
     models_cache: crate::catalog::Catalog,
-    /// Serializes discovery boots; several cold opencode starts at once are slower than one.
-    probe: tokio::sync::Mutex<Option<CachedCommands>>,
+    /// Held for a whole lookup; several cold opencode starts at once are slower than one.
+    lookups: Arc<tokio::sync::Mutex<Lookups>>,
+    lookup_idle: Duration,
 }
 
 impl Default for OpencodeHarness {
@@ -367,7 +420,19 @@ impl Default for OpencodeHarness {
             kill_grace: Duration::from_secs(3),
             startup_timeout: startup_timeout(),
             models_cache: crate::catalog::Catalog::default(),
-            probe: tokio::sync::Mutex::new(None),
+            lookups: Arc::default(),
+            lookup_idle: LOOKUP_SERVER_IDLE,
+        }
+    }
+}
+
+impl Drop for OpencodeHarness {
+    fn drop(&mut self) {
+        if let Ok(mut lookups) = self.lookups.try_lock() {
+            if let Some(watch) = lookups.idle_watch.take() {
+                watch.abort();
+            }
+            lookups.retire_server(self.kill_grace);
         }
     }
 }
@@ -414,12 +479,8 @@ impl OpencodeHarness {
     }
 
     fn boot(&self, cwd: Option<&str>) -> Result<ServerBoot, HarnessError> {
-        if let Some(cwd) = cwd
-            && !Path::new(cwd).is_dir()
-        {
-            return Err(HarnessError::Protocol(format!(
-                "project folder not found: {cwd}"
-            )));
+        if let Some(cwd) = cwd {
+            existing_folder(cwd)?;
         }
         if let Some(base) = &self.base_url {
             let server = Server::attached(base.clone())?;
@@ -433,9 +494,78 @@ impl OpencodeHarness {
         }))
     }
 
-    async fn probe_models(&self) -> Result<Vec<Model>, HarnessError> {
-        let _probe = self.probe.lock().await;
-        let mut server = self.boot(None)?.await?;
+    async fn lookup(&self, fresh: bool) -> Result<Lookup<'_>, HarnessError> {
+        self.lookup_holding(self.lookups.lock().await, fresh).await
+    }
+
+    async fn lookup_holding<'a>(
+        &'a self,
+        mut lookups: tokio::sync::MutexGuard<'a, Lookups>,
+        fresh: bool,
+    ) -> Result<Lookup<'a>, HarnessError> {
+        let context = self.discovery_context()?.hash;
+        let reusable = !fresh
+            && lookups.server.as_mut().is_some_and(|current| {
+                current.context == context
+                    && current.booted_at.elapsed() < LOOKUP_SERVER_MAX_AGE
+                    && current.server.child_exit_status().is_none()
+            });
+        let server = if reusable && let Some(current) = &lookups.server {
+            current.server.handle()
+        } else {
+            lookups.retire_server(self.kill_grace);
+            lookups.commands.clear();
+            let runtime = tokio::runtime::Handle::try_current()
+                .map_err(|error| HarnessError::Protocol(error.to_string()))?;
+            let server = self.boot(None)?.await?;
+            let handle = server.handle();
+            lookups.server = Some(LookupServer {
+                server,
+                context,
+                booted_at: Instant::now(),
+                last_used: Instant::now(),
+                runtime,
+            });
+            self.stop_lookup_server_when_idle(&mut lookups);
+            handle
+        };
+        Ok(Lookup {
+            lookups,
+            server,
+            kill_grace: self.kill_grace,
+        })
+    }
+
+    fn stop_lookup_server_when_idle(&self, lookups: &mut Lookups) {
+        if let Some(watch) = lookups.idle_watch.take() {
+            watch.abort();
+        }
+        let shared = Arc::downgrade(&self.lookups);
+        let (idle, kill_grace) = (self.lookup_idle, self.kill_grace);
+        lookups.idle_watch = Some(tokio::spawn(async move {
+            let mut wait = idle;
+            loop {
+                tokio::time::sleep(wait).await;
+                let Some(shared) = shared.upgrade() else {
+                    return;
+                };
+                let mut lookups = shared.lock().await;
+                let Some(current) = &lookups.server else {
+                    return;
+                };
+                let unused = current.last_used.elapsed();
+                if unused >= idle {
+                    lookups.retire_server(kill_grace);
+                    return;
+                }
+                wait = idle - unused;
+            }
+        }));
+    }
+
+    async fn probe_models(&self, fresh: bool) -> Result<Vec<Model>, HarnessError> {
+        let lookup = self.lookup(fresh).await?;
+        let server = &lookup.server;
         let result = async {
             let providers = server.provider_catalog(None).await?;
             let mut models = models_from_providers(&providers);
@@ -482,29 +612,31 @@ impl OpencodeHarness {
             Ok(models)
         }
         .await;
-        server.shutdown(self.kill_grace).await;
-        result
+        lookup.finish(result)
     }
 
     async fn project_commands(&self, cwd: &Path) -> Result<Value, HarnessError> {
-        let mut cache = self.probe.lock().await;
-        if let Some(cached) = cache.as_ref()
-            && cached.directory == cwd
+        let lookups = self.lookups.lock().await;
+        if let Some(cached) = lookups.commands.get(cwd)
             && cached.fetched_at.elapsed() < COMMAND_CACHE_TTL
         {
             return Ok(cached.wire.clone());
         }
-        let directory = utf8_directory(cwd)?;
-        let mut server = self.boot(directory)?.await?;
-        let result = server.commands_wire(directory).await;
-        server.shutdown(self.kill_grace).await;
-        let wire = result?;
-        *cache = Some(CachedCommands {
-            directory: cwd.to_path_buf(),
-            fetched_at: Instant::now(),
-            wire: wire.clone(),
-        });
-        Ok(wire)
+        let directory = project_directory(cwd)?;
+        let mut lookup = self.lookup_holding(lookups, false).await?;
+        let result = lookup.server.commands_wire(directory).await;
+        if let Ok(wire) = &result {
+            let commands = &mut lookup.lookups.commands;
+            commands.retain(|_, cached| cached.fetched_at.elapsed() < COMMAND_CACHE_TTL);
+            commands.insert(
+                cwd.to_path_buf(),
+                CachedCommands {
+                    fetched_at: Instant::now(),
+                    wire: wire.clone(),
+                },
+            );
+        }
+        lookup.finish(result)
     }
 }
 
@@ -525,6 +657,24 @@ impl Harness for OpencodeHarness {
     fn reasoning_levels(&self) -> &[ReasoningLevel] {
         REASONING_LEVELS
     }
+    fn stops_turn_in_place(&self) -> bool {
+        true
+    }
+    fn app_quitting(&self) {
+        if let Ok(mut lookups) = self.lookups.try_lock()
+            && let Some(mut lookup_server) = lookups.server.take()
+        {
+            lookup_server.server.kill_now();
+        }
+    }
+    fn applies_settings_live(&self, before: &TurnSettings, after: &TurnSettings) -> bool {
+        let model_known = after.model == before.model
+            || after
+                .model
+                .as_deref()
+                .is_some_and(|model| model.contains('/'));
+        model_known && after.model_options == before.model_options
+    }
     fn installed(&self) -> bool {
         self.base_url.is_some() || self.resolve_executable().is_ok()
     }
@@ -544,7 +694,7 @@ impl Harness for OpencodeHarness {
                 force,
                 self.startup_timeout * 3 + Duration::from_secs(1),
                 || self.discovery_context().map(|context| context.key()),
-                || self.probe_models(),
+                || self.probe_models(force),
             )
             .await
     }
@@ -560,11 +710,11 @@ impl Harness for OpencodeHarness {
         Ok(skills_from_wire(&self.project_commands(cwd).await?))
     }
     async fn external_sessions(&self, cwd: &Path) -> Result<Vec<ExternalSession>, HarnessError> {
-        let directory = utf8_directory(cwd)?;
-        let mut server = self.boot(directory)?.await?;
-        let result = server.saved_sessions(directory).await;
-        server.shutdown(self.kill_grace).await;
-        Ok(result?
+        let directory = project_directory(cwd)?;
+        let lookup = self.lookup(false).await?;
+        let result = lookup.server.saved_sessions(directory).await;
+        Ok(lookup
+            .finish(result)?
             .map(|list| feed::external_sessions(&list))
             .unwrap_or_default())
     }
@@ -573,11 +723,11 @@ impl Harness for OpencodeHarness {
         cwd: &Path,
         session_id: &str,
     ) -> Result<Vec<AgentEvent>, HarnessError> {
-        let directory = utf8_directory(cwd)?;
-        let mut server = self.boot(directory)?.await?;
-        let result = server.saved_messages(session_id, directory).await;
-        server.shutdown(self.kill_grace).await;
-        result?
+        let directory = project_directory(cwd)?;
+        let lookup = self.lookup(false).await?;
+        let result = lookup.server.saved_messages(session_id, directory).await;
+        lookup
+            .finish(result)?
             .map(|messages| feed::history_events(&messages))
             .ok_or_else(|| {
                 HarnessError::Protocol(
@@ -669,6 +819,23 @@ fn utf8_directory(cwd: &Path) -> Result<Option<&str>, HarnessError> {
         .ok_or_else(|| HarnessError::Protocol(n!("Project path is not UTF-8").into()))
 }
 
+fn existing_folder(cwd: &str) -> Result<(), HarnessError> {
+    if Path::new(cwd).is_dir() {
+        return Ok(());
+    }
+    Err(HarnessError::Protocol(format!(
+        "project folder not found: {cwd}"
+    )))
+}
+
+fn project_directory(cwd: &Path) -> Result<Option<&str>, HarnessError> {
+    let directory = utf8_directory(cwd)?;
+    if let Some(directory) = directory {
+        existing_folder(directory)?;
+    }
+    Ok(directory)
+}
+
 fn new_message_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -735,6 +902,58 @@ impl TurnState {
 struct TurnFailure {
     generation: u64,
     message: String,
+}
+
+#[derive(Default, PartialEq)]
+struct TurnModel {
+    model: Option<(String, String)>,
+    variant: Option<String>,
+}
+
+impl TurnModel {
+    fn pick(
+        providers: &ProviderCatalog,
+        model: Option<&str>,
+        reasoning: Option<ReasoningLevel>,
+    ) -> Self {
+        let model = model
+            .and_then(|model| model.split_once('/'))
+            .map(|(provider, model)| (provider.to_owned(), model.to_owned()));
+        let variant = model.as_ref().and_then(|(provider, model_id)| {
+            pick_variant(providers, provider, model_id, reasoning)
+        });
+        Self { model, variant }
+    }
+}
+
+async fn providers_or_none(server: &Server, dir: Option<&str>) -> ProviderCatalog {
+    match server.provider_catalog(dir).await {
+        Ok(providers) => providers,
+        Err(error) => {
+            tracing::debug!(target: "agent_harness::opencode", "provider catalog unavailable: {error}");
+            ProviderCatalog::default()
+        }
+    }
+}
+
+async fn switch_model(
+    server: &Server,
+    session_id: &str,
+    dir: Option<&str>,
+    settings: &TurnSettings,
+    current: &TurnModel,
+) -> Result<TurnModel, HarnessError> {
+    let providers = providers_or_none(server, dir).await;
+    let next = TurnModel::pick(&providers, settings.model.as_deref(), settings.reasoning);
+    if server.protocol().await == Protocol::V2
+        && next != *current
+        && let Some((provider, model_id)) = &next.model
+    {
+        server
+            .set_model(session_id, provider, model_id, next.variant.as_deref(), dir)
+            .await?;
+    }
+    Ok(next)
 }
 
 struct TurnSpec<'a> {
@@ -938,13 +1157,7 @@ async fn run_session(session: Session) {
                 id
             }
         };
-        let providers = match server.provider_catalog(dir).await {
-            Ok(providers) => providers,
-            Err(error) => {
-                tracing::debug!(target: "agent_harness::opencode", "provider catalog unavailable: {error}");
-                ProviderCatalog::default()
-            }
-        };
+        let providers = providers_or_none(&server, dir).await;
         if protocol == Protocol::V2
             && let Some((provider, model_id)) = request
                 .model
@@ -989,14 +1202,7 @@ async fn run_session(session: Session) {
         }
     };
 
-    let model = request
-        .model
-        .as_deref()
-        .and_then(|model| model.split_once('/'))
-        .map(|(provider, model)| (provider.to_owned(), model.to_owned()));
-    let variant = model.as_ref().and_then(|(provider, model_id)| {
-        pick_variant(&providers, provider, model_id, request.reasoning)
-    });
+    let mut turn_model = TurnModel::pick(&providers, request.model.as_deref(), request.reasoning);
     let context_windows = context_windows(&providers);
     drop(providers);
 
@@ -1151,8 +1357,8 @@ async fn run_session(session: Session) {
         initial_native_command_selected,
         turn_generation,
         TurnSpec {
-            model: model.as_ref(),
-            variant: variant.as_deref(),
+            model: turn_model.model.as_ref(),
+            variant: turn_model.variant.as_deref(),
             attachments: &request.attachments,
         },
     )
@@ -1169,6 +1375,9 @@ async fn run_session(session: Session) {
     let mut queued_steers: VecDeque<QueuedSteer> = VecDeque::new();
     let mut steering_open = true;
     let mut interrupt_requested = false;
+    let mut stopping = false;
+    let mut stop_ack = None;
+    let mut pending_settings: Option<TurnSettings> = None;
     let mut pending_usage: Option<AgentEvent> = None;
     let mut asked_questions: HashMap<String, tokio::task::AbortHandle> = HashMap::new();
     let mut done_sent = false;
@@ -1227,6 +1436,37 @@ async fn run_session(session: Session) {
         }};
     }
 
+    macro_rules! post_turn {
+        ($prompt:expr, $native_command_selected:expr, $attachments:expr) => {{
+            let switched = match pending_settings.take() {
+                Some(settings) => switch_model(&server, &session_id, dir, &settings, &turn_model)
+                    .await
+                    .map(Some),
+                None => Ok(None),
+            };
+            match switched {
+                Ok(next) => {
+                    if let Some(next) = next {
+                        turn_model = next;
+                    }
+                    post_prompt(
+                        &target!(),
+                        $prompt,
+                        $native_command_selected,
+                        turn_generation,
+                        TurnSpec {
+                            model: turn_model.model.as_ref(),
+                            variant: turn_model.variant.as_deref(),
+                            attachments: $attachments,
+                        },
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            }
+        }};
+    }
+
     // A macro so `break`/`continue` act on the caller's loop.
     macro_rules! settle_idle {
         ($label:lifetime) => {{
@@ -1236,6 +1476,7 @@ async fn run_session(session: Session) {
             turn.active = false;
             if let Some(usage) = pending_usage.take()
                 && !interrupt_requested
+                && !stopping
                 && !send(&event_tx, usage).await
             {
                 break $label;
@@ -1244,6 +1485,32 @@ async fn run_session(session: Session) {
                 settle_children(&mut children, &event_tx, DoneStatus::Interrupted).await;
                 finish!(DoneStatus::Interrupted, None);
                 break $label;
+            }
+            let failed = turn.aborted_for_retry || (turn.error.is_some() && !turn.saw_content);
+            if stopping && !failed {
+                stopping = false;
+                abort_deadline = None;
+                main_feed.retire_messages();
+                settle_children(&mut children, &event_tx, DoneStatus::Interrupted).await;
+                let (previous, _next) = rotate(&mut assistant_message_id);
+                if !send(&event_tx, AgentEvent::AssistantMessageCompleted {
+                    assistant_message_id: previous,
+                }).await {
+                    break $label;
+                }
+                if !steering_open {
+                    finish!(DoneStatus::Interrupted, None);
+                    break $label;
+                }
+                crate::acknowledge_stop(&mut stop_ack);
+                send_final(&event_tx, AgentEvent::Done {
+                    status: DoneStatus::Interrupted,
+                    result: None,
+                    error: None,
+                    session_id: Some(session_id.clone()),
+                }).await;
+                done_sent = true;
+                continue $label;
             }
             if let Some(first) = queued_steers.pop_front() {
                 turn_generation = turn_generation.wrapping_add(1);
@@ -1268,19 +1535,7 @@ async fn run_session(session: Session) {
                     .iter()
                     .flat_map(|steer| steer.attachments.iter().cloned())
                     .collect();
-                match post_prompt(
-                    &target!(),
-                    &steer,
-                    native_command_selected,
-                    turn_generation,
-                    TurnSpec {
-                        model: model.as_ref(),
-                        variant: variant.as_deref(),
-                        attachments: &attachments,
-                    },
-                )
-                .await
-                {
+                match post_turn!(&steer, native_command_selected, &attachments) {
                     Ok(()) => {
                         acknowledge_steers!(batch.len(), $label);
                         turn = TurnState::begin(stall);
@@ -1395,7 +1650,11 @@ async fn run_session(session: Session) {
 
             failure = failure_rx.recv() => {
                 let Some(failure) = failure else { continue 'main; };
-                if failure.generation != turn_generation || !turn.active || interrupt_requested {
+                if failure.generation != turn_generation
+                    || !turn.active
+                    || interrupt_requested
+                    || stopping
+                {
                     tracing::debug!(
                         target: "agent_harness::opencode",
                         failed_generation = failure.generation,
@@ -1408,11 +1667,34 @@ async fn run_session(session: Session) {
                 break 'main;
             }
 
-            steer = steering.recv(), if steering_open => {
+            // A message sent after a stop waits here until the stopped turn has ended.
+            steer = steering.recv(), if steering_open && !stopping => {
                 match steer {
-                    Some(steer) => {
+                    Some(Steer::StopTurn(ack)) => {
+                        if turn.active {
+                            stopping = true;
+                            stop_ack = Some(ack);
+                            queued_steers.clear();
+                            turn.idle_ready = true;
+                            let abort = tokio::time::timeout(
+                                Duration::from_secs(5),
+                                server.abort_session(&session_id, dir),
+                            )
+                            .await;
+                            if !matches!(abort, Ok(Ok(_))) {
+                                settle_children(&mut children, &event_tx, DoneStatus::Interrupted).await;
+                                finish!(DoneStatus::Interrupted, None);
+                                break 'main;
+                            }
+                            abort_deadline = Some(tokio::time::Instant::now() + interrupt_grace);
+                        }
+                    }
+                    Some(Steer::Message(steer)) => {
                         let (prompt, native_command_selected) =
                             plan_prompt(&steer.prompt, &steer.skills, &steer.attachments);
+                        if steer.settings.is_some() {
+                            pending_settings = steer.settings;
+                        }
                         if turn.active {
                             queued_steers.push_back(QueuedSteer {
                                 prompt,
@@ -1422,19 +1704,7 @@ async fn run_session(session: Session) {
                             maybe_preempt!();
                         } else {
                             turn_generation = turn_generation.wrapping_add(1);
-                            match post_prompt(
-                                &target!(),
-                                &prompt,
-                                native_command_selected,
-                                turn_generation,
-                                TurnSpec {
-                                    model: model.as_ref(),
-                                    variant: variant.as_deref(),
-                                    attachments: &steer.attachments,
-                                },
-                            )
-                            .await
-                            {
+                            match post_turn!(&prompt, native_command_selected, &steer.attachments) {
                                 Ok(()) => {
                                     acknowledge_steers!(1, 'main);
                                     turn = TurnState::begin(stall);
@@ -1506,7 +1776,7 @@ async fn run_session(session: Session) {
                             send_final(&event_tx, AgentEvent::Error { message: message.clone() }).await;
                         }
                         settle_children(&mut children, &event_tx, DoneStatus::Interrupted).await;
-                        if interrupt_requested {
+                        if interrupt_requested || stopping {
                             finish!(DoneStatus::Interrupted, None);
                         } else {
                             finish!(DoneStatus::Errored, Some(message));
@@ -1518,6 +1788,12 @@ async fn run_session(session: Session) {
                             // Only the idle acknowledgement matters once aborted; late content and usage drop.
                             if is_own_idle(&event, &session_id) {
                                 settle_idle!('main);
+                            }
+                            continue;
+                        }
+                        if stopping && !is_own_idle(&event, &session_id) {
+                            if let Some(message) = event_message(&event) {
+                                main_feed.retire_message(message);
                             }
                             continue;
                         }
@@ -1545,7 +1821,7 @@ async fn run_session(session: Session) {
                             BusOutcome::ConsumerGone => break 'main,
                             BusOutcome::TurnIdle => settle_idle!('main),
                             BusOutcome::TurnInterrupted
-                                if (turn.preempted || turn.aborted_for_retry)
+                                if (turn.preempted || turn.aborted_for_retry || stopping)
                                     && !interrupt_requested =>
                             {
                                 settle_idle!('main)
@@ -1572,6 +1848,18 @@ async fn run_session(session: Session) {
         kill_grace,
     )
     .await;
+}
+
+fn event_message(event: &Value) -> Option<&str> {
+    let payload = event.get("payload").unwrap_or(event);
+    let properties = payload.get("properties")?;
+    match payload.get("type")?.as_str()? {
+        "message.updated" => properties.pointer("/info/id"),
+        "message.part.updated" => properties.pointer("/part/messageID"),
+        "message.part.delta" => properties.get("messageID"),
+        _ => None,
+    }?
+    .as_str()
 }
 
 fn is_own_idle(event: &Value, session_id: &str) -> bool {
@@ -1992,6 +2280,9 @@ async fn handle_bus_event(context: BusContext<'_>) -> BusOutcome {
                 .and_then(Value::as_str)
         });
 
+    if event_message(event).is_some_and(|message| main_feed.is_retired(message)) {
+        return BusOutcome::Continue;
+    }
     let is_ours = event_session == Some(session_id);
     if is_ours && kind == "session.interrupted" {
         return BusOutcome::TurnInterrupted;

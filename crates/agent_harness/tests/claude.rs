@@ -13,7 +13,7 @@ use agent_harness::{
     UserInputQuestion,
 };
 use agent_harness::{
-    CancellationToken, ClaudeHarness, Harness, HarnessError, RunControls, SteerMessage,
+    CancellationToken, ClaudeHarness, Harness, HarnessError, RunControls, Steer, SteerMessage,
 };
 
 fn fixture_path() -> PathBuf {
@@ -57,9 +57,7 @@ fn request(prompt: &str) -> RunRequest {
     }
 }
 
-fn controls(
-    answer_label: &'static str,
-) -> (RunControls, mpsc::Sender<SteerMessage>, CancellationToken) {
+fn controls(answer_label: &'static str) -> (RunControls, mpsc::Sender<Steer>, CancellationToken) {
     let (steer_tx, steer_rx) = mpsc::channel(8);
     let token = CancellationToken::new();
     let controls = RunControls {
@@ -412,12 +410,13 @@ async fn ask_user_question_round_trips_through_the_control_channel() {
 async fn steering_lines_are_written_to_stdin_mid_run() {
     let (controls, steer, _token) = controls("A");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "redirect please".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .expect("steer queued");
     let events = run_to_end(&harness(), request("scenario:steer"), controls).await;
@@ -473,12 +472,13 @@ async fn image_attachments_ride_the_prompt_and_steers_as_image_blocks() {
 
     let (controls, steer, _token) = controls("A");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "and this one".into(),
             message_id: None,
             attachments: vec![path(&jpeg)],
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .expect("steer queued");
     let mut req = request("scenario:images");
@@ -769,12 +769,13 @@ async fn a_replay_confirms_superseded_steers_and_the_turn_ends() {
     let (controls, steer, _token) = controls("A");
     for prompt in ["first steer", "second steer"] {
         steer
-            .send(SteerMessage {
+            .send(Steer::Message(SteerMessage {
                 prompt: prompt.into(),
                 message_id: None,
                 attachments: Vec::new(),
                 skills: Vec::new(),
-            })
+                settings: None,
+            }))
             .await
             .expect("steer queued");
     }
@@ -810,12 +811,13 @@ async fn a_replay_confirms_superseded_steers_and_the_turn_ends() {
 async fn an_unreplayed_steer_releases_the_turn_end() {
     let (controls, steer, _token) = controls("A");
     steer
-        .send(SteerMessage {
+        .send(Steer::Message(SteerMessage {
             prompt: "absorbed steer".into(),
             message_id: None,
             attachments: Vec::new(),
             skills: Vec::new(),
-        })
+            settings: None,
+        }))
         .await
         .expect("steer queued");
     let started = std::time::Instant::now();
@@ -844,7 +846,7 @@ async fn an_unreplayed_steer_releases_the_turn_end() {
 fn permission_controls(
     permission_label: &'static str,
     asked: Arc<Mutex<Vec<UserInputQuestion>>>,
-) -> (RunControls, mpsc::Sender<SteerMessage>) {
+) -> (RunControls, mpsc::Sender<Steer>) {
     let (steer_tx, steer_rx) = mpsc::channel(8);
     let controls = RunControls {
         request_input: Box::new(move |questions| {
@@ -946,4 +948,316 @@ async fn slash_commands_come_from_initialize_in_the_chat_folder() {
     let commands = harness().commands(cwd.path()).await.expect("commands");
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].name, "project-only");
+}
+
+fn stop() -> Steer {
+    Steer::StopTurn(oneshot::channel().0)
+}
+
+fn message(prompt: &str) -> Steer {
+    Steer::Message(SteerMessage {
+        prompt: prompt.into(),
+        message_id: None,
+        attachments: Vec::new(),
+        skills: Vec::new(),
+        settings: None,
+    })
+}
+
+type EventStream = futures::stream::BoxStream<'static, Result<AgentEvent, HarnessError>>;
+
+async fn events_through(
+    stream: &mut EventStream,
+    last: impl Fn(&AgentEvent) -> bool,
+) -> Vec<AgentEvent> {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            let event = event.expect("stream event");
+            let found = last(&event);
+            events.push(event);
+            if found {
+                break;
+            }
+        }
+        events
+    })
+    .await
+    .expect("the awaited event arrived in time")
+}
+
+async fn turn_events(stream: &mut EventStream) -> Vec<AgentEvent> {
+    events_through(stream, |event| matches!(event, AgentEvent::Done { .. })).await
+}
+
+fn reply_text(events: &[AgentEvent]) -> String {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::TextDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn done_statuses(events: &[AgentEvent]) -> Vec<DoneStatus> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::Done { status, .. } => Some(*status),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_stopped_turn_ends_and_the_same_process_answers_the_next_message() {
+    let harness = harness().with_graces(Duration::from_secs(8), Duration::from_secs(1));
+    assert!(harness.stops_turn_in_place());
+    let (controls, steer, _token) = controls("A");
+    let mut stream = harness
+        .run(request("scenario:stop"), controls)
+        .await
+        .expect("run starts");
+
+    let first = events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::TextDelta { .. })
+    })
+    .await;
+    let first_text = reply_text(&first);
+    let process = first_text
+        .strip_prefix("turn 1 in ")
+        .expect("the fake reports its process id");
+
+    let (acknowledge, mut acknowledged) = oneshot::channel();
+    steer
+        .send(Steer::StopTurn(acknowledge))
+        .await
+        .expect("stop queued");
+    steer
+        .send(message("after the stop"))
+        .await
+        .expect("message queued");
+
+    let stopped = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&stopped), [DoneStatus::Interrupted]);
+    assert!(
+        acknowledged.try_recv().is_ok(),
+        "the stop is confirmed first"
+    );
+    assert_eq!(reply_text(&stopped), "", "{stopped:?}");
+
+    let second = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&second), [DoneStatus::Completed]);
+    assert_eq!(
+        reply_text(&second),
+        format!("turn 2 in {process}: after the stop")
+    );
+
+    let idle = tokio::time::timeout(Duration::from_millis(300), stream.next()).await;
+    assert!(idle.is_err(), "the run stays open after a stop: {idle:?}");
+}
+
+#[tokio::test]
+async fn a_stop_withdraws_the_question_the_turn_was_waiting_on() {
+    let waiting = Arc::new(Mutex::new(Vec::new()));
+    let (steer, steer_rx) = mpsc::channel(8);
+    let controls = RunControls {
+        request_input: Box::new({
+            let waiting = waiting.clone();
+            move |_questions| {
+                let (answer_tx, answer_rx) = oneshot::channel();
+                waiting.lock().unwrap().push(answer_tx);
+                answer_rx
+            }
+        }),
+        steering: steer_rx,
+        interrupt: CancellationToken::new(),
+        permission: tokio::sync::watch::channel(PermissionMode::Ask).1,
+    };
+    let mut req = request("scenario:stop-asking");
+    req.permission = PermissionMode::Ask;
+    let mut stream = harness()
+        .with_graces(Duration::from_secs(8), Duration::from_secs(1))
+        .run(req, controls)
+        .await
+        .expect("run starts");
+    events_through(&mut stream, |event| {
+        matches!(event, AgentEvent::TextDelta { .. })
+    })
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while waiting.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the turn asked its question");
+
+    steer.send(stop()).await.expect("stop queued");
+    let stopped = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&stopped), [DoneStatus::Interrupted]);
+    waiting.lock().unwrap().clear();
+
+    steer.send(message("after")).await.expect("message queued");
+    let second = turn_events(&mut stream).await;
+    assert!(reply_text(&second).starts_with("turn 2 in "), "{second:?}");
+    let late = tokio::time::timeout(Duration::from_millis(300), stream.next()).await;
+    assert!(
+        late.is_err(),
+        "nothing answers the withdrawn question: {late:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_between_turns_is_ignored() {
+    let (controls, steer, _token) = controls("A");
+    let mut stream = harness()
+        .run(request("scenario:stop-idle"), controls)
+        .await
+        .expect("run starts");
+    let first = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&first), [DoneStatus::Completed]);
+
+    steer.send(stop()).await.expect("stop queued");
+    steer.send(message("next")).await.expect("message queued");
+    let second = turn_events(&mut stream).await;
+    assert_eq!(done_statuses(&second), [DoneStatus::Completed]);
+    assert!(reply_text(&second).ends_with(": next"), "{second:?}");
+    assert!(
+        !second
+            .iter()
+            .any(|event| matches!(event, AgentEvent::Error { .. })),
+        "{second:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_the_agent_ignores_ends_the_run() {
+    let harness = ClaudeHarness::new()
+        .with_executable(fixture_path())
+        .with_graces(Duration::from_millis(100), Duration::from_millis(500));
+    let (controls, steer, _token) = controls("A");
+    let mut stream = harness
+        .run(request("scenario:interrupt"), controls)
+        .await
+        .expect("run starts");
+
+    let events = tokio::time::timeout(Duration::from_secs(10), async move {
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            let event = event.expect("stream event");
+            if matches!(event, AgentEvent::SessionStarted { .. }) {
+                steer.send(stop()).await.expect("stop queued");
+            }
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("the run ended in time");
+
+    assert_eq!(done_statuses(&events), [DoneStatus::Interrupted]);
+    assert_eq!(
+        events.last(),
+        Some(&AgentEvent::Done {
+            status: DoneStatus::Interrupted,
+            result: None,
+            error: None,
+            session_id: Some("sess-int".into()),
+        })
+    );
+}
+
+fn turn_settings(model: &str, options: serde_json::Value) -> agent_harness::TurnSettings {
+    agent_harness::TurnSettings {
+        model: Some(model.into()),
+        reasoning: None,
+        model_options: options.as_object().cloned().unwrap_or_default(),
+    }
+}
+
+#[tokio::test]
+async fn a_model_change_reaches_the_running_agent_without_a_restart() {
+    let harness = harness();
+    let alpha = turn_settings("gateway/alpha", serde_json::json!({}));
+    let beta = turn_settings("gateway/beta", serde_json::json!({ "contextWindow": "1m" }));
+    assert!(harness.applies_settings_live(&alpha, &beta));
+    let mut slower = beta.clone();
+    slower.reasoning = Some(agent_harness::ReasoningLevel::Low);
+    assert!(!harness.applies_settings_live(&beta, &slower));
+    let fast = turn_settings("gateway/beta", serde_json::json!({ "fastMode": "on" }));
+    assert!(!harness.applies_settings_live(&beta, &fast));
+    let mut default_model = beta.clone();
+    default_model.model = None;
+    assert!(!harness.applies_settings_live(&beta, &default_model));
+
+    let mut req = request("scenario:models");
+    req.model = alpha.model.clone();
+    let (controls, steer, _token) = controls("A");
+    let mut stream = harness.run(req, controls).await.expect("run starts");
+    let first = turn_events(&mut stream).await;
+    assert_eq!(reply_text(&first), "model=gateway/alpha switches=0");
+
+    let with_settings = |settings: agent_harness::TurnSettings| {
+        Steer::Message(SteerMessage {
+            prompt: "again".into(),
+            message_id: None,
+            attachments: Vec::new(),
+            skills: Vec::new(),
+            settings: Some(settings),
+        })
+    };
+    steer
+        .send(with_settings(beta.clone()))
+        .await
+        .expect("queued");
+    let switched = turn_events(&mut stream).await;
+    assert_eq!(reply_text(&switched), "model=gateway/beta[1m] switches=1");
+
+    for next in [message("again"), with_settings(beta)] {
+        steer.send(next).await.expect("queued");
+        let kept = turn_events(&mut stream).await;
+        assert_eq!(reply_text(&kept), "model=gateway/beta[1m] switches=1");
+    }
+
+    steer
+        .send(with_settings(turn_settings(
+            "gateway/unknown",
+            serde_json::json!({}),
+        )))
+        .await
+        .expect("queued");
+    let refused = turn_events(&mut stream).await;
+    assert!(
+        refused.iter().any(
+            |event| matches!(event, AgentEvent::Error { message } if message.ends_with("no such model"))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(reply_text(&refused), "model=gateway/beta[1m] switches=1");
+}
+
+#[tokio::test]
+async fn a_run_reports_the_same_commands_as_the_lookup() {
+    let cwd = tempfile::tempdir().expect("temporary directory");
+    let own_command = cwd.path().join(".claude/commands/usage.md");
+    std::fs::create_dir_all(own_command.parent().expect("parent")).expect("create directory");
+    std::fs::write(&own_command, "My own usage report").expect("write command");
+    let harness = harness();
+    let looked_up = harness.commands(cwd.path()).await.expect("commands");
+    assert_eq!(looked_up.len(), 3);
+
+    let mut req = request("scenario:commands");
+    req.cwd = cwd.path().display().to_string();
+    let events = run_to_end(&harness, req, controls("A").0).await;
+    let reported: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::AvailableCommands { commands } => Some(commands.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reported, [looked_up]);
+    assert_eq!(done_statuses(&events), [DoneStatus::Completed]);
 }

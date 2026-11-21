@@ -1,19 +1,24 @@
 use agent_harness::{
     AcpHarness, AgentEvent, CancellationToken, ClaudeHarness, CodexHarness, DoneStatus,
     ExternalSession, Harness, HarnessId, Model, OpencodeHarness, PermissionMode, ReasoningLevel,
-    RunControls, RunRequest, SkillRef, SlashCommand, SteerMessage, ToolCall, UserInputAnswer,
-    UserInputQuestion, usage::PlanUsage,
+    RunControls, RunRequest, SkillRef, SlashCommand, Steer, SteerMessage, ToolCall, TurnSettings,
+    UserInputAnswer, UserInputQuestion, usage::PlanUsage,
 };
 use anyhow::{Context as _, Result};
 use collections::{HashMap, HashSet};
 use futures::{FutureExt as _, StreamExt as _, future::Shared};
-use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task};
+use gpui::{
+    App, AppContext as _, Context, Entity, EntityId, EventEmitter, Global, SharedString, Task,
+    WeakEntity,
+};
 use i18n::{n, t};
 use language::LanguageRegistry;
 use markdown::Markdown;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use settings::Settings as _;
 use std::{
+    ops::{ControlFlow, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -26,9 +31,14 @@ const FIRST_MESSAGE_TITLE_CHARS: usize = 20;
 const AGENT_TITLE_CHARS: usize = 60;
 const TOOL_OUTPUT_MAX_CHARS: usize = 200_000;
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
+const STOP_IN_PLACE_TIMEOUT: Duration = Duration::from_secs(10);
+const SAVE_INTERVAL_WHILE_WORKING: Duration = Duration::from_secs(5);
+const RUN_INPUT_BATCH: usize = 128;
+const IDLE_SESSION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const IDLE_RECHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const USAGE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const USAGE_FORCED_MIN_INTERVAL: Duration = Duration::from_secs(30);
-const CATALOG_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const CATALOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const NEW_CHAT_TITLE: &str = n!("New chat");
 const FORKED_NOTICE: &str = n!("Forked from \"{title}\"");
 const SIDE_CHAT_NOTICE: &str = n!("Side chat of \"{title}\"");
@@ -132,6 +142,14 @@ fn attachment_paths(attachments: &[PathBuf]) -> Vec<String> {
         .iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect()
+}
+
+fn turn_settings(settings: &RunSettings) -> TurnSettings {
+    TurnSettings {
+        model: settings.model.clone(),
+        reasoning: settings.reasoning,
+        model_options: settings.options.clone(),
+    }
 }
 
 fn title_from(text: &str) -> String {
@@ -457,10 +475,131 @@ struct SavedSubagent {
     status: Option<DoneStatus>,
 }
 
+type TextIdentity = (usize, usize);
+
+fn text_identity(text: &str) -> TextIdentity {
+    (text.as_ptr() as usize, text.len())
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum EntryFingerprint {
+    User {
+        text: TextIdentity,
+        at: i64,
+        attachments: usize,
+        skills: usize,
+        undelivered: bool,
+    },
+    Assistant {
+        markdown: EntityId,
+        source: TextIdentity,
+        at: i64,
+    },
+    Thinking {
+        markdown: EntityId,
+        source: TextIdentity,
+    },
+    Tool {
+        status: ToolStatus,
+        output: Option<TextIdentity>,
+        diff: Option<(TextIdentity, Option<TextIdentity>, TextIdentity)>,
+    },
+    Notice {
+        text: TextIdentity,
+        is_error: bool,
+    },
+    Image {
+        path: TextIdentity,
+    },
+}
+
+impl EntryFingerprint {
+    fn of(entry: &Entry, cx: &App) -> Self {
+        match entry {
+            Entry::User {
+                text,
+                at,
+                attachments,
+                skills,
+                undelivered,
+            } => Self::User {
+                text: text_identity(text),
+                at: *at,
+                attachments: attachments.len(),
+                skills: skills.len(),
+                undelivered: *undelivered,
+            },
+            Entry::Assistant { markdown, at } => Self::Assistant {
+                markdown: markdown.entity_id(),
+                source: text_identity(markdown.read(cx).source()),
+                at: *at,
+            },
+            Entry::Thinking(markdown) => Self::Thinking {
+                markdown: markdown.entity_id(),
+                source: text_identity(markdown.read(cx).source()),
+            },
+            Entry::Tool(tool) => Self::Tool {
+                status: tool.status,
+                output: tool.output.as_ref().map(|output| text_identity(output)),
+                diff: tool.diff.as_ref().map(|diff| {
+                    (
+                        text_identity(&diff.path),
+                        diff.old_text.as_deref().map(text_identity),
+                        text_identity(&diff.new_text),
+                    )
+                }),
+            },
+            Entry::Notice { text, is_error } => Self::Notice {
+                text: text_identity(text),
+                is_error: *is_error,
+            },
+            Entry::Image { path } => {
+                let bytes = path.as_os_str().as_encoded_bytes();
+                Self::Image {
+                    path: (bytes.as_ptr() as usize, bytes.len()),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct EncodedEntry {
+    /// `None` after a change the fingerprint cannot see, so the entry is encoded again.
+    fingerprint: Option<EntryFingerprint>,
+    json: Arc<RawValue>,
+}
+
+struct EncodedEntries(Arc<Vec<EncodedEntry>>);
+
+impl Serialize for EncodedEntries {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter().map(|entry| &*entry.json))
+    }
+}
+
+/// Writes the same document as `SavedTranscript::Current`.
+#[derive(Serialize)]
+struct EncodedTranscript {
+    entries: EncodedEntries,
+    subagents: Vec<EncodedSubagent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    queue: Vec<SavedPrompt>,
+}
+
+#[derive(Serialize)]
+struct EncodedSubagent {
+    id: String,
+    entries: EncodedEntries,
+    status: Option<DoneStatus>,
+}
+
 #[derive(Default)]
 struct Transcript {
     entries: Vec<Entry>,
     text_block_open: bool,
+    encoded: Arc<Vec<EncodedEntry>>,
+    unchanged_prefix: usize,
 }
 
 impl Transcript {
@@ -473,8 +612,73 @@ impl Transcript {
                 })
                 .map(|entry| deserialize_entry(entry, languages, cx))
                 .collect(),
-            text_block_open: false,
+            ..Self::default()
         }
+    }
+
+    fn changed(&mut self, index: usize) {
+        self.unchanged_prefix = self.unchanged_prefix.min(index);
+    }
+
+    fn encode_again(&mut self, index: usize) {
+        self.changed(index);
+        if index < self.encoded.len()
+            && let Some(encoded) = Arc::make_mut(&mut self.encoded).get_mut(index)
+        {
+            encoded.fingerprint = None;
+        }
+    }
+
+    fn forget_encoded_from(&mut self, index: usize) {
+        self.changed(index);
+        if index < self.encoded.len() {
+            Arc::make_mut(&mut self.encoded).truncate(index);
+        }
+    }
+
+    fn truncate(&mut self, index: usize) {
+        self.entries.truncate(index);
+        self.forget_encoded_from(index);
+        self.text_block_open = false;
+    }
+
+    fn remove(&mut self, range: RangeInclusive<usize>) {
+        self.forget_encoded_from(*range.start());
+        self.entries.drain(range);
+    }
+
+    fn mark_last_message_undelivered(&mut self) {
+        if let Some(Entry::User { undelivered, .. }) = self.entries.last_mut() {
+            *undelivered = true;
+            self.changed(self.entries.len().saturating_sub(1));
+        }
+    }
+
+    fn encode(&mut self, cx: &App) -> Result<Arc<Vec<EncodedEntry>>> {
+        let start = self.unchanged_prefix.min(self.encoded.len());
+        if start < self.entries.len() || self.entries.len() < self.encoded.len() {
+            let encoded = Arc::make_mut(&mut self.encoded);
+            encoded.truncate(self.entries.len());
+            for (index, entry) in self.entries.iter().enumerate().skip(start) {
+                let fingerprint = Some(EntryFingerprint::of(entry, cx));
+                if encoded
+                    .get(index)
+                    .is_some_and(|known| known.fingerprint == fingerprint)
+                {
+                    continue;
+                }
+                let fresh = EncodedEntry {
+                    fingerprint,
+                    json: serde_json::value::to_raw_value(&serialized_entry(entry, cx))?.into(),
+                };
+                match encoded.get_mut(index) {
+                    Some(known) => *known = fresh,
+                    None => encoded.push(fresh),
+                }
+            }
+        }
+        self.unchanged_prefix = self.entries.len();
+        Ok(self.encoded.clone())
     }
 
     fn append_text(
@@ -493,6 +697,7 @@ impl Transcript {
                 (Some(Entry::Assistant { .. }), false) | (Some(Entry::Thinking(_)), true)
             );
         if extends_last {
+            self.changed(self.entries.len().saturating_sub(1));
             match self.entries.last_mut() {
                 Some(Entry::Assistant { markdown, at }) => {
                     *at = now();
@@ -537,10 +742,15 @@ impl Transcript {
     }
 
     fn tool_mut(&mut self, id: &str) -> Option<&mut ToolEntry> {
-        self.entries.iter_mut().rev().find_map(|entry| match entry {
-            Entry::Tool(tool) if tool.id == id => Some(tool),
+        let index = self
+            .entries
+            .iter()
+            .rposition(|entry| matches!(entry, Entry::Tool(tool) if tool.id == id))?;
+        self.encode_again(index);
+        match self.entries.get_mut(index) {
+            Some(Entry::Tool(tool)) => Some(tool),
             _ => None,
-        })
+        }
     }
 
     fn tool(&self, id: &str) -> Option<&ToolEntry> {
@@ -590,53 +800,66 @@ impl Transcript {
     }
 
     fn cancel_running_tools(&mut self) {
-        for entry in &mut self.entries {
+        let mut first_canceled = None;
+        for (index, entry) in self.entries.iter_mut().enumerate() {
             if let Entry::Tool(tool) = entry
                 && tool.status == ToolStatus::Running
             {
                 tool.status = ToolStatus::Canceled;
+                first_canceled.get_or_insert(index);
             }
+        }
+        if let Some(index) = first_canceled {
+            self.changed(index);
         }
     }
 
     fn serialize(&self, cx: &App) -> Vec<SerializedEntry> {
         self.entries
             .iter()
-            .map(|entry| match entry {
-                Entry::User {
-                    text,
-                    at,
-                    attachments,
-                    skills,
-                    undelivered,
-                } => SerializedEntry::User {
-                    text: text.to_string(),
-                    at: *at,
-                    attachments: attachments.clone(),
-                    skills: skills.clone(),
-                    undelivered: *undelivered,
-                },
-                Entry::Assistant { markdown, at } => SerializedEntry::Assistant {
-                    text: markdown.read(cx).source().to_string(),
-                    at: *at,
-                },
-                Entry::Thinking(markdown) => SerializedEntry::Thinking {
-                    text: markdown.read(cx).source().to_string(),
-                },
-                Entry::Tool(tool) => SerializedEntry::Tool {
-                    id: tool.id.clone(),
-                    call: tool.call.clone(),
-                    status: tool.status,
-                    output: tool.output.as_ref().map(|output| output.to_string()),
-                    diff: tool.diff.clone(),
-                },
-                Entry::Notice { text, is_error } => SerializedEntry::Notice {
-                    text: text.to_string(),
-                    is_error: *is_error,
-                },
-                Entry::Image { path } => SerializedEntry::Image { path: path.clone() },
-            })
+            .map(|entry| serialized_entry(entry, cx))
             .collect()
+    }
+}
+
+fn serialized_entry(entry: &Entry, cx: &App) -> SerializedEntry {
+    match entry {
+        Entry::User {
+            text,
+            at,
+            attachments,
+            skills,
+            undelivered,
+        } => SerializedEntry::User {
+            text: text.to_string(),
+            at: *at,
+            attachments: attachments.clone(),
+            skills: skills.clone(),
+            undelivered: *undelivered,
+        },
+        Entry::Assistant { markdown, at } => SerializedEntry::Assistant {
+            text: markdown.read(cx).source().to_string(),
+            at: *at,
+        },
+        Entry::Thinking(markdown) => SerializedEntry::Thinking {
+            text: markdown.read(cx).source().to_string(),
+        },
+        Entry::Tool(tool) => SerializedEntry::Tool {
+            id: tool.id.clone(),
+            call: tool.call.clone(),
+            status: tool.status,
+            output: tool.output.as_ref().map(|output| output.to_string()),
+            diff: tool
+                .diff
+                .as_ref()
+                .filter(|diff| diff_for_call(&tool.call).as_ref() != Some(*diff))
+                .cloned(),
+        },
+        Entry::Notice { text, is_error } => SerializedEntry::Notice {
+            text: text.to_string(),
+            is_error: *is_error,
+        },
+        Entry::Image { path } => SerializedEntry::Image { path: path.clone() },
     }
 }
 
@@ -818,11 +1041,55 @@ enum RunInput {
     Ended,
 }
 
+struct PendingSave {
+    due: Instant,
+    _timer: Task<()>,
+}
+
+enum IdleCheck {
+    Busy,
+    Wait(Duration),
+    Unneeded,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ListedState {
+    working: bool,
+    needs_input: bool,
+    deleted: bool,
+}
+
 struct ActiveRun {
-    steering: tokio::sync::mpsc::Sender<SteerMessage>,
+    steering: tokio::sync::mpsc::Sender<Steer>,
     interrupt: CancellationToken,
+    stopping_turn: bool,
+    stop_acknowledged: Option<tokio::sync::oneshot::Receiver<()>>,
+    stop_timeout: Option<Task<()>>,
     permission: tokio::sync::watch::Sender<PermissionMode>,
     _events: Task<()>,
+}
+
+impl ActiveRun {
+    fn stopping(&self) -> bool {
+        self.stopping_turn || self.interrupt.is_cancelled()
+    }
+
+    /// Whether a requested stop left the agent running. An agent that didn't say so is ending.
+    fn settle_stop(&mut self) -> bool {
+        if !std::mem::take(&mut self.stopping_turn) {
+            return false;
+        }
+        self.stop_timeout = None;
+        let acknowledged = self
+            .stop_acknowledged
+            .take()
+            .is_some_and(|mut acknowledged| acknowledged.try_recv().is_ok());
+        let in_place = acknowledged && !self.interrupt.is_cancelled();
+        if !in_place {
+            self.interrupt.cancel();
+        }
+        in_place
+    }
 }
 
 pub enum SessionEvent {
@@ -830,6 +1097,7 @@ pub enum SessionEvent {
     SettingsChanged,
     Finished { errored: bool },
     NeedsInput,
+    CommandsReported(Vec<SlashCommand>),
 }
 
 pub struct AgentSession {
@@ -838,6 +1106,8 @@ pub struct AgentSession {
     run_failed: bool,
     harness: Arc<dyn Harness>,
     restart_on_next_send: bool,
+    unsent_settings: bool,
+    runs_started: u64,
     native_fork_prompt: Option<Prompt>,
     native_fork_failed: bool,
     native_fork_errors: Vec<String>,
@@ -863,6 +1133,9 @@ pub struct AgentSession {
     languages: Arc<LanguageRegistry>,
     save_metadata_task: Task<()>,
     save_entries_task: Task<()>,
+    pending_entries_save: Option<PendingSave>,
+    unfinished_writes: Arc<()>,
+    active_at: Instant,
 }
 
 impl EventEmitter<SessionEvent> for AgentSession {}
@@ -902,6 +1175,8 @@ impl AgentSession {
             run_failed: false,
             harness,
             restart_on_next_send: false,
+            unsent_settings: false,
+            runs_started: 0,
             native_fork_prompt: None,
             native_fork_failed: false,
             native_fork_errors: Vec::new(),
@@ -934,6 +1209,9 @@ impl AgentSession {
             languages,
             save_metadata_task: Task::ready(()),
             save_entries_task: Task::ready(()),
+            pending_entries_save: None,
+            unfinished_writes: Arc::new(()),
+            active_at: Instant::now(),
         }
     }
 
@@ -991,6 +1269,52 @@ impl AgentSession {
 
     pub fn is_working(&self) -> bool {
         self.working
+    }
+
+    fn listed_state(&self) -> ListedState {
+        ListedState {
+            working: self.working,
+            needs_input: !self.pending_questions.is_empty(),
+            deleted: self.deleted,
+        }
+    }
+
+    fn has_unsaved_changes(&self) -> bool {
+        self.pending_entries_save.is_some() || Arc::strong_count(&self.unfinished_writes) > 1
+    }
+
+    fn must_stay_loaded(&self) -> bool {
+        self.run.is_some() || self.working || self.has_unsaved_changes()
+    }
+
+    fn run_is_quiet(&self) -> bool {
+        self.run.as_ref().is_some_and(|run| !run.stopping())
+            && !self.working
+            && self.pending_questions.is_empty()
+            && self.background_tasks.is_empty()
+            && self.known_tasks.is_empty()
+            && self.queue.is_empty()
+            && self.prompt_after_stop.is_none()
+            && self.metadata.native_session_id.is_some()
+    }
+
+    fn release_when_idle(&mut self, idle_for: Duration, cx: &mut Context<Self>) -> IdleCheck {
+        if self.working {
+            return IdleCheck::Busy;
+        }
+        let remaining = idle_for.saturating_sub(self.active_at.elapsed());
+        if !remaining.is_zero() {
+            return IdleCheck::Wait(remaining);
+        }
+        if self.run_is_quiet() {
+            self.run = None;
+            cx.notify();
+        }
+        if self.must_stay_loaded() {
+            IdleCheck::Wait(IDLE_RECHECK_INTERVAL)
+        } else {
+            IdleCheck::Unneeded
+        }
     }
 
     fn agent_activity(&self) -> Option<workspace::AgentActivity> {
@@ -1069,9 +1393,11 @@ impl AgentSession {
 
     /// Like `update_settings`, but not remembered as the default for new chats.
     pub fn pin_settings(&mut self, change: impl FnOnce(&mut RunSettings), cx: &mut Context<Self>) {
-        let restart_on_next_send = self.restart_on_next_send;
+        let (restart_on_next_send, unsent_settings) =
+            (self.restart_on_next_send, self.unsent_settings);
         self.change_settings(change, cx);
         self.restart_on_next_send = restart_on_next_send;
+        self.unsent_settings = unsent_settings;
     }
 
     fn change_settings(
@@ -1088,7 +1414,28 @@ impl AgentSession {
         if permission != before.permission {
             self.apply_permission_now(permission, cx);
         }
-        self.restart_on_next_send = self.run.is_some();
+        let (old, new) = (
+            turn_settings(&before),
+            turn_settings(&self.metadata.settings),
+        );
+        // Codex gets its compaction limit, which is sized to the model, only at launch.
+        let compaction_limit_is_stale = self.metadata.kind == AgentKind::Codex
+            && old.model != new.model
+            && AgentChatSettings::get_global(cx)
+                .auto_compact_tokens
+                .is_some();
+        if self.run.is_none() {
+            self.restart_on_next_send = false;
+            self.unsent_settings = false;
+        } else if old != new
+            && permission == before.permission
+            && !compaction_limit_is_stale
+            && self.harness.applies_settings_live(&old, &new)
+        {
+            self.unsent_settings = true;
+        } else {
+            self.restart_on_next_send = true;
+        }
         self.save_metadata(cx);
         cx.notify();
         true
@@ -1104,10 +1451,7 @@ impl AgentSession {
         if prompt.is_empty() || self.deleted {
             return;
         }
-        let stopping = self
-            .run
-            .as_ref()
-            .is_some_and(|run| run.interrupt.is_cancelled());
+        let stopping = self.run.as_ref().is_some_and(ActiveRun::stopping);
         if self.working && self.run.is_some() && !stopping {
             if AgentChatSettings::get_global(cx).steer_while_working {
                 self.deliver(prompt, cx);
@@ -1146,7 +1490,7 @@ impl AgentSession {
             id: self.next_queue_id,
             prompt,
         });
-        self.save_entries(cx);
+        self.save_entries_soon(cx);
         cx.notify();
     }
 
@@ -1168,17 +1512,15 @@ impl AgentSession {
         let Some((_, prompt)) = self.take_queued(id) else {
             return;
         };
-        if self.working
-            && let Some(run) = &self.run
-        {
-            run.interrupt.cancel();
+        if self.working {
+            self.interrupt_run(cx);
         }
         self.deliver(prompt, cx);
     }
 
     pub fn remove_queued(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.take_queued(id).is_some() {
-            self.save_entries(cx);
+            self.save_entries_soon(cx);
             cx.notify();
         }
     }
@@ -1190,7 +1532,7 @@ impl AgentSession {
         let queued = self.queue.remove(from);
         let to_index = to_index.min(self.queue.len());
         self.queue.insert(to_index, queued);
-        self.save_entries(cx);
+        self.save_entries_soon(cx);
         cx.notify();
     }
 
@@ -1220,7 +1562,7 @@ impl AgentSession {
                 Some(queued) => queued.prompt = prompt,
                 None => self.enqueue(prompt, cx),
             }
-            self.save_entries(cx);
+            self.save_entries_soon(cx);
         }
         cx.notify();
     }
@@ -1256,14 +1598,13 @@ impl AgentSession {
             attachments: attachments.clone(),
             skills: skills.clone(),
         };
-        self.transcript.entries.truncate(index);
-        self.transcript.text_block_open = false;
+        self.transcript.truncate(index);
         self.metadata.dropped_prompt = self.editable_prompt.take();
         if self.last_user_index().is_none() && self.metadata.title == title_from(&prompt.text) {
             self.metadata.title.clear();
         }
         self.save_metadata(cx);
-        self.save_entries(cx);
+        self.save_entries_soon(cx);
         cx.notify();
         Some(prompt)
     }
@@ -1295,15 +1636,12 @@ impl AgentSession {
             .iter()
             .take_while(|entry| matches!(entry, Entry::Notice { is_error: true, .. }))
             .count();
-        self.transcript.entries.drain(index..=index + notices);
+        self.transcript.remove(index..=index + notices);
         self.send_message(prompt, cx);
     }
 
     fn deliver(&mut self, prompt: Prompt, cx: &mut Context<Self>) {
-        let stopping = self
-            .run
-            .as_ref()
-            .is_some_and(|run| run.interrupt.is_cancelled());
+        let stopping = self.run.as_ref().is_some_and(ActiveRun::stopping);
         let is_command = |prompt: &Prompt| agent_harness::leading_command(&prompt.text).is_some();
         let steering_command = self.run.is_some() && !stopping && !self.can_steer(&prompt);
         // Merging would turn the other message into the command's arguments.
@@ -1328,10 +1666,6 @@ impl AgentSession {
         self.user_stopped = false;
         self.editable_prompt = None;
         let new_turn = !self.working;
-        if (self.restart_on_next_send || self.metadata.dropped_prompt.is_some()) && !self.working {
-            self.run = None;
-            self.restart_on_next_send = false;
-        }
         if self.metadata.title.is_empty() {
             self.metadata.title = title_from(&prompt.text);
         }
@@ -1348,22 +1682,34 @@ impl AgentSession {
         self.metadata.outcome = None;
         self.touch(cx);
 
-        if let Some(run) = &self.run {
-            if run.interrupt.is_cancelled() {
-                match &mut self.prompt_after_stop {
-                    Some(pending) => pending.merge(prompt),
-                    None => self.prompt_after_stop = Some(prompt),
-                }
-                cx.notify();
-                return;
+        if self.run.as_ref().is_some_and(ActiveRun::stopping) {
+            match &mut self.prompt_after_stop {
+                Some(pending) => pending.merge(prompt),
+                None => self.prompt_after_stop = Some(prompt),
             }
+            cx.notify();
+            return;
+        }
+        self.hand_to_agent(prompt, new_turn, cx);
+    }
+
+    fn hand_to_agent(&mut self, prompt: Prompt, new_turn: bool, cx: &mut Context<Self>) {
+        if new_turn && (self.restart_on_next_send || self.metadata.dropped_prompt.is_some()) {
+            self.run = None;
+            self.restart_on_next_send = false;
+        }
+        if let Some(run) = &self.run {
             let steer = SteerMessage {
                 prompt: prompt.text.clone(),
                 message_id: None,
                 attachments: attachment_paths(&prompt.attachments),
                 skills: prompt.skills.clone(),
+                settings: self
+                    .unsent_settings
+                    .then(|| turn_settings(&self.metadata.settings)),
             };
-            if run.steering.try_send(steer).is_ok() {
+            if run.steering.try_send(Steer::Message(steer)).is_ok() {
+                self.unsent_settings = false;
                 if new_turn {
                     self.turn_prompts = 1;
                     self.turn_prompt_id = None;
@@ -1381,11 +1727,62 @@ impl AgentSession {
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         self.prompt_after_stop = None;
         self.user_stopped = true;
-        match &self.run {
-            Some(run) => run.interrupt.cancel(),
-            None => {
+        if self.run.is_some() {
+            self.interrupt_run(cx);
+        } else {
+            self.working = false;
+            cx.notify();
+        }
+    }
+
+    /// A second stop, or a stop with steered messages or background work in play, ends the whole run.
+    fn interrupt_run(&mut self, cx: &mut Context<Self>) {
+        let subagent_working = self.subagents.iter().any(|(id, subagent)| {
+            subagent.status.is_none()
+                && self
+                    .tool_entry(id)
+                    .is_some_and(|spawn| spawn.status == ToolStatus::Running)
+        });
+        let in_place = self.working
+            && self.harness.stops_turn_in_place()
+            && !self.compacting
+            && self.turn_prompts <= 1
+            && self.background_tasks.is_empty()
+            && self.known_tasks.is_empty()
+            && !subagent_working;
+        let Some(run) = &mut self.run else {
+            return;
+        };
+        let (acknowledge, acknowledged) = tokio::sync::oneshot::channel();
+        if in_place
+            && !run.stopping()
+            && run.steering.try_send(Steer::StopTurn(acknowledge)).is_ok()
+        {
+            run.stopping_turn = true;
+            run.stop_acknowledged = Some(acknowledged);
+            let interrupt = run.interrupt.clone();
+            run.stop_timeout = Some(cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(STOP_IN_PLACE_TIMEOUT).await;
+                interrupt.cancel();
+            }));
+        } else {
+            run.interrupt.cancel();
+        }
+    }
+
+    fn turn_stopped_in_place(&mut self, status: DoneStatus, cx: &mut Context<Self>) {
+        self.pending_questions.clear();
+        match self.prompt_after_stop.take() {
+            Some(prompt) if !self.deleted => {
+                self.working = true;
+                self.working_since = Some(Instant::now());
+                self.hand_to_agent(prompt, true, cx);
+            }
+            _ => {
                 self.working = false;
-                cx.notify();
+                if status != DoneStatus::Interrupted || !self.user_stopped {
+                    self.send_next_queued(cx);
+                }
             }
         }
     }
@@ -1483,6 +1880,9 @@ impl AgentSession {
 
     fn start_run(&mut self, prompt: Prompt, cx: &mut Context<Self>) {
         self.restart_on_next_send = false;
+        self.unsent_settings = false;
+        self.runs_started += 1;
+        let run_number = self.runs_started;
         self.turn_prompts = 1;
         self.turn_prompt_id = None;
         let drop_prompt = self.metadata.dropped_prompt.take();
@@ -1577,47 +1977,64 @@ impl AgentSession {
                 questions,
                 responder,
             });
-            let mut inputs = futures::stream::select(events, questions);
-            while let Some(input) = inputs.next().await {
-                let update = match input {
-                    RunInput::Event(Ok(event)) => {
-                        this.update(cx, |this, cx| this.apply_event(event, cx))
-                    }
-                    RunInput::Event(Err(error)) => {
-                        this.update(cx, |this, cx| this.push_notice(error.to_string(), true, cx))
-                    }
-                    RunInput::Question {
-                        questions,
-                        responder,
-                    } => {
-                        let (relay_tx, relay_rx) = tokio::sync::oneshot::channel();
-                        cx.spawn({
-                            let this = this.clone();
-                            async move |cx| {
-                                if agent_stopped_waiting(responder, relay_rx).await {
-                                    this.update(cx, |this, cx| this.drop_withdrawn_questions(cx))
-                                        .log_err();
-                                }
-                            }
-                        })
-                        .detach();
-                        this.update(cx, |this, cx| this.push_question(questions, relay_tx, cx))
-                    }
-                    RunInput::Ended => break,
-                };
-                if update.is_err() {
+            let mut inputs =
+                futures::stream::select(events, questions).ready_chunks(RUN_INPUT_BATCH);
+            while let Some(batch) = inputs.next().await {
+                let Ok(stream) = this.update(cx, |this, cx| this.apply_run_inputs(batch, cx))
+                else {
                     return;
+                };
+                if stream.is_break() {
+                    break;
                 }
             }
-            this.update(cx, |this, cx| this.run_ended(cx)).log_err();
+            this.update(cx, |this, cx| {
+                // A queued message can already have started the next run from this one's last events.
+                if this.runs_started == run_number {
+                    this.run_ended(cx);
+                }
+            })
+            .log_err();
         });
         self.run = Some(ActiveRun {
             steering: steering_tx,
             interrupt,
+            stopping_turn: false,
+            stop_acknowledged: None,
+            stop_timeout: None,
             permission: permission_tx,
             _events: events,
         });
         cx.notify();
+    }
+
+    fn apply_run_inputs(
+        &mut self,
+        inputs: Vec<RunInput>,
+        cx: &mut Context<Self>,
+    ) -> ControlFlow<()> {
+        for input in inputs {
+            match input {
+                RunInput::Event(Ok(event)) => self.apply_event(event, cx),
+                RunInput::Event(Err(error)) => self.push_notice(error.to_string(), true, cx),
+                RunInput::Question {
+                    questions,
+                    responder,
+                } => {
+                    let (relay_tx, relay_rx) = tokio::sync::oneshot::channel();
+                    cx.spawn(async move |this, cx| {
+                        if agent_stopped_waiting(responder, relay_rx).await {
+                            this.update(cx, |this, cx| this.drop_withdrawn_questions(cx))
+                                .log_err();
+                        }
+                    })
+                    .detach();
+                    self.push_question(questions, relay_tx, cx);
+                }
+                RunInput::Ended => return ControlFlow::Break(()),
+            }
+        }
+        ControlFlow::Continue(())
     }
 
     fn fail_run(&mut self, message: String, cx: &mut Context<Self>) {
@@ -1630,9 +2047,7 @@ impl AgentSession {
             return;
         }
         self.run_failed = true;
-        if let Some(Entry::User { undelivered, .. }) = self.transcript.entries.last_mut() {
-            *undelivered = true;
-        }
+        self.transcript.mark_last_message_undelivered();
         self.push_notice(message, true, cx);
         self.run_ended(cx);
     }
@@ -1651,7 +2066,7 @@ impl AgentSession {
             subagent.transcript.cancel_running_tools();
             subagent.status.get_or_insert(DoneStatus::Interrupted);
         }
-        self.save_entries(cx);
+        self.save_entries_soon(cx);
         if std::mem::take(&mut self.native_fork_failed)
             && let Some(prompt) = self.native_fork_prompt.take()
             && !self.deleted
@@ -1692,6 +2107,7 @@ impl AgentSession {
     fn close_for_deletion(&mut self, cx: &mut Context<Self>) -> Vec<Task<()>> {
         self.deleted = true;
         self.run = None;
+        self.pending_entries_save = None;
         self.prompt_after_stop = None;
         self.pending_questions.clear();
         self.working = false;
@@ -1731,6 +2147,7 @@ impl AgentSession {
     }
 
     fn apply_event(&mut self, event: AgentEvent, cx: &mut Context<Self>) {
+        self.active_at = Instant::now();
         match event {
             AgentEvent::SessionStarted { session_id, .. } => {
                 if !session_id.is_empty() {
@@ -1834,7 +2251,10 @@ impl AgentSession {
                     }
                 }
                 self.touch(cx);
-                if status != DoneStatus::Interrupted {
+                let stopped_in_place = self.run.as_mut().is_some_and(ActiveRun::settle_stop);
+                if stopped_in_place {
+                    self.turn_stopped_in_place(status, cx);
+                } else if status != DoneStatus::Interrupted {
                     self.send_next_queued(cx);
                 }
             }
@@ -1945,8 +2365,10 @@ impl AgentSession {
                     self.save_metadata(cx);
                 }
             }
+            AgentEvent::AvailableCommands { commands } => {
+                cx.emit(SessionEvent::CommandsReported(commands));
+            }
             AgentEvent::Usage { .. }
-            | AgentEvent::AvailableCommands { .. }
             | AgentEvent::InputRequested { .. }
             | AgentEvent::InputResolved { .. }
             | AgentEvent::UserMessage { .. } => {}
@@ -2109,10 +2531,36 @@ impl AgentSession {
 
     fn touch(&mut self, cx: &mut Context<Self>) {
         self.metadata.updated_at = now();
+        self.active_at = Instant::now();
         self.save_metadata(cx);
-        self.save_entries(cx);
+        self.save_entries_soon(cx);
     }
 
+    fn encoded_transcript(&mut self, cx: &App) -> Result<EncodedTranscript> {
+        let mut subagents = self
+            .subagents
+            .iter_mut()
+            .map(|(id, subagent)| {
+                Ok(EncodedSubagent {
+                    id: id.clone(),
+                    entries: EncodedEntries(subagent.transcript.encode(cx)?),
+                    status: subagent.status,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        subagents.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(EncodedTranscript {
+            entries: EncodedEntries(self.transcript.encode(cx)?),
+            subagents,
+            queue: self
+                .queue
+                .iter()
+                .map(|queued| (&queued.prompt).into())
+                .collect(),
+        })
+    }
+
+    #[cfg(test)]
     fn saved_transcript(&self, cx: &App) -> SavedTranscript {
         let mut subagents: Vec<SavedSubagent> = self
             .subagents
@@ -2139,7 +2587,9 @@ impl AgentSession {
         let metadata = self.metadata.clone();
         let directory = self.directory.clone();
         let previous_save = std::mem::replace(&mut self.save_metadata_task, Task::ready(()));
+        let unfinished_write = self.unfinished_writes.clone();
         self.save_metadata_task = cx.background_spawn(async move {
+            let _unfinished_write = unfinished_write;
             previous_save.await;
             let path = metadata_path(&directory, &metadata.id);
             serde_json::to_vec_pretty(&metadata)
@@ -2150,29 +2600,73 @@ impl AgentSession {
     }
 
     fn save_entries(&mut self, cx: &mut Context<Self>) {
+        let delay = if self.working || self.run.is_some() {
+            SAVE_INTERVAL_WHILE_WORKING
+        } else {
+            SAVE_DEBOUNCE
+        };
+        self.schedule_entries_save(delay, cx);
+    }
+
+    fn save_entries_soon(&mut self, cx: &mut Context<Self>) {
+        self.schedule_entries_save(SAVE_DEBOUNCE, cx);
+    }
+
+    fn schedule_entries_save(&mut self, delay: Duration, cx: &mut Context<Self>) {
         if self.deleted {
             return;
         }
-        let directory = self.directory.clone();
-        self.save_entries_task = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(SAVE_DEBOUNCE).await;
-            let Some((id, entries)) = this
-                .read_with(cx, |this, cx| {
-                    (!this.deleted).then(|| (this.metadata.id.clone(), this.saved_transcript(cx)))
-                })
-                .log_err()
-                .flatten()
-            else {
-                return;
-            };
-            cx.background_spawn(async move {
-                serde_json::to_vec(&entries)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|json| write_atomically(&entries_path(&directory, &id), &json))
-                    .log_err();
-            })
-            .await;
+        let due = Instant::now() + delay;
+        if self
+            .pending_entries_save
+            .as_ref()
+            .is_some_and(|pending| pending.due <= due)
+        {
+            return;
+        }
+        let timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update(cx, |this, cx| this.write_entries(cx)).log_err();
         });
+        self.pending_entries_save = Some(PendingSave { due, _timer: timer });
+    }
+
+    fn write_entries(&mut self, cx: &mut Context<Self>) {
+        if self.pending_entries_save.take().is_none() || self.deleted {
+            return;
+        }
+        let Some(transcript) = self
+            .encoded_transcript(cx)
+            .context("failed to encode the chat transcript")
+            .log_err()
+        else {
+            return;
+        };
+        #[cfg(test)]
+        assert_eq!(
+            serde_json::to_string(&transcript).ok(),
+            serde_json::to_string(&self.saved_transcript(cx)).ok(),
+            "an incremental save must write what a full one would"
+        );
+        let path = entries_path(&self.directory, &self.metadata.id);
+        let previous_write = std::mem::replace(&mut self.save_entries_task, Task::ready(()));
+        let unfinished_write = self.unfinished_writes.clone();
+        self.save_entries_task = cx.background_spawn(async move {
+            let _unfinished_write = unfinished_write;
+            previous_write.await;
+            serde_json::to_vec(&transcript)
+                .map_err(anyhow::Error::from)
+                .and_then(|json| write_atomically(&path, &json))
+                .log_err();
+        });
+    }
+
+    fn finish_saving(&mut self, cx: &mut Context<Self>) -> Vec<Task<()>> {
+        self.write_entries(cx);
+        vec![
+            std::mem::replace(&mut self.save_metadata_task, Task::ready(())),
+            std::mem::replace(&mut self.save_entries_task, Task::ready(())),
+        ]
     }
 }
 
@@ -2333,11 +2827,13 @@ impl Global for GlobalAgentStore {}
 
 impl EventEmitter<StoreEvent> for AgentStore {}
 
-/// Owns every live chat, so an agent keeps running after its tab is closed.
+/// Keeps chats with an agent or unsaved changes alive, so an agent keeps running after its tab is closed.
 pub struct AgentStore {
     directory: Arc<Path>,
     sessions: Vec<SessionMetadata>,
     live: HashMap<String, Entity<AgentSession>>,
+    released: HashMap<String, WeakEntity<AgentSession>>,
+    idle_watch: Option<Task<()>>,
     languages: Arc<LanguageRegistry>,
     harnesses: HashMap<AgentKind, Arc<dyn Harness>>,
     catalogs: HashMap<AgentKind, ModelCatalog>,
@@ -2605,6 +3101,8 @@ impl AgentStore {
             directory,
             sessions: Vec::new(),
             live: HashMap::default(),
+            released: HashMap::default(),
+            idle_watch: None,
             languages,
             harnesses: HashMap::default(),
             catalogs: HashMap::default(),
@@ -2625,6 +3123,13 @@ impl AgentStore {
             idle_sleep_guard: None,
         };
         cx.observe_self(|store, cx| store.update_idle_sleep_guard(cx)).detach();
+        cx.on_app_quit(|store, cx| {
+            for harness in store.harnesses.values() {
+                harness.app_quitting();
+            }
+            store.finish_saving(cx)
+        })
+        .detach();
         cx.observe_global::<settings::SettingsStore>(|store, cx| {
             store.update_idle_sleep_guard(cx)
         })
@@ -2633,6 +3138,93 @@ impl AgentStore {
             store.load_saved_chats(cx);
         }
         store
+    }
+
+    fn loaded_session(&self, id: &str) -> Option<Entity<AgentSession>> {
+        self.live
+            .get(id)
+            .cloned()
+            .or_else(|| self.released.get(id)?.upgrade())
+    }
+
+    fn finish_saving(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        let sessions: Vec<Entity<AgentSession>> = self
+            .live
+            .values()
+            .cloned()
+            .chain(self.released.values().filter_map(WeakEntity::upgrade))
+            .collect();
+        let writes: Vec<Task<()>> = sessions
+            .into_iter()
+            .flat_map(|session| session.update(cx, |session, cx| session.finish_saving(cx)))
+            .collect();
+        cx.background_spawn(async move {
+            futures::future::join_all(writes).await;
+        })
+    }
+
+    fn keep_loaded_while_needed(&mut self, session: &Entity<AgentSession>, cx: &mut Context<Self>) {
+        let state = session.read(cx);
+        if state.deleted {
+            return;
+        }
+        let (working, must_stay_loaded) = (state.working, state.must_stay_loaded());
+        if self.live.contains_key(&state.metadata.id) {
+            if !working {
+                self.watch_idle_sessions(cx);
+            }
+        } else if must_stay_loaded {
+            let id = state.metadata.id.clone();
+            self.released.remove(&id);
+            self.live.insert(id, session.clone());
+            self.watch_idle_sessions(cx);
+        }
+    }
+
+    fn watch_idle_sessions(&mut self, cx: &mut Context<Self>) {
+        if self.idle_watch.is_some() {
+            return;
+        }
+        self.idle_watch = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let next_check = this.update(cx, |this, cx| {
+                    let next_check = this.release_idle_sessions(IDLE_SESSION_TIMEOUT, cx);
+                    if next_check.is_none() {
+                        this.idle_watch = None;
+                    }
+                    next_check
+                });
+                let Ok(Some(wait)) = next_check else {
+                    return;
+                };
+                cx.background_executor().timer(wait).await;
+            }
+        }));
+    }
+
+    fn release_idle_sessions(
+        &mut self,
+        idle_for: Duration,
+        cx: &mut Context<Self>,
+    ) -> Option<Duration> {
+        self.released
+            .retain(|_, session| session.upgrade().is_some());
+        let sessions: Vec<Entity<AgentSession>> = self.live.values().cloned().collect();
+        let mut next_check: Option<Duration> = None;
+        for session in sessions {
+            match session.update(cx, |session, cx| session.release_when_idle(idle_for, cx)) {
+                IdleCheck::Busy => {}
+                IdleCheck::Wait(wait) => {
+                    next_check = Some(next_check.map_or(wait, |known| known.min(wait)));
+                }
+                IdleCheck::Unneeded => {
+                    let id = session.read(cx).metadata.id.clone();
+                    self.live.remove(&id);
+                    self.released.insert(id, session.downgrade());
+                }
+            }
+        }
+        next_check
     }
 
     fn has_agent_working_unattended(&self, cx: &App) -> bool {
@@ -3350,7 +3942,7 @@ impl AgentStore {
         change: impl FnOnce(&mut SessionMetadata),
         cx: &mut Context<Self>,
     ) {
-        if let Some(session) = self.live.get(id).cloned() {
+        if let Some(session) = self.loaded_session(id) {
             session.update(cx, |session, cx| session.update_metadata(change, cx));
             return;
         }
@@ -3570,8 +4162,8 @@ impl AgentStore {
         id: &str,
         cx: &mut Context<Self>,
     ) -> Task<Result<Entity<AgentSession>>> {
-        if let Some(session) = self.live.get(id) {
-            return Task::ready(Ok(session.clone()));
+        if let Some(session) = self.loaded_session(id) {
+            return Task::ready(Ok(session));
         }
         let Some(metadata) = self
             .sessions
@@ -3597,8 +4189,8 @@ impl AgentStore {
                 })
                 .await?;
             this.update(cx, |this, cx| {
-                if let Some(session) = this.live.get(&metadata.id) {
-                    return Ok(session.clone());
+                if let Some(session) = this.loaded_session(&metadata.id) {
+                    return Ok(session);
                 }
                 if !this.sessions.iter().any(|known| known.id == metadata.id) {
                     anyhow::bail!("chat {} was deleted", metadata.id);
@@ -3621,9 +4213,11 @@ impl AgentStore {
     }
 
     pub fn delete_session(&mut self, id: &str, cx: &mut Context<Self>) {
-        let mut pending_writes = self
+        let session = self
             .live
             .remove(id)
+            .or_else(|| self.released.remove(id)?.upgrade());
+        let mut pending_writes = session
             .map(|session| session.update(cx, |session, cx| session.close_for_deletion(cx)))
             .unwrap_or_default();
         pending_writes.extend(self.metadata_writes.remove(id));
@@ -3666,9 +4260,19 @@ impl AgentStore {
 
     fn track(&mut self, session: Entity<AgentSession>, cx: &mut Context<Self>) {
         let id = session.read(cx).metadata.id.clone();
-        cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        let mut listed = session.read(cx).listed_state();
+        cx.observe(&session, move |this, session, cx| {
+            this.keep_loaded_while_needed(&session, cx);
+            let now_listed = session.read(cx).listed_state();
+            if now_listed != listed {
+                listed = now_listed;
+                cx.notify();
+            }
+        })
+        .detach();
         cx.subscribe(&session, |this, session, event, cx| match event {
             SessionEvent::MetadataChanged => {
+                this.keep_loaded_while_needed(&session, cx);
                 let metadata = session.read(cx).metadata.clone();
                 // A native fork copies the parent as it is at the fork's first run, so it must not have moved on.
                 let stale_forks: Vec<String> = this
@@ -3711,9 +4315,21 @@ impl AgentStore {
                 let id = session.read(cx).metadata.id.clone();
                 cx.emit(StoreEvent::SessionNeedsInput { id });
             }
+            SessionEvent::CommandsReported(commands) => {
+                let session = session.read(cx);
+                let key = (session.kind(), session.metadata.cwd.clone());
+                let catalog = this.commands.entry(key).or_default();
+                catalog.commands = commands.clone();
+                catalog.error = None;
+                catalog.loaded = true;
+                catalog.fetched_at = Some(Instant::now());
+                cx.notify();
+            }
         })
         .detach();
+        self.released.remove(&id);
         self.live.insert(id, session);
+        self.watch_idle_sessions(cx);
         cx.notify();
     }
 
@@ -4692,6 +5308,43 @@ done
     }
 
     #[gpui::test]
+    async fn stopping_keeps_the_agent_for_the_next_message(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        session.update(cx, |session, cx| session.send_message("scenario:stop", cx));
+        run_until(cx, |cx| last_reply(&session, cx).starts_with("turn 1 in "));
+        let first = last_reply(&session, cx);
+        let process = first.trim_start_matches("turn 1 in ").to_string();
+
+        session.update(cx, |session, cx| session.stop(cx));
+        run_until(cx, |cx| {
+            session.read_with(cx, |session, _| !session.is_working())
+        });
+        session.read_with(cx, |session, _| {
+            let run = session.run.as_ref().expect("the agent is still running");
+            assert!(!run.stopping());
+        });
+
+        session.update(cx, |session, cx| {
+            session.send_message("scenario:stop", cx);
+            session.stop(cx);
+            session.send_message("after the stop", cx);
+        });
+        run_until(cx, |cx| {
+            session.read_with(cx, |session, _| !session.is_working())
+                && last_reply(&session, cx).ends_with(": after the stop")
+        });
+        assert!(
+            last_reply(&session, cx).contains(&format!(" in {process}: ")),
+            "the same process answers: {}",
+            last_reply(&session, cx)
+        );
+    }
+
+    #[gpui::test]
     async fn deleting_a_running_chat_removes_its_files_for_good(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().expect("temporary directory");
         let store = new_store(directory.path(), cx);
@@ -5272,6 +5925,9 @@ done
             session.run = Some(ActiveRun {
                 steering,
                 interrupt: CancellationToken::new(),
+                stopping_turn: false,
+                stop_acknowledged: None,
+                stop_timeout: None,
                 permission: tokio::sync::watch::channel(PermissionMode::Ask).0,
                 _events: Task::ready(()),
             });
@@ -6090,5 +6746,644 @@ done
 
     fn session_id(session: &Entity<AgentSession>, cx: &mut TestAppContext) -> String {
         session.read_with(cx, |session, _| session.metadata().id.clone())
+    }
+
+    fn count_notifications<T: 'static>(
+        entity: &Entity<T>,
+        cx: &mut TestAppContext,
+    ) -> (std::rc::Rc<std::cell::Cell<usize>>, gpui::Subscription) {
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let subscription = cx.update(|cx| {
+            let count = count.clone();
+            cx.observe(entity, move |_, _| count.set(count.get() + 1))
+        });
+        (count, subscription)
+    }
+
+    fn text(text: &str) -> AgentEvent {
+        AgentEvent::TextDelta { text: text.into() }
+    }
+
+    fn finished_turn() -> AgentEvent {
+        AgentEvent::Done {
+            status: DoneStatus::Completed,
+            result: None,
+            error: None,
+            session_id: None,
+        }
+    }
+
+    fn exec_call(id: &str, command: &str) -> AgentEvent {
+        AgentEvent::ToolCall {
+            id: id.into(),
+            call: ToolCall::Exec {
+                command: command.into(),
+            },
+        }
+    }
+
+    fn tool_result(id: &str, output: &str) -> AgentEvent {
+        AgentEvent::ToolResult {
+            id: id.into(),
+            is_error: false,
+            output: Some(output.into()),
+            diff: None,
+        }
+    }
+
+    #[gpui::test]
+    async fn the_store_is_notified_of_state_changes_but_not_of_streamed_text(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        cx.run_until_parked();
+        let (notifications, _subscription) = count_notifications(&store, cx);
+
+        feed_events(&session, vec![text("one")], cx);
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), 1, "starting to work shows in the list");
+
+        feed_events(
+            &session,
+            vec![
+                text(" two"),
+                exec_call("t1", "ls"),
+                tool_result("t1", "done"),
+                text("three"),
+            ],
+            cx,
+        );
+        cx.run_until_parked();
+        assert_eq!(
+            notifications.get(),
+            1,
+            "streamed text and tools change nothing the store shows"
+        );
+
+        session.update(cx, |session, cx| {
+            session.pending_questions.push(PendingQuestion {
+                questions: Vec::new(),
+                responder: None,
+            });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), 2, "a question shows in the list");
+
+        feed_events(&session, vec![finished_turn()], cx);
+        cx.run_until_parked();
+        assert!(notifications.get() > 2, "a finished turn shows in the list");
+        store.read_with(cx, |store, cx| {
+            let summaries = store.sessions_in(&[directory.path().to_path_buf()], cx);
+            assert!(!summaries[0].working);
+            assert!(summaries[0].unseen);
+        });
+    }
+
+    #[gpui::test]
+    async fn queued_agent_events_are_applied_together_and_in_order(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Codex, directory.path().to_path_buf(), cx)
+        });
+        cx.run_until_parked();
+        let (notifications, _subscription) = count_notifications(&session, cx);
+        let (responder, _answer) = tokio::sync::oneshot::channel();
+        let question = UserInputQuestion {
+            id: "q".into(),
+            header: "Choice".into(),
+            question: "Pick one".into(),
+            options: vec!["A".into()],
+            multi_select: false,
+            prefill: None,
+            multiline: false,
+            accepts_typed_answer: false,
+        };
+        let ended = session.update(cx, |session, cx| {
+            session.working = true;
+            session.apply_run_inputs(
+                vec![
+                    RunInput::Event(Ok(text("one"))),
+                    RunInput::Event(Ok(text(" two"))),
+                    RunInput::Event(Err(agent_harness::HarnessError::Protocol(
+                        "broken line".into(),
+                    ))),
+                    RunInput::Question {
+                        questions: vec![question],
+                        responder,
+                    },
+                    RunInput::Event(Ok(text("three"))),
+                    RunInput::Ended,
+                    RunInput::Event(Ok(text("late"))),
+                ],
+                cx,
+            )
+        });
+        assert!(
+            ended.is_break(),
+            "nothing after the end of the stream is applied"
+        );
+        cx.run_until_parked();
+        assert_eq!(
+            notifications.get(),
+            1,
+            "one batch wakes the chat's views once"
+        );
+        session.read_with(cx, |session, cx| {
+            let entries = summarize(session.entries(), cx);
+            assert_eq!(entries.len(), 3, "{entries:?}");
+            assert_eq!(entries[0], "assistant: one two");
+            assert!(entries[1].starts_with("notice: "), "{entries:?}");
+            assert_eq!(entries[2], "assistant: three");
+            assert_eq!(session.pending_questions().len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    async fn saved_chats_keep_their_file_format(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let user = |text: &str, at: i64| Entry::User {
+            text: text.to_string().into(),
+            at,
+            attachments: Vec::new(),
+            skills: Vec::new(),
+            undelivered: false,
+        };
+        session.update(cx, |session, cx| {
+            let languages = session.languages.clone();
+            let thought = new_markdown("hm".into(), &languages, cx);
+            let reply = new_markdown("Hello".into(), &languages, cx);
+            session.transcript.entries.extend([
+                user("hi", 1),
+                Entry::Thinking(thought),
+                Entry::Assistant {
+                    markdown: reply,
+                    at: 2,
+                },
+                Entry::Tool(ToolEntry {
+                    id: "t1".into(),
+                    call: ToolCall::Exec {
+                        command: "ls".into(),
+                    },
+                    status: ToolStatus::Completed,
+                    output: Some("ok".into()),
+                    diff: None,
+                }),
+                Entry::Notice {
+                    text: "note".into(),
+                    is_error: true,
+                },
+                Entry::Image {
+                    path: "/tmp/a.png".into(),
+                },
+            ]);
+            let mut subagent = Subagent::new();
+            subagent.transcript.entries.push(user("task", 3));
+            subagent.status = Some(DoneStatus::Completed);
+            session.subagents.insert("spawn-1".into(), subagent);
+            session.enqueue(Prompt::text("later"), cx);
+            session.touch(cx);
+        });
+        cx.executor().advance_clock(SAVE_DEBOUNCE * 2);
+        let path = entries_path(directory.path(), &session_id(&session, cx));
+        run_until(cx, |_| path.exists());
+
+        let saved = std::fs::read_to_string(&path).expect("saved chat");
+        assert_eq!(
+            saved,
+            concat!(
+                r#"{"entries":[{"type":"user","text":"hi","at":1},"#,
+                r#"{"type":"thinking","text":"hm"},"#,
+                r#"{"type":"assistant","text":"Hello","at":2},"#,
+                r#"{"type":"tool","id":"t1","call":{"kind":"exec","command":"ls"},"#,
+                r#""status":"completed","output":"ok"},"#,
+                r#"{"type":"notice","text":"note","is_error":true},"#,
+                r#"{"type":"image","path":"/tmp/a.png"}],"#,
+                r#""subagents":[{"id":"spawn-1","#,
+                r#""entries":[{"type":"user","text":"task","at":3}],"status":"completed"}],"#,
+                r#""queue":[{"text":"later"}]}"#,
+            )
+        );
+        let loaded: SavedTranscript = serde_json::from_str(&saved).expect("loads");
+        assert!(matches!(
+            loaded,
+            SavedTranscript::Current { entries, subagents, queue }
+                if entries.len() == 6 && subagents.len() == 1 && queue.len() == 1
+        ));
+    }
+
+    #[gpui::test]
+    async fn only_diffs_from_the_agent_are_saved(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let edit = ToolCall::EditFile {
+            path: "a.rs".into(),
+            old_string: Some("old".into()),
+            new_string: Some("new".into()),
+        };
+        let from_agent = agent_harness::ToolDiff {
+            path: "b.rs".into(),
+            old_text: Some("before".into()),
+            new_text: "after".into(),
+        };
+        feed_events(
+            &session,
+            vec![
+                AgentEvent::ToolCall {
+                    id: "edit".into(),
+                    call: edit.clone(),
+                },
+                AgentEvent::ToolResult {
+                    id: "edit".into(),
+                    is_error: false,
+                    output: None,
+                    diff: None,
+                },
+                AgentEvent::ToolCall {
+                    id: "patch".into(),
+                    call: ToolCall::ApplyPatch {
+                        path: Some("b.rs".into()),
+                    },
+                },
+                AgentEvent::ToolResult {
+                    id: "patch".into(),
+                    is_error: false,
+                    output: None,
+                    diff: Some(from_agent.clone()),
+                },
+                finished_turn(),
+            ],
+            cx,
+        );
+        let id = session_id(&session, cx);
+        cx.executor().advance_clock(SAVE_DEBOUNCE * 2);
+        let path = entries_path(directory.path(), &id);
+        run_until(cx, |_| path.exists());
+        cx.run_until_parked();
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("saved chat")).expect("json");
+        assert!(saved["entries"][0].get("diff").is_none(), "{saved}");
+        assert_eq!(saved["entries"][1]["diff"]["newText"], "after");
+
+        let reopened_store = new_store(directory.path(), cx);
+        cx.run_until_parked();
+        let reopened = reopened_store
+            .update(cx, |store, cx| store.open_session(&id, cx))
+            .await
+            .expect("chat reopens");
+        reopened.read_with(cx, |session, _| {
+            let diff = |id: &str| session.tool_entry(id).and_then(|tool| tool.diff.clone());
+            assert_eq!(diff("edit"), diff_for_call(&edit));
+            assert_eq!(diff("patch"), Some(from_agent.clone()));
+        });
+    }
+
+    #[gpui::test]
+    async fn saving_encodes_only_the_entries_that_changed(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let encode = |cx: &mut TestAppContext| {
+            session.update(cx, |session, cx| {
+                session.encoded_transcript(cx).expect("encodes").entries.0
+            })
+        };
+        feed_user(&session, "hi", cx);
+        feed_events(
+            &session,
+            vec![
+                text("one"),
+                AgentEvent::AssistantMessageCompleted {
+                    assistant_message_id: String::new(),
+                },
+                exec_call("t1", "ls"),
+                text("two"),
+            ],
+            cx,
+        );
+        let first = encode(cx);
+        feed_events(&session, vec![text(" more"), tool_result("t1", "done")], cx);
+        let second = encode(cx);
+
+        let reused = |index: usize| Arc::ptr_eq(&first[index].json, &second[index].json);
+        assert_eq!((first.len(), second.len()), (4, 4));
+        assert!(reused(0), "the message is not encoded again");
+        assert!(reused(1), "the finished reply is not encoded again");
+        assert!(!reused(2), "the finished tool is encoded again");
+        assert!(!reused(3), "the growing reply is encoded again");
+        assert!(second[3].json.get().contains("two more"));
+    }
+
+    fn assert_saves_in_full(session: &Entity<AgentSession>, cx: &mut TestAppContext) {
+        session.update(cx, |session, cx| {
+            let incremental =
+                serde_json::to_string(&session.encoded_transcript(cx).expect("encodes"))
+                    .expect("json");
+            let full = serde_json::to_string(&session.saved_transcript(cx)).expect("json");
+            assert_eq!(incremental, full);
+        });
+    }
+
+    #[gpui::test]
+    async fn every_kind_of_change_reaches_the_next_save(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Codex, directory.path().to_path_buf(), cx)
+        });
+        feed_user(&session, "first", cx);
+        feed_events(&session, vec![text("reply"), exec_call("t1", "ls")], cx);
+        assert_saves_in_full(&session, cx);
+
+        feed_events(&session, vec![exec_call("t1", "ls -la")], cx);
+        assert_saves_in_full(&session, cx);
+
+        feed_events(&session, vec![tool_result("t1", "done"), text("more")], cx);
+        assert_saves_in_full(&session, cx);
+
+        feed_subagent(&session, cx);
+        assert_saves_in_full(&session, cx);
+
+        session.update(cx, |session, cx| session.run_ended(cx));
+        assert_saves_in_full(&session, cx);
+
+        feed_user(&session, "second", cx);
+        session.update(cx, |session, cx| session.fail_run("no agent".into(), cx));
+        assert_saves_in_full(&session, cx);
+
+        session.update(cx, |session, _| {
+            let notice = session.transcript.entries.len() - 1;
+            session.transcript.remove(notice - 1..=notice);
+        });
+        feed_user(&session, "third", cx);
+        assert_saves_in_full(&session, cx);
+
+        session.update(cx, |session, _| {
+            let last = session.transcript.entries.len() - 1;
+            session.transcript.truncate(last);
+        });
+        feed_user(&session, "fourt", cx);
+        assert_saves_in_full(&session, cx);
+
+        enqueue(&session, "later", cx);
+        assert_saves_in_full(&session, cx);
+    }
+
+    #[gpui::test]
+    async fn saves_are_spaced_out_while_working_and_prompt_when_a_turn_ends(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let path = entries_path(directory.path(), &session_id(&session, cx));
+        let due = |cx: &mut TestAppContext| {
+            session.read_with(cx, |session, _| {
+                session
+                    .pending_entries_save
+                    .as_ref()
+                    .map(|pending| pending.due)
+            })
+        };
+
+        feed_events(&session, vec![text("one")], cx);
+        let first_due = due(cx);
+        assert!(first_due.is_some());
+        feed_events(&session, vec![text(" two"), text(" three")], cx);
+        assert_eq!(
+            due(cx),
+            first_due,
+            "more text waits for the save already pending"
+        );
+
+        cx.executor().advance_clock(SAVE_DEBOUNCE * 2);
+        cx.run_until_parked();
+        assert!(
+            !path.exists(),
+            "a working chat is not written at every pause"
+        );
+        cx.executor().advance_clock(SAVE_INTERVAL_WHILE_WORKING);
+        run_until(cx, |_| path.exists());
+        assert!(due(cx).is_none());
+
+        feed_events(&session, vec![text(" four"), finished_turn()], cx);
+        cx.executor().advance_clock(SAVE_DEBOUNCE * 2);
+        run_until(cx, |_| {
+            std::fs::read_to_string(&path).is_ok_and(|saved| saved.contains("four"))
+        });
+    }
+
+    #[gpui::test]
+    async fn unsaved_chats_are_written_when_the_app_quits(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        feed_user(&session, "question", cx);
+        feed_events(&session, vec![text("answer")], cx);
+        let path = entries_path(directory.path(), &session_id(&session, cx));
+        assert!(!path.exists());
+
+        store.update(cx, |store, cx| store.finish_saving(cx)).await;
+        let saved = std::fs::read_to_string(&path).expect("saved chat");
+        assert!(
+            saved.contains("question") && saved.contains("answer"),
+            "{saved}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    async fn an_idle_agent_is_ended_and_the_next_message_resumes_it(cx: &mut TestAppContext) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let script = directory.path().join("echo-args-claude");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+args="$*"
+printf '{"type":"system","subtype":"init","model":"m","tools":[],"cwd":"/tmp","session_id":"sess-args"}\n'
+while read -r line; do
+  printf '{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"%s"}}}\n' "$args"
+  printf '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[]}}\n'
+  printf '{"type":"result","subtype":"success","result":"ok","errors":[],"usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-args"}\n'
+done
+"#,
+        )
+        .expect("write fixture");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("make fixture executable");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| {
+            store.harnesses.insert(
+                AgentKind::Claude,
+                Arc::new(ClaudeHarness::new().with_executable(script)),
+            );
+        });
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let id = session_id(&session, cx);
+        session.update(cx, |session, cx| session.send_message("first", cx));
+        run_until(cx, |cx| {
+            session.read_with(cx, |session, _| !session.is_working())
+        });
+        let first = last_reply(&session, cx);
+        assert!(!first.contains("--resume"), "{first}");
+        session.read_with(cx, |session, _| assert!(session.run.is_some()));
+
+        cx.executor().advance_clock(SAVE_DEBOUNCE * 2);
+        let path = entries_path(directory.path(), &id);
+        run_until(cx, |_| path.exists());
+        cx.run_until_parked();
+
+        let next_check = store.update(cx, |store, cx| {
+            store.release_idle_sessions(IDLE_SESSION_TIMEOUT, cx)
+        });
+        assert!(next_check.is_some_and(|wait| wait <= IDLE_SESSION_TIMEOUT));
+        session.read_with(cx, |session, _| {
+            assert!(
+                session.run.is_some(),
+                "a chat used a moment ago keeps its agent"
+            )
+        });
+
+        let next_check = store.update(cx, |store, cx| {
+            store.release_idle_sessions(Duration::ZERO, cx)
+        });
+        assert_eq!(next_check, None);
+        session.read_with(cx, |session, _| assert!(session.run.is_none()));
+        store.read_with(cx, |store, _| {
+            assert!(!store.live.contains_key(&id));
+            assert!(store.released.contains_key(&id));
+        });
+
+        session.update(cx, |session, cx| session.send_message("second", cx));
+        run_until(cx, |cx| {
+            session.read_with(cx, |session, _| !session.is_working())
+                && last_reply(&session, cx) != first
+        });
+        let second = last_reply(&session, cx);
+        assert!(second.contains("--resume=sess-args"), "{second}");
+        store.read_with(cx, |store, _| assert!(store.live.contains_key(&id)));
+    }
+
+    #[gpui::test]
+    async fn an_agent_with_work_pending_is_not_ended(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        session.update(cx, |session, cx| {
+            let (steering, _) = tokio::sync::mpsc::channel(1);
+            session.run = Some(ActiveRun {
+                steering,
+                interrupt: CancellationToken::new(),
+                stopping_turn: false,
+                stop_acknowledged: None,
+                stop_timeout: None,
+                permission: tokio::sync::watch::channel(PermissionMode::Ask).0,
+                _events: Task::ready(()),
+            });
+            session.enqueue(Prompt::text("later"), cx);
+        });
+        let release = |cx: &mut TestAppContext| {
+            store.update(cx, |store, cx| {
+                store.release_idle_sessions(Duration::ZERO, cx)
+            })
+        };
+        assert_eq!(release(cx), Some(IDLE_RECHECK_INTERVAL));
+        session.read_with(cx, |session, _| {
+            assert!(session.run.is_some(), "a queued message keeps the agent")
+        });
+
+        session.update(cx, |session, cx| {
+            session.queue.clear();
+            session.apply_event(
+                AgentEvent::TaskStarted {
+                    task_id: "server".into(),
+                    tool_use_id: None,
+                    kind: agent_harness::BackgroundTaskKind::Agent,
+                    description: "dev server".into(),
+                },
+                cx,
+            );
+        });
+        assert_eq!(release(cx), Some(IDLE_RECHECK_INTERVAL));
+        session.read_with(cx, |session, _| {
+            assert!(session.run.is_some(), "a background task keeps the agent")
+        });
+
+        session.update(cx, |session, _| session.working = true);
+        assert_eq!(release(cx), None);
+        session.read_with(cx, |session, _| {
+            assert!(session.run.is_some(), "a working agent is left alone")
+        });
+    }
+
+    #[gpui::test]
+    async fn idle_chats_leave_memory_once_saved_and_reload_on_demand(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let id = session_id(&session, cx);
+        feed_user(&session, "remember me", cx);
+        session.update(cx, |session, cx| session.touch(cx));
+        let in_memory = session.downgrade();
+        drop(session);
+        let release = |cx: &mut TestAppContext| {
+            store.update(cx, |store, cx| {
+                store.release_idle_sessions(Duration::ZERO, cx)
+            })
+        };
+
+        assert_eq!(release(cx), Some(IDLE_RECHECK_INTERVAL));
+        assert!(
+            in_memory.upgrade().is_some(),
+            "a chat with unsaved changes stays in memory"
+        );
+
+        cx.executor().advance_clock(SAVE_DEBOUNCE * 2);
+        let path = entries_path(directory.path(), &id);
+        run_until(cx, |_| path.exists());
+        cx.run_until_parked();
+        assert_eq!(release(cx), None);
+        cx.run_until_parked();
+        assert!(in_memory.upgrade().is_none(), "a saved idle chat is let go");
+        store.read_with(cx, |store, cx| {
+            assert_eq!(
+                store
+                    .sessions_in(&[directory.path().to_path_buf()], cx)
+                    .len(),
+                1
+            );
+        });
+
+        let reopened = store
+            .update(cx, |store, cx| store.open_session(&id, cx))
+            .await
+            .expect("chat reloads");
+        assert_eq!(user_texts(&reopened, cx), ["remember me"]);
     }
 }

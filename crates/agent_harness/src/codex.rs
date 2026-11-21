@@ -23,7 +23,7 @@ use crate::{
 
 use crate::jsonrpc::{Incoming, RpcClient};
 use crate::process::{Child, Stdio};
-use crate::{Harness, HarnessError, RunControls, SteerMessage};
+use crate::{Harness, HarnessError, RunControls, Steer, SteerMessage, TurnSettings};
 use catalog::{REASONING_LEVELS, sandbox_mode, sandbox_policy_value, static_models, to_effort};
 use normalize::{
     ChildRoute, Phase, ReasoningStream, delta_text, item_id, item_type, notification_thread_id,
@@ -156,7 +156,7 @@ impl CodexHarness {
             shutdown_child(&mut child, self.kill_grace).await;
             return Err(HarnessError::Protocol("codex child has no stdio".into()));
         };
-        let (client, _incoming) = RpcClient::new(stdin, stdout);
+        let (client, incoming) = RpcClient::new(stdin, stdout);
         let probe = async {
             client
                 .request(
@@ -174,8 +174,15 @@ impl CodexHarness {
             client.notify("initialized", None);
             body(client.clone(), exe).await
         };
-        let result = tokio::time::timeout(Duration::from_secs(10), probe).await;
-        shutdown_child(&mut child, self.kill_grace).await;
+        let answered = async {
+            tokio::select! {
+                result = probe => result,
+                never = decline_incoming(&client, incoming) => match never {},
+            }
+        };
+        let result = tokio::time::timeout(Duration::from_secs(10), answered).await;
+        let kill_grace = self.kill_grace;
+        tokio::spawn(async move { shutdown_child(&mut child, kill_grace).await });
         match result {
             Ok(inner) => inner,
             Err(_) => Err(HarnessError::Protocol(timeout_message.into())),
@@ -286,6 +293,19 @@ impl CodexHarness {
         })
         .await
     }
+}
+
+/// A probe reads only replies, so everything else is discarded to keep the reader moving.
+async fn decline_incoming(
+    client: &RpcClient,
+    mut incoming: mpsc::Receiver<Incoming>,
+) -> std::convert::Infallible {
+    while let Some(message) = incoming.recv().await {
+        if let Incoming::Request { id, method, .. } = message {
+            client.respond_error(&id, -32601, &format!("unsupported method: {method}"));
+        }
+    }
+    std::future::pending().await
 }
 
 fn reasoning_level(value: &str) -> Option<ReasoningLevel> {
@@ -483,6 +503,26 @@ impl Harness for CodexHarness {
     }
     fn reasoning_levels(&self) -> &[ReasoningLevel] {
         REASONING_LEVELS
+    }
+    fn stops_turn_in_place(&self) -> bool {
+        true
+    }
+    fn applies_settings_live(&self, before: &TurnSettings, after: &TurnSettings) -> bool {
+        // Codex keeps a turn override until another replaces it, so one cannot be cleared.
+        let replaced =
+            |before: Option<&str>, after: Option<&str>| after.is_some() || before.is_none();
+        let other_options = |settings: &TurnSettings| {
+            let mut options = settings.model_options.clone();
+            options.remove(SERVICE_TIER_OPTION);
+            options
+        };
+        replaced(before.model.as_deref(), after.model.as_deref())
+            && replaced(to_effort(before.reasoning), to_effort(after.reasoning))
+            && replaced(
+                service_tier_choice(&before.model_options).as_deref(),
+                service_tier_choice(&after.model_options).as_deref(),
+            )
+            && other_options(before) == other_options(after)
     }
     fn installed(&self) -> bool {
         self.resolve_executable().is_ok()
@@ -848,7 +888,26 @@ fn command_with_extras_error() -> HarnessError {
     )
 }
 
-async fn start_turn(client: &RpcClient, params: Value) -> Result<String, HarnessError> {
+type Reply = futures::future::BoxFuture<'static, Result<Value, HarnessError>>;
+
+enum Request {
+    Turn {
+        steered: bool,
+    },
+    Steer {
+        message: SteerMessage,
+        expected: String,
+    },
+}
+
+async fn reply_to(outstanding: &mut Option<(Request, Reply)>) -> Result<Value, HarnessError> {
+    match outstanding {
+        Some((_, reply)) => reply.await,
+        None => std::future::pending().await,
+    }
+}
+
+fn turn_request(client: &RpcClient, params: Value) -> Result<Reply, HarnessError> {
     let text = params
         .pointer("/input/0/text")
         .and_then(Value::as_str)
@@ -863,8 +922,141 @@ async fn start_turn(client: &RpcClient, params: Value) -> Result<String, Harness
         return Err(command_with_extras_error());
     }
     let (method, params) = native.unwrap_or(("turn/start", params));
-    let started = client.request(method, params).await?;
-    Ok(started["turn"]["id"].as_str().unwrap_or("").to_owned())
+    Ok(client.request_now(method, params))
+}
+
+/// Returns false when the session loop should end.
+async fn begin_steered_turn(
+    client: &RpcClient,
+    params: Value,
+    outstanding: &mut Option<(Request, Reply)>,
+    done_current: &mut bool,
+    event_tx: &mpsc::Sender<Result<AgentEvent, HarnessError>>,
+) -> bool {
+    match turn_request(client, params) {
+        Ok(reply) => {
+            *outstanding = Some((Request::Turn { steered: true }, reply));
+            *done_current = false;
+            true
+        }
+        Err(e) => {
+            let message = t!("Steering failed: {error}", error = e).to_string();
+            send_final(event_tx, AgentEvent::Error { message }).await;
+            false
+        }
+    }
+}
+
+fn is_native_command(prompt: &str, thread_id: &str) -> bool {
+    command_request(prompt, thread_id).ok().flatten().is_some()
+}
+
+fn interrupt_turn(client: &RpcClient, thread_id: &str, turn: String) {
+    let reply = client.request_now(
+        "turn/interrupt",
+        json!({ "threadId": thread_id, "turnId": turn }),
+    );
+    tokio::spawn(async move {
+        if let Err(e) = reply.await {
+            tracing::debug!(
+                target: "agent_harness::codex",
+                "turn/interrupt failed (escalation will reap): {e}"
+            );
+        }
+    });
+}
+
+fn notification_turn(params: &Value) -> Option<&str> {
+    params
+        .get("turnId")
+        .or_else(|| params.pointer("/turn/id"))
+        .and_then(Value::as_str)
+}
+
+const SERVICE_TIER_OPTION: &str = "serviceTier";
+
+fn service_tier_choice(options: &serde_json::Map<String, Value>) -> Option<String> {
+    options
+        .get(SERVICE_TIER_OPTION)
+        .and_then(Value::as_str)
+        .filter(|tier| *tier != "default")
+        .map(str::to_owned)
+}
+
+fn approval_policy(permission: PermissionMode) -> &'static str {
+    if permission.skips_prompts() {
+        "never"
+    } else {
+        "on-request"
+    }
+}
+
+struct TurnParams {
+    thread_id: String,
+    started_with_reviewer: bool,
+    model: Option<String>,
+    effort: Option<&'static str>,
+    service_tier: Option<String>,
+}
+
+impl TurnParams {
+    fn apply(&mut self, settings: &TurnSettings) {
+        self.model = settings.model.clone();
+        self.effort = to_effort(settings.reasoning);
+        self.service_tier = service_tier_choice(&settings.model_options);
+    }
+
+    fn build(
+        &self,
+        permission: PermissionMode,
+        text: &str,
+        attachments: &[String],
+        skills: &[SkillRef],
+    ) -> Value {
+        let mut p = serde_json::Map::new();
+        p.insert("threadId".into(), Value::String(self.thread_id.clone()));
+        p.insert("input".into(), prompt_input(text, attachments, skills));
+        p.insert("approvalPolicy".into(), approval_policy(permission).into());
+        p.insert(
+            "sandboxPolicy".into(),
+            sandbox_policy_value(permission_sandbox(permission)),
+        );
+        let approve_for_me = permission == PermissionMode::ApproveForMe;
+        if approve_for_me || self.started_with_reviewer {
+            let reviewer = if approve_for_me {
+                "auto_review"
+            } else {
+                "user"
+            };
+            p.insert("approvalsReviewer".into(), reviewer.into());
+        }
+        // Without this Codex streams no reasoning summaries and looks idle for minutes.
+        p.insert("summary".into(), "auto".into());
+        if let Some(model) = &self.model {
+            p.insert("model".into(), Value::String(model.clone()));
+        }
+        if let Some(effort) = self.effort {
+            p.insert("effort".into(), effort.into());
+        }
+        if let Some(tier) = &self.service_tier {
+            p.insert(SERVICE_TIER_OPTION.into(), Value::String(tier.clone()));
+        }
+        Value::Object(p)
+    }
+}
+
+fn settle_stopped_turn(
+    escalation: &mut Option<tokio::task::JoinHandle<()>>,
+    queued_steers: &mut VecDeque<SteerMessage>,
+    request_tasks: &mut Vec<tokio::task::AbortHandle>,
+) {
+    if let Some(handle) = escalation.take() {
+        handle.abort();
+    }
+    queued_steers.clear();
+    for task in request_tasks.drain(..) {
+        task.abort();
+    }
 }
 
 async fn run_session(session: Session) {
@@ -889,22 +1081,9 @@ async fn run_session(session: Session) {
 
     let mut permission = request.permission.for_harness(HarnessId::Codex);
     let mut permission_open = true;
-    let approval_policy = |permission: PermissionMode| {
-        if permission.skips_prompts() {
-            "never"
-        } else {
-            "on-request"
-        }
-    };
     let approvals_reviewer = (permission == PermissionMode::ApproveForMe).then_some("auto_review");
     let started_with_reviewer = approvals_reviewer.is_some();
-    let effort = to_effort(request.reasoning);
-    let service_tier = request
-        .model_options
-        .get("serviceTier")
-        .and_then(Value::as_str)
-        .filter(|t| *t != "default")
-        .map(str::to_owned);
+    let service_tier = service_tier_choice(&request.model_options);
 
     let start_params = {
         let mut p = serde_json::Map::new();
@@ -1032,40 +1211,12 @@ async fn run_session(session: Session) {
         }
     };
 
-    let turn_params = |permission: PermissionMode,
-                       text: &str,
-                       attachments: &[String],
-                       skills: &[SkillRef]|
-     -> Value {
-        let mut p = serde_json::Map::new();
-        p.insert("threadId".into(), Value::String(thread_id.clone()));
-        p.insert("input".into(), prompt_input(text, attachments, skills));
-        p.insert("approvalPolicy".into(), approval_policy(permission).into());
-        p.insert(
-            "sandboxPolicy".into(),
-            sandbox_policy_value(permission_sandbox(permission)),
-        );
-        let approve_for_me = permission == PermissionMode::ApproveForMe;
-        if approve_for_me || started_with_reviewer {
-            let reviewer = if approve_for_me {
-                "auto_review"
-            } else {
-                "user"
-            };
-            p.insert("approvalsReviewer".into(), reviewer.into());
-        }
-        // Without this Codex streams no reasoning summaries and looks idle for minutes.
-        p.insert("summary".into(), "auto".into());
-        if let Some(model) = &request.model {
-            p.insert("model".into(), Value::String(model.clone()));
-        }
-        if let Some(effort) = effort {
-            p.insert("effort".into(), effort.into());
-        }
-        if let Some(tier) = &service_tier {
-            p.insert("serviceTier".into(), Value::String(tier.clone()));
-        }
-        Value::Object(p)
+    let mut turn_params = TurnParams {
+        thread_id: thread_id.clone(),
+        started_with_reviewer,
+        model: request.model.clone(),
+        effort: to_effort(request.reasoning),
+        service_tier,
     };
 
     let mut assistant_message_id = new_message_id();
@@ -1093,27 +1244,16 @@ async fn run_session(session: Session) {
     }
 
     let mut router = TurnRouter::default();
-    match start_turn(
+    let mut outstanding = match turn_request(
         &client,
-        turn_params(
+        turn_params.build(
             permission,
             &request.prompt,
             &request.attachments,
             &request.skills,
         ),
-    )
-    .await
-    {
-        Ok(id) => {
-            if revertable
-                && !id.is_empty()
-                && !send(&event_tx, AgentEvent::PromptRecorded { id: id.clone() }).await
-            {
-                shutdown_child(&mut child, kill_grace).await;
-                return;
-            }
-            router.adopt_started(id)
-        }
+    ) {
+        Ok(reply) => Some((Request::Turn { steered: false }, reply)),
         Err(e) => {
             send_final(
                 &event_tx,
@@ -1128,7 +1268,7 @@ async fn run_session(session: Session) {
             shutdown_child(&mut child, kill_grace).await;
             return;
         }
-    }
+    };
 
     let mut streamed_text: HashSet<String> = HashSet::new();
     let mut delivered_review: Option<String> = None;
@@ -1141,15 +1281,205 @@ async fn run_session(session: Session) {
     let mut interrupted = false;
     let mut interrupt_sent = false;
     let mut done_current = false;
-    let mut current_native = command_request(&request.prompt, &thread_id)
-        .ok()
-        .flatten()
-        .is_some();
+    let mut current_native = is_native_command(&request.prompt, &thread_id);
     let mut done_after_interrupt = false;
     let mut escalation: Option<tokio::task::JoinHandle<()>> = None;
+    let mut turn_settled = false;
+    let mut stopping_turn = false;
+    let mut stop_ack = None;
+    let mut stop_kill_starts_at = None;
+    let mut stopped_turn: Option<String> = None;
+    let mut request_tasks: Vec<tokio::task::AbortHandle> = Vec::new();
 
     'main: loop {
+        if std::mem::take(&mut turn_settled) && outstanding.is_none() && done_current {
+            if let Some(message) = queued_steers.pop_front() {
+                current_native = is_native_command(&message.prompt, &thread_id);
+                if !begin_steered_turn(
+                    &client,
+                    turn_params.build(
+                        permission,
+                        &message.prompt,
+                        &message.attachments,
+                        &message.skills,
+                    ),
+                    &mut outstanding,
+                    &mut done_current,
+                    &event_tx,
+                )
+                .await
+                {
+                    break 'main;
+                }
+            } else if !steering_open {
+                break 'main;
+            }
+        }
         tokio::select! {
+            // A reply skips the incoming queue, so it is read first to stay ahead of later messages.
+            biased;
+
+            _ = event_tx.closed() => break 'main,
+
+            _ = interrupt.cancelled(), if !interrupt_sent => {
+                interrupt_sent = true;
+                interrupted = true;
+                let Some(turn) = router.active.clone() else {
+                    break 'main;
+                };
+                interrupt_turn(&client, &thread_id, turn);
+                if escalation.is_none() {
+                    escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                }
+            },
+
+            result = reply_to(&mut outstanding), if outstanding.is_some() => {
+                let Some((request, _)) = outstanding.take() else {
+                    continue 'main;
+                };
+                match (request, result) {
+                    (Request::Turn { steered }, Ok(started)) => {
+                        let id = started["turn"]["id"].as_str().unwrap_or("").to_owned();
+                        if revertable
+                            && !id.is_empty()
+                            && !send(&event_tx, AgentEvent::PromptRecorded { id: id.clone() }).await
+                        {
+                            break 'main;
+                        }
+                        router.adopt_started(id);
+                        if steered {
+                            let (prev, next) = rotate(&mut assistant_message_id);
+                            if !send(
+                                &event_tx,
+                                AgentEvent::Steered {
+                                    assistant_message_id: Some(prev),
+                                    next_assistant_message_id: Some(next),
+                                },
+                            )
+                            .await
+                            {
+                                break 'main;
+                            }
+                        }
+                    }
+                    (Request::Turn { steered }, Err(e)) => {
+                        done_current = true;
+                        let failure = if steered {
+                            AgentEvent::Error {
+                                message: t!("Steering failed: {error}", error = e).to_string(),
+                            }
+                        } else {
+                            AgentEvent::Done {
+                                status: DoneStatus::Errored,
+                                result: None,
+                                error: Some(e.to_string()),
+                                session_id: Some(thread_id.clone()),
+                            }
+                        };
+                        send_final(&event_tx, failure).await;
+                        break 'main;
+                    }
+                    (Request::Steer { .. }, Ok(_)) => {
+                        let (prev, next) = rotate(&mut assistant_message_id);
+                        if !send(
+                            &event_tx,
+                            AgentEvent::Steered {
+                                assistant_message_id: Some(prev),
+                                next_assistant_message_id: Some(next),
+                            },
+                        )
+                        .await
+                        {
+                            break 'main;
+                        }
+                    }
+                    // Usually the turn ended before the steer landed; redeliver as the next turn.
+                    (Request::Steer { message, expected }, Err(e)) => {
+                        tracing::debug!(
+                            target: "agent_harness::codex",
+                            "turn/steer rejected (queued as next turn): {e}"
+                        );
+                        if router.active.as_deref() == Some(expected.as_str())
+                            && !router.is_completed(&expected)
+                        {
+                            queued_steers.push_back(message);
+                        } else {
+                            current_native = is_native_command(&message.prompt, &thread_id);
+                            if !begin_steered_turn(
+                                &client,
+                                turn_params.build(permission, &message.prompt, &message.attachments, &message.skills),
+                                &mut outstanding,
+                                &mut done_current,
+                                &event_tx,
+                            )
+                            .await
+                            {
+                                break 'main;
+                            }
+                        }
+                    }
+                }
+                turn_settled = true;
+            },
+
+            steer = steering.recv(), if steering_open && !interrupted && !stopping_turn && outstanding.is_none() => match steer {
+                Some(Steer::StopTurn(_)) if done_current && router.active.is_none() => {}
+                Some(Steer::StopTurn(ack)) => {
+                    let Some(turn) = router.active.clone() else {
+                        interrupted = true;
+                        break 'main;
+                    };
+                    stopping_turn = true;
+                    stop_ack = Some(ack);
+                    stop_kill_starts_at = Some(tokio::time::Instant::now() + interrupt_grace);
+                    interrupt_turn(&client, &thread_id, turn);
+                    escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                }
+                Some(Steer::Message(message)) => {
+                    if let Some(settings) = &message.settings {
+                        turn_params.apply(settings);
+                    }
+                    // Steered acks must stay FIFO, so nothing may overtake a queued command.
+                    if !done_current && (!queued_steers.is_empty() || current_native || !matches!(command_request(&message.prompt, &thread_id), Ok(None))) {
+                        queued_steers.push_back(message);
+                    } else if let Some(expected) = router.active.clone() {
+                        let steer_params = json!({
+                            "threadId": thread_id,
+                            "expectedTurnId": expected,
+                            "input": prompt_input(&message.prompt, &message.attachments, &message.skills),
+                        });
+                        let reply = client.request_now("turn/steer", steer_params);
+                        outstanding = Some((Request::Steer { message, expected }, reply));
+                    } else {
+                        current_native = is_native_command(&message.prompt, &thread_id);
+                        if !begin_steered_turn(
+                            &client,
+                            turn_params.build(permission, &message.prompt, &message.attachments, &message.skills),
+                            &mut outstanding,
+                            &mut done_current,
+                            &event_tx,
+                        )
+                        .await
+                        {
+                            break 'main;
+                        }
+                    }
+                }
+                None => {
+                    steering_open = false;
+                    if done_current && router.active.is_none() && queued_steers.is_empty() {
+                        break 'main;
+                    }
+                }
+            },
+
+            changed = permission_changes.changed(), if permission_open => match changed {
+                Ok(()) => {
+                    permission = permission_changes.borrow_and_update().for_harness(HarnessId::Codex);
+                }
+                Err(_) => permission_open = false,
+            },
+
             inc = incoming.recv() => match inc {
                 Some(Incoming::Notification { method, params }) => {
                 // Must run first: a child's turn/completed would otherwise settle the parent turn.
@@ -1169,6 +1499,9 @@ async fn run_session(session: Session) {
                             continue;
                         }
                     }
+                }
+                if stopped_turn.as_deref().is_some_and(|stopped| notification_turn(&params) == Some(stopped)) {
+                    continue;
                 }
                 match method.as_str() {
                     "turn/started" => router.note_started(turn_id(&params)),
@@ -1302,7 +1635,11 @@ async fn run_session(session: Session) {
                                 == Some("failed"))
                             .then(|| t!("Codex turn failed").to_string())
                         });
-                        let status = if interrupted {
+                        let ended_by_itself = matches!(
+                            params.pointer("/turn/status").and_then(Value::as_str),
+                            Some("completed" | "failed")
+                        );
+                        let status = if interrupted || (stopping_turn && !ended_by_itself) {
                             DoneStatus::Interrupted
                         } else if error.is_some() {
                             DoneStatus::Errored
@@ -1310,6 +1647,12 @@ async fn run_session(session: Session) {
                             DoneStatus::Completed
                         };
                         done_current = true;
+                        if stopping_turn
+                            && !interrupted
+                            && !crate::confirm_stop(&mut stop_ack, stop_kill_starts_at, &mut escalation)
+                        {
+                            interrupted = true;
+                        }
                         if !send(
                             &event_tx,
                             AgentEvent::Done {
@@ -1328,24 +1671,13 @@ async fn run_session(session: Session) {
                             break 'main;
                         }
                         current_native = false;
-                        if let Some(msg) = queued_steers.pop_front() {
-                            current_native = command_request(&msg.prompt, &thread_id).ok().flatten().is_some();
-                            if !steer_as_new_turn(
-                                &client,
-                                turn_params(permission, &msg.prompt, &msg.attachments, &msg.skills),
-                                &mut router,
-                                &event_tx,
-                                &mut assistant_message_id,
-                                &mut done_current,
-                                revertable,
-                            )
-                            .await
-                            {
-                                break 'main;
-                            }
-                        } else if !steering_open {
-                            break 'main;
+                        if std::mem::take(&mut stopping_turn) {
+                            settle_stopped_turn(&mut escalation, &mut queued_steers, &mut request_tasks);
+                            compacting = false;
+                            compacted_tokens = None;
+                            stopped_turn = Some(id).filter(|id| !id.is_empty());
                         }
+                        turn_settled = true;
                     }
 
                     "turn/failed" => {
@@ -1356,13 +1688,13 @@ async fn run_session(session: Session) {
                             break 'main;
                         }
                         done_current = true;
-                        if interrupted {
+                        if interrupted || stopping_turn {
                             done_after_interrupt = true;
                         }
                         send_final(
                             &event_tx,
                             AgentEvent::Done {
-                                status: if interrupted {
+                                status: if interrupted || stopping_turn {
                                     DoneStatus::Interrupted
                                 } else {
                                     DoneStatus::Errored
@@ -1380,22 +1712,41 @@ async fn run_session(session: Session) {
                     }
 
                     "turn/aborted" => {
-                        router.note_completed(&turn_id(&params));
+                        let id = turn_id(&params);
+                        router.note_completed(&id);
                         done_current = true;
                         if interrupted {
                             done_after_interrupt = true;
                         }
-                        send_final(
-                            &event_tx,
-                            AgentEvent::Done {
-                                status: DoneStatus::Interrupted,
-                                result: None,
-                                error: None,
-                                session_id: Some(thread_id.clone()),
-                            },
-                        )
-                        .await;
-                        break 'main;
+                        let aborted = AgentEvent::Done {
+                            status: DoneStatus::Interrupted,
+                            result: None,
+                            error: None,
+                            session_id: Some(thread_id.clone()),
+                        };
+                        if !interrupted
+                            && stopping_turn
+                            && !crate::confirm_stop(&mut stop_ack, stop_kill_starts_at, &mut escalation)
+                        {
+                            interrupted = true;
+                        }
+                        if interrupted || !stopping_turn {
+                            send_final(&event_tx, aborted).await;
+                            break 'main;
+                        }
+                        if !send(&event_tx, aborted).await {
+                            break 'main;
+                        }
+                        stopping_turn = false;
+                        settle_stopped_turn(&mut escalation, &mut queued_steers, &mut request_tasks);
+                        streamed_text.clear();
+                        delivered_review = None;
+                        pending_usage = None;
+                        current_native = false;
+                        compacting = false;
+                        compacted_tokens = None;
+                        stopped_turn = Some(id).filter(|id| !id.is_empty());
+                        turn_settled = true;
                     }
 
                     "error" => {
@@ -1415,116 +1766,23 @@ async fn run_session(session: Session) {
                 }
 
                 Some(Incoming::Request { id, method, params }) => {
-                    handle_server_request(
+                    request_tasks.retain(|task| !task.is_finished());
+                    request_tasks.extend(handle_server_request(
                         &client,
                         id,
                         &method,
                         &params,
                         permission.skips_prompts(),
                         &request_input,
-                    );
+                    ));
                 }
 
                 Some(Incoming::Eof) | None => break 'main,
             },
-
-            steer = steering.recv(), if steering_open && !interrupted => match steer {
-                Some(msg) => {
-                    // Steered acks must stay FIFO, so nothing may overtake a queued command.
-                    if !done_current && (!queued_steers.is_empty() || current_native || !matches!(command_request(&msg.prompt, &thread_id), Ok(None))) {
-                        queued_steers.push_back(msg);
-                        continue 'main;
-                    }
-                    if let Some(expected) = router.active.clone() {
-                        let steer_params = json!({
-                            "threadId": thread_id,
-                            "expectedTurnId": expected,
-                            "input": prompt_input(&msg.prompt, &msg.attachments, &msg.skills),
-                        });
-                        match client.request("turn/steer", steer_params).await {
-                            Ok(_) => {
-                                let (prev, next) = rotate(&mut assistant_message_id);
-                                if !send(
-                                    &event_tx,
-                                    AgentEvent::Steered {
-                                        assistant_message_id: Some(prev),
-                                        next_assistant_message_id: Some(next),
-                                    },
-                                )
-                                .await
-                                {
-                                    break 'main;
-                                }
-                            }
-                            // Usually the turn ended before the steer landed; redeliver as the next turn.
-                            Err(e) => {
-                                tracing::debug!(
-                                    target: "agent_harness::codex",
-                                    "turn/steer rejected (queued as next turn): {e}"
-                                );
-                                if router.active.as_deref() == Some(expected.as_str())
-                                    && !router.is_completed(&expected)
-                                {
-                                    queued_steers.push_back(msg);
-                                } else {
-                                    current_native = command_request(&msg.prompt, &thread_id).ok().flatten().is_some();
-                                    if !steer_as_new_turn(
-                                        &client, turn_params(permission, &msg.prompt, &msg.attachments, &msg.skills), &mut router, &event_tx,
-                                        &mut assistant_message_id, &mut done_current, revertable,
-                                    ).await { break 'main; }
-                                }
-                            }
-                        }
-                    } else {
-                        current_native = command_request(&msg.prompt, &thread_id).ok().flatten().is_some();
-                        if !steer_as_new_turn(
-                            &client, turn_params(permission, &msg.prompt, &msg.attachments, &msg.skills), &mut router, &event_tx,
-                            &mut assistant_message_id, &mut done_current, revertable,
-                        ).await { break 'main; }
-                    }
-                }
-                None => {
-                    steering_open = false;
-                    if done_current && router.active.is_none() && queued_steers.is_empty() {
-                        break 'main;
-                    }
-                }
-            },
-
-            changed = permission_changes.changed(), if permission_open => match changed {
-                Ok(()) => {
-                    permission = permission_changes.borrow_and_update().for_harness(HarnessId::Codex);
-                }
-                Err(_) => permission_open = false,
-            },
-
-            _ = interrupt.cancelled(), if !interrupt_sent => {
-                interrupt_sent = true;
-                interrupted = true;
-                if let Some(turn) = router.active.clone() {
-                    let client = client.clone();
-                    let thread = thread_id.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = client
-                            .request("turn/interrupt", json!({ "threadId": thread, "turnId": turn }))
-                            .await
-                        {
-                            tracing::debug!(
-                                target: "agent_harness::codex",
-                                "turn/interrupt failed (escalation will reap): {e}"
-                            );
-                        }
-                    });
-                    escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
-                } else {
-                    break 'main;
-                }
-            },
-
-            _ = event_tx.closed() => break 'main,
         }
     }
 
+    let interrupted = interrupted || stopping_turn;
     if !event_tx.is_closed() {
         if interrupted && !done_after_interrupt {
             send_final(
@@ -1562,44 +1820,6 @@ async fn run_session(session: Session) {
     }
 }
 
-/// Returns false when the session loop should end.
-async fn steer_as_new_turn(
-    client: &RpcClient,
-    params: Value,
-    router: &mut TurnRouter,
-    event_tx: &mpsc::Sender<Result<AgentEvent, HarnessError>>,
-    assistant_message_id: &mut String,
-    done_current: &mut bool,
-    revertable: bool,
-) -> bool {
-    match start_turn(client, params).await {
-        Ok(id) => {
-            if revertable
-                && !id.is_empty()
-                && !send(event_tx, AgentEvent::PromptRecorded { id: id.clone() }).await
-            {
-                return false;
-            }
-            router.adopt_started(id);
-            *done_current = false;
-            let (prev, next) = rotate(assistant_message_id);
-            send(
-                event_tx,
-                AgentEvent::Steered {
-                    assistant_message_id: Some(prev),
-                    next_assistant_message_id: Some(next),
-                },
-            )
-            .await
-        }
-        Err(e) => {
-            let message = t!("Steering failed: {error}", error = e).to_string();
-            send_final(event_tx, AgentEvent::Error { message }).await;
-            false
-        }
-    }
-}
-
 type RequestInputFn = Box<
     dyn Fn(Vec<UserInputQuestion>) -> tokio::sync::oneshot::Receiver<Vec<UserInputAnswer>>
         + Send
@@ -1622,17 +1842,17 @@ fn handle_server_request(
     params: &Value,
     skip_prompts: bool,
     request_input: &Arc<RequestInputFn>,
-) {
+) -> Option<tokio::task::AbortHandle> {
     // A content question, so never auto-approved.
     if method == "item/tool/requestUserInput" {
         let questions = user_input_questions(params);
         if questions.is_empty() {
             client.respond(&id, json!({ "answers": {} }));
-            return;
+            return None;
         }
         let client = client.clone();
         let request_input = Arc::clone(request_input);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let asked: Vec<UserInputQuestion> = questions.iter().map(|(_, q)| q.clone()).collect();
             let answers = (request_input)(asked).await.unwrap_or_default();
             let mut by_id = serde_json::Map::new();
@@ -1646,16 +1866,16 @@ fn handle_server_request(
             }
             client.respond(&id, json!({ "answers": by_id }));
         });
-        return;
+        return Some(task.abort_handle());
     }
     if method == "mcpServer/elicitation/request" {
         let Some((question, replies)) = elicitation_question(params) else {
             client.respond(&id, json!({ "action": "decline" }));
-            return;
+            return None;
         };
         let client = client.clone();
         let request_input = Arc::clone(request_input);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let answers = (request_input)(vec![question.clone()])
                 .await
                 .unwrap_or_default();
@@ -1672,7 +1892,7 @@ fn handle_server_request(
                 .unwrap_or_else(|| json!({ "action": "decline" }));
             client.respond(&id, reply);
         });
-        return;
+        return Some(task.abort_handle());
     }
     if method == "item/permissions/requestApproval" {
         let granted = json!({
@@ -1681,12 +1901,12 @@ fn handle_server_request(
         });
         if skip_prompts {
             client.respond(&id, granted);
-            return;
+            return None;
         }
         let question = permissions_question(params);
         let client = client.clone();
         let request_input = Arc::clone(request_input);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let answers = (request_input)(vec![question.clone()])
                 .await
                 .unwrap_or_default();
@@ -1705,7 +1925,7 @@ fn handle_server_request(
                 },
             );
         });
-        return;
+        return Some(task.abort_handle());
     }
     let is_approval = matches!(
         method,
@@ -1717,17 +1937,17 @@ fn handle_server_request(
             "unhandled server request: {method}"
         );
         client.respond_error(&id, -32601, &format!("unsupported method: {method}"));
-        return;
+        return None;
     }
     if skip_prompts {
         client.respond(&id, json!({ "decision": "accept" }));
-        return;
+        return None;
     }
 
     let question = approval_question(method, params);
     let client = client.clone();
     let request_input = Arc::clone(request_input);
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let answers = (request_input)(vec![question.clone()])
             .await
             .unwrap_or_default();
@@ -1742,6 +1962,7 @@ fn handle_server_request(
             json!({ "decision": if accept { "accept" } else { "decline" } }),
         );
     });
+    Some(task.abort_handle())
 }
 
 /// Answers must be keyed by the wire id, not the generated question id.

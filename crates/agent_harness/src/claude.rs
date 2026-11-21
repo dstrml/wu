@@ -23,7 +23,7 @@ use crate::{
 };
 
 use crate::process::{Child, ChildStdin, Command, Stdio};
-use crate::{Harness, HarnessError, RunControls, shutdown_child};
+use crate::{Harness, HarnessError, RunControls, Steer, TurnSettings, shutdown_child};
 use catalog::{apply_ultrathink, to_effort};
 use normalize::Normalizer;
 use wire::{
@@ -180,12 +180,12 @@ impl ClaudeHarness {
             "stdio",
         ]);
         if let Some(model) = &request.model {
-            let choice = request
-                .model_options
-                .get(catalog::CONTEXT_WINDOW_OPTION)
-                .and_then(Value::as_str);
             cmd.arg("--model");
-            cmd.arg(catalog::model_argument(model, choice, discovered));
+            cmd.arg(model_argument_for(
+                model,
+                &request.model_options,
+                discovered,
+            ));
         }
         if let Some(effort) = to_effort(request.reasoning, request.model.as_deref()) {
             cmd.args(["--effort", effort]);
@@ -303,7 +303,8 @@ impl ClaudeHarness {
             ))
         };
         let result = tokio::time::timeout(Duration::from_secs(10), discovery).await;
-        shutdown_child(&mut child, self.kill_grace).await;
+        let kill_grace = self.kill_grace;
+        tokio::spawn(async move { shutdown_child(&mut child, kill_grace).await });
         match result {
             Ok(inner) => inner,
             Err(_) => Err(HarnessError::Protocol(
@@ -535,6 +536,27 @@ fn parse_initialize_commands(response: &Value) -> Vec<SlashCommand> {
         .collect()
 }
 
+async fn listed_commands(
+    initialize_response: &Value,
+    project: PathBuf,
+    config_dir: PathBuf,
+) -> Result<Vec<SlashCommand>, HarnessError> {
+    let mut commands = parse_initialize_commands(initialize_response);
+    let (defined, skills) = tokio::task::spawn_blocking(move || {
+        (
+            defined_command_names(&project, &config_dir),
+            defined_skill_names(&project, &config_dir),
+        )
+    })
+    .await
+    .map_err(|error| HarnessError::Protocol(error.to_string()))?;
+    commands.retain(|command| !is_hidden_command(&command.name) || defined.contains(&command.name));
+    for command in &mut commands {
+        command.is_skill = skills.contains(&command.name);
+    }
+    Ok(commands)
+}
+
 #[async_trait]
 impl Harness for ClaudeHarness {
     fn id(&self) -> HarnessId {
@@ -557,6 +579,21 @@ impl Harness for ClaudeHarness {
             ReasoningLevel::XHigh,
             ReasoningLevel::Max,
         ]
+    }
+    fn stops_turn_in_place(&self) -> bool {
+        true
+    }
+    fn applies_settings_live(&self, before: &TurnSettings, after: &TurnSettings) -> bool {
+        let launch_only = |settings: &TurnSettings| {
+            let mut options = settings.model_options.clone();
+            options.remove(catalog::CONTEXT_WINDOW_OPTION);
+            (
+                to_effort(settings.reasoning, settings.model.as_deref()),
+                settings.reasoning == Some(ReasoningLevel::Ultracode),
+                options,
+            )
+        };
+        after.model.is_some() && launch_only(before) == launch_only(after)
     }
     fn installed(&self) -> bool {
         // Must match launch resolution, including CLAUDE_CODE_EXECUTABLE.
@@ -590,23 +627,7 @@ impl Harness for ClaudeHarness {
     }
     async fn commands(&self, cwd: &std::path::Path) -> Result<Vec<SlashCommand>, HarnessError> {
         let response = self.probe_initialize(Some(cwd)).await?;
-        let mut commands = parse_initialize_commands(&response);
-        let config_dir = self.config_dir();
-        let project = cwd.to_owned();
-        let (defined, skills) = tokio::task::spawn_blocking(move || {
-            (
-                defined_command_names(&project, &config_dir),
-                defined_skill_names(&project, &config_dir),
-            )
-        })
-        .await
-        .map_err(|error| HarnessError::Protocol(error.to_string()))?;
-        commands
-            .retain(|command| !is_hidden_command(&command.name) || defined.contains(&command.name));
-        for command in &mut commands {
-            command.is_skill = skills.contains(&command.name);
-        }
-        Ok(commands)
+        listed_commands(&response, cwd.to_owned(), self.config_dir()).await
     }
 
     async fn external_sessions(
@@ -723,6 +744,13 @@ impl ClaudeHarness {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinMsg>();
         tokio::spawn(stdin_writer(stdin, stdin_rx));
 
+        let commands_scan =
+            (!request.cwd.is_empty()).then(|| (PathBuf::from(&request.cwd), self.config_dir()));
+        if commands_scan.is_some() {
+            let line = wire::initialize_request_line(RUN_INITIALIZE_REQUEST);
+            stdin_tx.send(StdinMsg::Line(line)).ok();
+        }
+
         let (images, image_problems) = load_image_blocks(&request.attachments).await;
         let first_prompt_id = uuid::Uuid::new_v4().to_string();
         let first = wire::user_message_line(
@@ -751,6 +779,11 @@ impl ClaudeHarness {
             event_tx,
             controls,
             reasoning: request.reasoning,
+            model_argument: request.model.as_deref().map(|model| {
+                model_argument_for(model, &request.model_options, discovered.as_deref())
+            }),
+            discovered,
+            commands_scan,
             interrupt_grace: self.interrupt_grace,
             kill_grace: self.kill_grace,
             stderr_tail,
@@ -876,9 +909,81 @@ struct Session {
     event_tx: mpsc::Sender<Result<AgentEvent, HarnessError>>,
     controls: RunControls,
     reasoning: Option<ReasoningLevel>,
+    model_argument: Option<String>,
+    discovered: Option<Vec<Model>>,
+    commands_scan: Option<(PathBuf, PathBuf)>,
     interrupt_grace: Duration,
     kill_grace: Duration,
     stderr_tail: crate::StderrTail,
+}
+
+fn model_argument_for(
+    model: &str,
+    options: &serde_json::Map<String, Value>,
+    discovered: Option<&[Model]>,
+) -> String {
+    let choice = options
+        .get(catalog::CONTEXT_WINDOW_OPTION)
+        .and_then(Value::as_str);
+    catalog::model_argument(model, choice, discovered)
+}
+
+fn starts_parent_turn(frame: &Frame) -> bool {
+    match frame {
+        Frame::System(system) => system.subtype == "init",
+        Frame::StreamEvent(event) => event.parent_tool_use_id.is_none(),
+        Frame::Assistant(message) => message.parent_tool_use_id.is_none(),
+        _ => false,
+    }
+}
+
+fn report_commands(
+    initialize_response: Value,
+    project: PathBuf,
+    config_dir: PathBuf,
+    event_tx: mpsc::Sender<Result<AgentEvent, HarnessError>>,
+) {
+    if initialize_response.get("subtype").and_then(Value::as_str) == Some("error") {
+        log::debug!("claude did not list its commands: {initialize_response}");
+        return;
+    }
+    tokio::spawn(async move {
+        match listed_commands(&initialize_response, project, config_dir).await {
+            Ok(commands) => {
+                if event_tx
+                    .send(Ok(AgentEvent::AvailableCommands { commands }))
+                    .await
+                    .is_err()
+                {
+                    log::debug!("claude run consumer gone before its commands were reported");
+                }
+            }
+            Err(error) => log::debug!("couldn't list claude commands: {error}"),
+        }
+    });
+}
+
+/// Returns false when the consumer is gone.
+async fn release_held_done(
+    held_done: &mut Option<(AgentEvent, tokio::time::Instant)>,
+    pending_steers: &mut std::collections::VecDeque<String>,
+    norm: &mut Normalizer,
+    event_tx: &mpsc::Sender<Result<AgentEvent, HarnessError>>,
+) -> bool {
+    while pending_steers.pop_front().is_some() {
+        let (prev, next) = norm.rotate_for_steer();
+        let steered = AgentEvent::Steered {
+            assistant_message_id: Some(prev),
+            next_assistant_message_id: Some(next),
+        };
+        if event_tx.send(Ok(steered)).await.is_err() {
+            return false;
+        }
+    }
+    match held_done.take() {
+        Some((done, _)) => event_tx.send(Ok(done)).await.is_ok(),
+        None => true,
+    }
 }
 
 async fn run_session(session: Session) {
@@ -891,7 +996,10 @@ async fn run_session(session: Session) {
         stdin_tx,
         event_tx,
         controls,
-        reasoning,
+        mut reasoning,
+        mut model_argument,
+        discovered,
+        mut commands_scan,
         interrupt_grace,
         kill_grace,
         stderr_tail,
@@ -917,8 +1025,15 @@ async fn run_session(session: Session) {
     // Steers can be absorbed without a replay, so a held turn end must time out.
     const HELD_DONE_SETTLE: Duration = Duration::from_secs(5);
     let mut held_done: Option<(AgentEvent, tokio::time::Instant)> = None;
+    let mut turn_resumed_after_held_done = false;
     let mut done_after_interrupt = false;
     let mut escalation: Option<tokio::task::JoinHandle<()>> = None;
+    let mut turn_running = true;
+    let mut stopping_turn = false;
+    let mut stop_ack = None;
+    let mut stop_kill_starts_at = None;
+    let mut model_switched = false;
+    let mut request_tasks: Vec<tokio::task::AbortHandle> = Vec::new();
 
     'main: loop {
         tokio::select! {
@@ -940,6 +1055,21 @@ async fn run_session(session: Session) {
                         if event_tx.send(Ok(AgentEvent::Error { message })).await.is_err() { break 'main; }
                         continue;
                     }
+                    if model_switched
+                        && let Some(error) = wire::control_error(line, SET_MODEL_REQUEST_PREFIX)
+                    {
+                        let message = format!("{} {error}", t!("The selected model isn't available."));
+                        if event_tx.send(Ok(AgentEvent::Error { message })).await.is_err() { break 'main; }
+                        continue;
+                    }
+                    if commands_scan.is_some()
+                        && let Some(response) = wire::control_response_to(line, RUN_INITIALIZE_REQUEST)
+                    {
+                        if let Some((project, config_dir)) = commands_scan.take() {
+                            report_commands(response, project, config_dir, event_tx.clone());
+                        }
+                        continue;
+                    }
                     let frame = match wire::parse_frame(line) {
                         Ok(frame) => frame,
                         Err(e) => {
@@ -954,8 +1084,13 @@ async fn run_session(session: Session) {
                         }
                     };
                     if let Frame::ControlRequest(req) = frame {
-                        handle_control_request(req, skip_prompts, &request_input, &stdin_tx);
+                        request_tasks.retain(|task| !task.is_finished());
+                        request_tasks.extend(handle_control_request(req, skip_prompts, &request_input, &stdin_tx));
                         continue;
+                    }
+                    if starts_parent_turn(&frame) {
+                        turn_running = true;
+                        turn_resumed_after_held_done = held_done.is_some();
                     }
                     if let Frame::User(ref user) = frame {
                         if user.parent_tool_use_id.is_none()
@@ -980,7 +1115,7 @@ async fn run_session(session: Session) {
                             }
                         }
                     }
-                    for ev in norm.normalize(frame, interrupted) {
+                    for ev in norm.normalize(frame, interrupted || stopping_turn) {
                         match &ev {
                             AgentEvent::ToolCall { id, .. } => {
                                 open_tools.insert(id.clone());
@@ -993,22 +1128,41 @@ async fn run_session(session: Session) {
                         }
                         let is_done = matches!(ev, AgentEvent::Done { .. });
                         // A `now` steer ends the turn it interrupts with a result frame.
-                        if is_done && !interrupted && !pending_steers.is_empty() {
+                        if is_done && !interrupted && !stopping_turn && !pending_steers.is_empty() {
                             held_done =
                                 Some((ev, tokio::time::Instant::now() + HELD_DONE_SETTLE));
+                            turn_resumed_after_held_done = false;
                             continue;
                         }
                         if is_done {
                             held_done = None;
+                        }
+                        if is_done
+                            && stopping_turn
+                            && !interrupted
+                            && !crate::confirm_stop(&mut stop_ack, stop_kill_starts_at, &mut escalation)
+                        {
+                            interrupted = true;
                         }
                         if event_tx.send(Ok(ev)).await.is_err() {
                             break 'main;
                         }
                         if is_done {
                             any_done = true;
+                            turn_running = false;
                             if interrupted {
                                 done_after_interrupt = true;
                                 break 'main;
+                            }
+                            if std::mem::take(&mut stopping_turn) {
+                                if let Some(handle) = escalation.take() {
+                                    handle.abort();
+                                }
+                                pending_steers.clear();
+                                unrecorded_prompts.clear();
+                                for task in request_tasks.drain(..) {
+                                    task.abort();
+                                }
                             }
                         }
                     }
@@ -1022,8 +1176,44 @@ async fn run_session(session: Session) {
                 }
             },
 
-            steer = steering.recv(), if steering_open && !interrupted => match steer {
-                Some(msg) => {
+            steer = steering.recv(), if steering_open && !interrupted && !stopping_turn => match steer {
+                Some(Steer::StopTurn(_)) if !turn_running => {}
+                Some(Steer::StopTurn(ack)) if held_done.is_some() && !turn_resumed_after_held_done => {
+                    crate::acknowledge_stop(&mut Some(ack));
+                    if !release_held_done(&mut held_done, &mut pending_steers, &mut norm, &event_tx).await {
+                        break 'main;
+                    }
+                    any_done = true;
+                    turn_running = false;
+                    unrecorded_prompts.clear();
+                    for task in request_tasks.drain(..) {
+                        task.abort();
+                    }
+                }
+                Some(Steer::StopTurn(ack)) => {
+                    held_done = None;
+                    stopping_turn = true;
+                    stop_ack = Some(ack);
+                    stop_kill_starts_at = Some(tokio::time::Instant::now() + interrupt_grace);
+                    if stdin_tx.send(StdinMsg::Line(wire::interrupt_request_line("stop_1"))).is_err() {
+                        log::debug!("claude stdin closed before the turn stop was sent");
+                    }
+                    escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                }
+                Some(Steer::Message(msg)) => {
+                    if let Some(settings) = &msg.settings {
+                        reasoning = settings.reasoning;
+                        let wanted = settings.model.as_deref().map(|model| {
+                            model_argument_for(model, &settings.model_options, discovered.as_deref())
+                        });
+                        if let Some(wanted) = wanted.filter(|wanted| model_argument.as_ref() != Some(wanted)) {
+                            let id = format!("{SET_MODEL_REQUEST_PREFIX}{}", uuid::Uuid::new_v4());
+                            if stdin_tx.send(StdinMsg::Line(wire::set_model_line(&id, &wanted))).is_err() { break 'main; }
+                            model_argument = Some(wanted);
+                            model_switched = true;
+                        }
+                    }
+                    turn_running = true;
                     let id = uuid::Uuid::new_v4().to_string();
                     let (images, image_problems) = load_image_blocks(&msg.attachments).await;
                     for message in image_problems {
@@ -1066,24 +1256,19 @@ async fn run_session(session: Session) {
                 if stdin_tx.send(StdinMsg::Line(wire::interrupt_request_line("int_1"))).is_err() {
                     log::debug!("claude stdin closed before the interrupt was sent");
                 }
-                escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                if escalation.is_none() {
+                    escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                }
             },
 
             _ = tokio::time::sleep_until(
                 held_done.as_ref().map_or_else(tokio::time::Instant::now, |(_, d)| *d)
             ), if held_done.is_some() => {
-                while pending_steers.pop_front().is_some() {
-                    let (prev, next) = norm.rotate_for_steer();
-                    if event_tx.send(Ok(AgentEvent::Steered {
-                        assistant_message_id: Some(prev), next_assistant_message_id: Some(next),
-                    })).await.is_err() { break 'main; }
+                if !release_held_done(&mut held_done, &mut pending_steers, &mut norm, &event_tx).await {
+                    break 'main;
                 }
-                if let Some((done, _)) = held_done.take() {
-                    if event_tx.send(Ok(done)).await.is_err() {
-                        break 'main;
-                    }
-                    any_done = true;
-                }
+                any_done = true;
+                turn_running = turn_resumed_after_held_done;
             },
 
             _ = event_tx.closed() => break 'main,
@@ -1097,6 +1282,7 @@ async fn run_session(session: Session) {
         any_done = true;
     }
 
+    let interrupted = interrupted || stopping_turn;
     if !event_tx.is_closed() {
         if interrupted && !done_after_interrupt {
             if event_tx
@@ -1141,6 +1327,8 @@ type RequestInputFn = Box<
 >;
 
 const SET_MODE_REQUEST_PREFIX: &str = "wu-set-mode-";
+const SET_MODEL_REQUEST_PREFIX: &str = "wu-set-model-";
+const RUN_INITIALIZE_REQUEST: &str = "wu-run-initialize";
 
 /// Claude refuses `bypassPermissions` unless launched in it, so it asks instead and Wu approves.
 fn live_permission_mode_name(permission: PermissionMode, launched_bypass: bool) -> &'static str {
@@ -1182,30 +1370,27 @@ fn handle_control_request(
     skip_prompts: bool,
     request_input: &Arc<RequestInputFn>,
     stdin_tx: &mpsc::UnboundedSender<StdinMsg>,
-) {
+) -> Option<tokio::task::AbortHandle> {
     match req.request.subtype.as_str() {
         "can_use_tool" => {}
-        "elicitation" => {
-            answer_elicitation(req, request_input, stdin_tx);
-            return;
-        }
+        "elicitation" => return answer_elicitation(req, request_input, stdin_tx),
         subtype => {
             log::warn!("claude sent an unsupported {subtype} request; answering with an error");
             let error = format!("Wu can't answer {subtype} requests.");
             let line = control_error_line(&req.request_id, &error);
             stdin_tx.send(StdinMsg::Line(line)).ok();
-            return;
+            return None;
         }
     }
     if req.request.tool_name != "AskUserQuestion" {
         if skip_prompts {
             let line = control_response_line(&req.request_id, allow_response(req.request.input));
             stdin_tx.send(StdinMsg::Line(line)).ok();
-            return;
+            return None;
         }
         let request_input = Arc::clone(request_input);
         let stdin_tx = stdin_tx.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let question = permission_question(&req.request.tool_name, &req.request.input);
             // A dropped sender must deny, never allow.
             let answers = (request_input)(vec![question.clone()])
@@ -1226,11 +1411,11 @@ fn handle_control_request(
             let line = control_response_line(&req.request_id, response);
             stdin_tx.send(StdinMsg::Line(line)).ok();
         });
-        return;
+        return Some(task.abort_handle());
     }
     let request_input = Arc::clone(request_input);
     let stdin_tx = stdin_tx.clone();
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let request_id = req.request_id;
         let input = req.request.input;
         let questions = parse_questions(&input);
@@ -1242,6 +1427,7 @@ fn handle_control_request(
             log::debug!("claude stdin writer gone before the AskUserQuestion answer was sent");
         }
     });
+    Some(task.abort_handle())
 }
 
 fn elicitation_question(request: &ControlRequestBody) -> Option<UserInputQuestion> {
@@ -1279,7 +1465,7 @@ fn answer_elicitation(
     req: ControlRequestFrame,
     request_input: &Arc<RequestInputFn>,
     stdin_tx: &mpsc::UnboundedSender<StdinMsg>,
-) {
+) -> Option<tokio::task::AbortHandle> {
     let request_id = req.request_id;
     let Some(question) = elicitation_question(&req.request) else {
         log::warn!(
@@ -1291,11 +1477,11 @@ fn answer_elicitation(
         );
         let line = control_response_line(&request_id, serde_json::json!({ "action": "decline" }));
         stdin_tx.send(StdinMsg::Line(line)).ok();
-        return;
+        return None;
     };
     let request_input = Arc::clone(request_input);
     let stdin_tx = stdin_tx.clone();
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let answers = (request_input)(vec![question.clone()])
             .await
             .unwrap_or_default();
@@ -1318,6 +1504,7 @@ fn answer_elicitation(
             log::debug!("claude stdin writer gone before the elicitation answer was sent");
         }
     });
+    Some(task.abort_handle())
 }
 
 fn parse_questions(input: &Value) -> Vec<UserInputQuestion> {

@@ -4,8 +4,12 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
-- Add Antigravity as a coding agent.
+- Add support Antigravity.
 - Thinner, rounded scrollbar in the editor.
+- Much lower CPU use while agents are working, and smoother long chats.
+- Agents left idle for 15 minutes are terminated till the next message is sent.
+- Faster Git refresh and commit history in large repositories.
+- Faster search panel on files with very long lines.
 
 ## 1.4.0 - 2026-11-21
 

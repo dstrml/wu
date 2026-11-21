@@ -8,6 +8,14 @@ use std::time::Duration;
 use theme::ActiveTheme as _;
 use ui::{Clickable, IconName, IconSize, Toggleable, Tooltip, prelude::*};
 
+const WORKING_ANIMATION_FPS: f32 = 12.;
+
+pub(crate) fn working_animation(period: Duration) -> Animation {
+    Animation::new(period)
+        .repeat()
+        .with_max_fps(WORKING_ANIMATION_FPS)
+}
+
 pub(crate) fn ui(pixels_at_default: f32) -> Rems {
     rems(pixels_at_default / 16.0)
 }
@@ -308,7 +316,7 @@ fn logo_spinner(
                 )
                 .with_animation(
                     ElementId::Name(format!("{id}-{band}").into()),
-                    Animation::new(Duration::from_millis(GRADIENT_SPIN_MS)).repeat(),
+                    working_animation(Duration::from_millis(GRADIENT_SPIN_MS)),
                     move |band, delta| band.opacity(gspin_opacity(delta - phase, GSPIN_DIM)),
                 )
         }))

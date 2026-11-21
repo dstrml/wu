@@ -1,15 +1,15 @@
 use crate::{
     AgentChatSettings, AgentKind, ContinueSavedChat, NewAntigravityChat, NewClaudeChat,
     NewCodexChat, NewOpencodeChat, ToggleFocus,
-    chat_style::{accent, ink, selected_row, text_faint, ui, wash},
+    chat_style::{accent, ink, selected_row, text_faint, ui, wash, working_animation},
     chat_view::ChatView,
     session::{AgentSession, AgentStore, ChatListPrefs, ChatOutcome, SessionSummary},
 };
 use anyhow::Result;
-use collections::HashSet;
+use collections::{HashMap, HashSet};
 use editor::{Editor, EditorEvent};
 use gpui::{
-    Action, Animation, AnimationExt as _, AnyElement, App, AsyncWindowContext, Bounds, ClickEvent,
+    Action, AnimationExt as _, AnyElement, App, AsyncWindowContext, Bounds, ClickEvent,
     ClipboardItem, Context, CursorStyle, DismissEvent, EdgeFade, Element, ElementId, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, GlobalElementId, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, PromptButton,
@@ -23,6 +23,7 @@ use settings::{DockSide, Settings as _};
 use std::{
     cell::Cell,
     path::{Path, PathBuf},
+    rc::Rc,
     time::Duration,
 };
 use time::OffsetDateTime;
@@ -234,6 +235,7 @@ pub struct AgentPanel {
     row_menu: Option<RowMenu>,
     hovered_row: Option<SharedString>,
     list_scroll: ScrollHandle,
+    list_model: Option<ListModel>,
     showing_saved: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -246,46 +248,67 @@ impl AgentPanel {
         workspace.update_in(&mut cx, |workspace, window, cx| {
             let store = store_for(workspace, cx);
             let project = workspace.project().clone();
-            let workspace_entity = cx.entity();
-            let weak_workspace = workspace_entity.downgrade();
-            cx.new(|cx| {
-                let search = cx.new(|cx| {
-                    let mut editor = Editor::single_line(window, cx);
-                    editor.set_placeholder_text(&t!("Search chats…"), window, cx);
-                    editor.set_text_style_refinement(TextStyleRefinement {
-                        font_size: Some(ui(13.).into()),
-                        ..Default::default()
-                    });
-                    editor
-                });
-                Self {
-                    _subscriptions: vec![
-                        cx.observe(&store, |_, _, cx| cx.notify()),
-                        cx.observe(&project, |_, _, cx| cx.notify()),
-                        cx.subscribe(&search, |_, _, event: &EditorEvent, cx| {
-                            if matches!(event, EditorEvent::BufferEdited) {
-                                cx.notify();
-                            }
-                        }),
-                        cx.subscribe(&workspace_entity, |_, _, event: &workspace::Event, cx| {
-                            if matches!(event, workspace::Event::ActiveItemChanged) {
-                                cx.notify();
-                            }
-                        }),
-                    ],
-                    workspace: weak_workspace,
-                    project,
-                    store,
-                    focus_handle: cx.focus_handle(),
-                    search,
-                    renaming: None,
-                    row_menu: None,
-                    hovered_row: None,
-                    list_scroll: ScrollHandle::new(),
-                    showing_saved: false,
-                }
-            })
+            let workspace = cx.entity();
+            cx.new(|cx| Self::new(store, project, workspace, window, cx))
         })
+    }
+
+    fn new(
+        store: Entity<AgentStore>,
+        project: Entity<Project>,
+        workspace: Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let search = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(&t!("Search chats…"), window, cx);
+            editor.set_text_style_refinement(TextStyleRefinement {
+                font_size: Some(ui(13.).into()),
+                ..Default::default()
+            });
+            editor
+        });
+        Self {
+            _subscriptions: vec![
+                cx.observe(&store, |this, _, cx| {
+                    this.list_model = None;
+                    cx.notify();
+                }),
+                cx.observe(&project, |this, project, cx| {
+                    let same_roots = this
+                        .list_model
+                        .as_ref()
+                        .is_some_and(|model| model.roots == chat_roots(&project, cx));
+                    if !same_roots {
+                        this.list_model = None;
+                        cx.notify();
+                    }
+                }),
+                cx.subscribe(&search, |this, _, event: &EditorEvent, cx| {
+                    if matches!(event, EditorEvent::BufferEdited) {
+                        this.list_model = None;
+                        cx.notify();
+                    }
+                }),
+                cx.subscribe(&workspace, |_, _, event: &workspace::Event, cx| {
+                    if matches!(event, workspace::Event::ActiveItemChanged) {
+                        cx.notify();
+                    }
+                }),
+            ],
+            workspace: workspace.downgrade(),
+            project,
+            store,
+            focus_handle: cx.focus_handle(),
+            search,
+            renaming: None,
+            row_menu: None,
+            hovered_row: None,
+            list_scroll: ScrollHandle::new(),
+            list_model: None,
+            showing_saved: false,
+        }
     }
 
     fn open_session(&mut self, id: SharedString, window: &mut Window, cx: &mut Context<Self>) {
@@ -824,23 +847,22 @@ impl AgentPanel {
 
     fn render_session(
         &self,
-        session: SessionSummary,
-        nested: bool,
-        now: i64,
+        row: &RowModel,
         compact: bool,
         selected: bool,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let id: SharedString = session.id.clone().into();
+        let session = &row.session;
+        let id = row.id.clone();
         let colors = cx.theme().colors();
         let text = colors.text;
         let subline = colors.text_muted.opacity(0.5);
         let time_color = colors.text_muted.opacity(0.8);
         let hovered = self.hovered_row.as_ref() == Some(&id);
-        let status = RowStatus::of(&session);
+        let status = RowStatus::of(session);
         let status_color = status.color(cx);
-        let time_ago: SharedString = format_time_ago(session.updated_at, now).into();
-        let branch = session.branch.clone().map(SharedString::from);
+        let time_ago = row.time_ago.clone();
+        let branch = row.branch.clone();
         let row_height = row_height(compact, branch.is_some());
         let renaming = self.renaming.as_ref().filter(
             |field| matches!(&field.target, Renaming::Chat(renaming_id) if *renaming_id == id),
@@ -849,10 +871,7 @@ impl AgentPanel {
         let menu_session = session.clone();
         let status_glyph = || -> AnyElement {
             match status {
-                RowStatus::Working => {
-                    mini_spinner(format!("agent-session-working-{id}").into(), cx)
-                        .into_any_element()
-                }
+                RowStatus::Working => mini_spinner(row.spinner_id.clone(), cx).into_any_element(),
                 RowStatus::Done => {
                     glyph(IconName::AgentCheck, 11., status_color).into_any_element()
                 }
@@ -921,7 +940,7 @@ impl AgentPanel {
         let title_content = match renaming {
             Some(field) => self.rename_field(&field.editor, cx),
             None => faded_label(
-                SharedString::from(format!("agent-session-title-{id}")),
+                row.title_id.clone(),
                 true,
                 div().text_size(ui(13.)).line_height(px(17.)).child(title),
             )
@@ -933,8 +952,8 @@ impl AgentPanel {
             colors.element_hover
         };
         let rest_text = if selected { text } else { text.opacity(0.8) };
-        let row = div()
-            .id(SharedString::from(format!("agent-session-row-{id}")))
+        let row_element = div()
+            .id(row.row_id.clone())
             .h(px(row_height))
             .flex()
             .flex_col()
@@ -1002,7 +1021,7 @@ impl AgentPanel {
                         .gap(px(4.))
                         .child(glyph(IconName::AgentGitBranch, 11., subline))
                         .child(faded_label(
-                            SharedString::from(format!("agent-session-branch-{id}")),
+                            row.branch_id.clone(),
                             false,
                             div()
                                 .text_size(ui(11.))
@@ -1013,33 +1032,29 @@ impl AgentPanel {
                         .child(div().flex_1().min_w_0()),
                 )
             });
-        if nested {
+        if row.nested {
             div()
                 .pl(px(HARNESS_ICON_SIZE + SPACE_SM))
-                .child(row)
+                .child(row_element)
                 .into_any_element()
         } else {
-            row.into_any_element()
+            row_element.into_any_element()
         }
     }
 
-    fn section_header(
-        &self,
-        key: SharedString,
-        label: SharedString,
-        collapsed: bool,
-        cx: &Context<Self>,
-    ) -> AnyElement {
+    fn section_header(&self, group: &GroupModel, cx: &Context<Self>) -> AnyElement {
         let colors = cx.theme().colors();
         let faint = colors.text_muted.opacity(0.5);
+        let key = group.key.clone();
+        let collapsed = group.collapsed;
         let label_element = faded_label(
-            SharedString::from(format!("{key}-label")),
+            group.label_id.clone(),
             false,
             div()
                 .text_size(ui(12.))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(faint)
-                .child(label),
+                .child(group.label.clone()),
         );
         h_flex()
             .id(key.clone())
@@ -1050,25 +1065,22 @@ impl AgentPanel {
             .child(label_element)
             .child(div().flex_1())
             .child(disclosure_chevron(!collapsed, faint))
-            .on_click(cx.listener({
+            .on_click(cx.listener(move |this, _, _, cx| {
                 let key = key.to_string();
-                move |this, _, _, cx| {
-                    let key = key.clone();
-                    this.store.update(cx, |store, cx| {
-                        store.update_list_prefs(
-                            |prefs| {
-                                if let Some(position) =
-                                    prefs.collapsed_sections.iter().position(|id| *id == key)
-                                {
-                                    prefs.collapsed_sections.remove(position);
-                                } else {
-                                    prefs.collapsed_sections.push(key);
-                                }
-                            },
-                            cx,
-                        )
-                    })
-                }
+                this.store.update(cx, |store, cx| {
+                    store.update_list_prefs(
+                        |prefs| {
+                            if let Some(position) =
+                                prefs.collapsed_sections.iter().position(|id| *id == key)
+                            {
+                                prefs.collapsed_sections.remove(position);
+                            } else {
+                                prefs.collapsed_sections.push(key);
+                            }
+                        },
+                        cx,
+                    )
+                })
             }))
             .into_any_element()
     }
@@ -1090,48 +1102,170 @@ impl AgentPanel {
                 .is_some_and(|branch| branch.to_lowercase().contains(query))
     }
 
-    fn render_list(&self, cx: &Context<Self>) -> ChatList {
+    fn build_list_model(&self, now: i64, cx: &App) -> ListModel {
         let roots = chat_roots(&self.project, cx);
         let store = self.store.read(cx);
-        let prefs = store.list_prefs().clone();
+        let prefs = store.list_prefs();
         let query = self.search.read(cx).text(cx).trim().to_lowercase();
         let searching = !query.is_empty();
-        let sessions: Vec<SessionSummary> = store
-            .sessions_in(&roots, cx)
+        let in_roots = store.sessions_in(&roots, cx);
+        let has_any = !in_roots.is_empty();
+        let sessions: Vec<Rc<SessionSummary>> = in_roots
             .into_iter()
             .filter(|session| Self::matches_search(session, &query))
+            .map(Rc::new)
             .collect();
-        let layout = layout_list(&sessions, &prefs, searching);
-        let rendered_rows: HashSet<String> = layout
-            .active
-            .iter()
-            .flat_map(|group| group.rows.iter().map(|row| row.session.id.clone()))
-            .collect();
-        let row_context = RowContext {
-            now: OffsetDateTime::now_utc().unix_timestamp(),
-            compact: prefs.compact_rows,
-            active_id: self.active_chat_id(cx),
-        };
-        let active = layout
+        let groups: Vec<GroupModel> = layout_list(&sessions, prefs, searching)
             .active
             .into_iter()
             .enumerate()
-            .map(|(index, group)| self.render_group(group, index > 0, &row_context, cx))
+            .map(|(index, group)| GroupModel::new(group, index > 0, now))
             .collect();
-        ChatList {
-            active,
+        let row_ids = groups
+            .iter()
+            .flat_map(|group| group.rows.iter().map(|row| row.id.clone()))
+            .collect();
+        ListModel {
+            roots,
+            language: i18n::language(),
+            has_any,
             searching,
-            rendered_rows,
+            compact: prefs.compact_rows,
+            groups,
+            row_ids,
         }
+    }
+
+    fn refresh_list_model(&mut self, now: i64, cx: &App) {
+        let language = i18n::language();
+        if self
+            .list_model
+            .as_ref()
+            .is_none_or(|model| model.language != language)
+        {
+            self.list_model = Some(self.build_list_model(now, cx));
+        }
+        let Some(model) = &mut self.list_model else {
+            return;
+        };
+        model.refresh_time_labels(now);
+        if self
+            .hovered_row
+            .as_ref()
+            .is_some_and(|id| !model.row_ids.contains(id))
+        {
+            self.hovered_row = None;
+        }
+    }
+
+    fn render_list(&self, model: &ListModel, cx: &Context<Self>) -> AnyElement {
+        let active: Option<AnyElement> = if model.groups.is_empty() {
+            Some(
+                div()
+                    .px(px(SPACE_SM))
+                    .pb(px(SPACE_SM))
+                    .text_size(ui(12.))
+                    .text_color(text_faint(cx))
+                    .child(if model.searching {
+                        t!("No matching chats")
+                    } else {
+                        t!("No chats yet")
+                    })
+                    .into_any_element(),
+            )
+        } else {
+            let active_id = self.active_chat_id(cx);
+            Some(
+                v_flex()
+                    .gap(px(LIST_GAP))
+                    .pb(px(SPACE_SM))
+                    .children(model.groups.iter().map(|group| {
+                        self.render_group(group, model.compact, active_id.as_deref(), cx)
+                    }))
+                    .into_any_element(),
+            )
+        };
+        faded_list(
+            &self.list_scroll,
+            v_flex()
+                .id("agent-sessions")
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&self.list_scroll)
+                .px(px(SPACE_SM))
+                .pt(px(LIST_PAD_TOP))
+                .children(active),
+        )
+        .into_any_element()
     }
 
     fn render_group(
         &self,
-        group: ListGroup,
-        follows_group: bool,
-        row_context: &RowContext,
+        group: &GroupModel,
+        compact: bool,
+        active_id: Option<&str>,
         cx: &Context<Self>,
     ) -> AnyElement {
+        let header = self.section_header(group, cx);
+        let section = v_flex()
+            .id(group.section_id.clone())
+            .w_full()
+            .rounded(px(8.))
+            .child(header)
+            .when(!group.rows.is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .w_full()
+                        .pt(px(DISCLOSURE_BODY_INSET))
+                        .gap(px(LIST_GAP))
+                        .children(group.rows.iter().map(|row| {
+                            let selected = active_id == Some(row.session.id.as_str());
+                            self.render_session(row, compact, selected, cx)
+                        })),
+                )
+            });
+        div()
+            .w_full()
+            .when(group.top_gap, |this| this.pt(px(SECTION_GAP)))
+            .child(section)
+            .into_any_element()
+    }
+}
+
+struct ListModel {
+    roots: Vec<PathBuf>,
+    language: i18n::Language,
+    has_any: bool,
+    searching: bool,
+    compact: bool,
+    groups: Vec<GroupModel>,
+    row_ids: HashSet<SharedString>,
+}
+
+impl ListModel {
+    fn refresh_time_labels(&mut self, now: i64) {
+        for row in self.groups.iter_mut().flat_map(|group| &mut group.rows) {
+            let elapsed_minutes = elapsed_minutes(row.session.updated_at, now);
+            if elapsed_minutes != row.elapsed_minutes {
+                row.elapsed_minutes = elapsed_minutes;
+                row.time_ago = format_time_ago(row.session.updated_at, now).into();
+            }
+        }
+    }
+}
+
+struct GroupModel {
+    key: SharedString,
+    section_id: SharedString,
+    label_id: SharedString,
+    label: SharedString,
+    collapsed: bool,
+    top_gap: bool,
+    rows: Vec<RowModel>,
+}
+
+impl GroupModel {
+    fn new(group: ListGroup, follows_group: bool, now: i64) -> Self {
         let collapsed = group.collapsed;
         let (key, label, top_gap): (SharedString, SharedString, bool) = match &group.kind {
             GroupKind::Pinned => (
@@ -1150,54 +1284,51 @@ impl AgentPanel {
                 follows_group,
             ),
         };
-        let header = self.section_header(key.clone(), label, collapsed, cx);
-        let body: Vec<AnyElement> = group
-            .rows
-            .iter()
-            .map(|row| {
-                let selected = row_context.active_id.as_deref() == Some(row.session.id.as_str());
-                self.render_session(
-                    row.session.clone(),
-                    row.nested,
-                    row_context.now,
-                    row_context.compact,
-                    selected,
-                    cx,
-                )
-            })
-            .collect();
-        let section = v_flex()
-            .id(SharedString::from(format!("{key}-section")))
-            .w_full()
-            .rounded(px(8.))
-            .child(header)
-            .when(!body.is_empty(), |this| {
-                this.child(
-                    v_flex()
-                        .w_full()
-                        .pt(px(DISCLOSURE_BODY_INSET))
-                        .gap(px(LIST_GAP))
-                        .children(body),
-                )
-            });
-        div()
-            .w_full()
-            .when(top_gap, |this| this.pt(px(SECTION_GAP)))
-            .child(section)
-            .into_any_element()
+        Self {
+            section_id: format!("{key}-section").into(),
+            label_id: format!("{key}-label").into(),
+            key,
+            label,
+            collapsed,
+            top_gap,
+            rows: group
+                .rows
+                .into_iter()
+                .map(|row| RowModel::new(row.session.clone(), row.nested, now))
+                .collect(),
+        }
     }
 }
 
-struct ChatList {
-    active: Vec<AnyElement>,
-    searching: bool,
-    rendered_rows: HashSet<String>,
+struct RowModel {
+    session: Rc<SessionSummary>,
+    nested: bool,
+    id: SharedString,
+    branch: Option<SharedString>,
+    row_id: SharedString,
+    title_id: SharedString,
+    branch_id: SharedString,
+    spinner_id: SharedString,
+    elapsed_minutes: i64,
+    time_ago: SharedString,
 }
 
-struct RowContext {
-    now: i64,
-    compact: bool,
-    active_id: Option<String>,
+impl RowModel {
+    fn new(session: Rc<SessionSummary>, nested: bool, now: i64) -> Self {
+        let id = &session.id;
+        Self {
+            id: id.clone().into(),
+            branch: session.branch.clone().map(SharedString::from),
+            row_id: format!("agent-session-row-{id}").into(),
+            title_id: format!("agent-session-title-{id}").into(),
+            branch_id: format!("agent-session-branch-{id}").into(),
+            spinner_id: format!("agent-session-working-{id}").into(),
+            elapsed_minutes: elapsed_minutes(session.updated_at, now),
+            time_ago: format_time_ago(session.updated_at, now).into(),
+            nested,
+            session,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1215,7 +1346,7 @@ struct ListGroup<'a> {
 }
 
 struct ListRow<'a> {
-    session: &'a SessionSummary,
+    session: &'a Rc<SessionSummary>,
     nested: bool,
 }
 
@@ -1228,42 +1359,45 @@ fn needs_attention(session: &SessionSummary) -> bool {
 }
 
 fn layout_list<'a>(
-    sessions: &'a [SessionSummary],
+    sessions: &'a [Rc<SessionSummary>],
     prefs: &ChatListPrefs,
     searching: bool,
 ) -> ListLayout<'a> {
     let is_collapsed = |key: &str| prefs.collapsed_sections.iter().any(|id| id == key);
-    let children_of = |parent: &SessionSummary| -> Vec<&'a SessionSummary> {
-        sessions
-            .iter()
-            .filter(|session| {
-                session.side_chat && session.parent_id.as_deref() == Some(parent.id.as_str())
-            })
-            .collect()
-    };
-    let is_top_level = |session: &SessionSummary| {
-        !(session.side_chat
-            && session
-                .parent_id
-                .as_ref()
-                .is_some_and(|parent| sessions.iter().any(|other| other.id == *parent)))
-    };
-    let group = |kind: GroupKind, members: &[&'a SessionSummary], collapsed: bool| {
+    let ids: HashSet<&str> = sessions.iter().map(|session| session.id.as_str()).collect();
+    let mut side_chats: HashMap<&str, Vec<&'a Rc<SessionSummary>>> = HashMap::default();
+    let mut pinned = Vec::new();
+    let mut rest = Vec::new();
+    for session in sessions {
+        let shown_parent = session
+            .parent_id
+            .as_deref()
+            .filter(|parent| session.side_chat && ids.contains(parent));
+        match shown_parent {
+            Some(parent) => side_chats.entry(parent).or_default().push(session),
+            None if session.pinned => pinned.push(session),
+            None => rest.push(session),
+        }
+    }
+    let group = |kind: GroupKind, members: Vec<&'a Rc<SessionSummary>>, collapsed: bool| {
         let collapsed = collapsed && !searching;
         let mut rows = Vec::new();
-        for &session in members {
-            let mut children = children_of(session);
-            if collapsed {
-                children.retain(|child| needs_attention(child));
-                if !needs_attention(session) && children.is_empty() {
-                    continue;
-                }
+        for &session in &members {
+            let children = side_chats
+                .get(session.id.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .copied()
+                .filter(|child| !collapsed || needs_attention(child));
+            if collapsed && !needs_attention(session) && children.clone().next().is_none() {
+                continue;
             }
             rows.push(ListRow {
                 session,
                 nested: false,
             });
-            rows.extend(children.into_iter().map(|session| ListRow {
+            rows.extend(children.map(|session| ListRow {
                 session,
                 nested: true,
             }));
@@ -1275,45 +1409,32 @@ fn layout_list<'a>(
             rows,
         }
     };
-    let live: Vec<&SessionSummary> = sessions
-        .iter()
-        .filter(|session| is_top_level(session))
-        .collect();
     let mut active = Vec::new();
-    let pinned: Vec<&SessionSummary> = live
-        .iter()
-        .copied()
-        .filter(|session| session.pinned)
-        .collect();
     if !pinned.is_empty() {
-        active.push(group(GroupKind::Pinned, &pinned, is_collapsed(PINNED_KEY)));
+        active.push(group(GroupKind::Pinned, pinned, is_collapsed(PINNED_KEY)));
     }
-    let rest: Vec<&SessionSummary> = live
-        .iter()
-        .copied()
-        .filter(|session| !session.pinned)
-        .collect();
     if prefs.group_by_project && !rest.is_empty() {
-        let mut projects: Vec<&Path> = Vec::new();
-        for session in &rest {
-            if !projects.contains(&session.project_root.as_path()) {
-                projects.push(&session.project_root);
+        let mut project_positions: HashMap<&Path, usize> = HashMap::default();
+        let mut projects: Vec<(&Path, Vec<&'a Rc<SessionSummary>>)> = Vec::new();
+        for session in rest {
+            let project = session.project_root.as_path();
+            let position = *project_positions.entry(project).or_insert_with(|| {
+                projects.push((project, Vec::new()));
+                projects.len() - 1
+            });
+            if let Some((_, members)) = projects.get_mut(position) {
+                members.push(session);
             }
         }
-        for project in projects {
-            let members: Vec<&SessionSummary> = rest
-                .iter()
-                .copied()
-                .filter(|session| session.project_root == project)
-                .collect();
+        for (project, members) in projects {
             active.push(group(
                 GroupKind::Project(project.to_path_buf()),
-                &members,
+                members,
                 is_collapsed(&project_key(project)),
             ));
         }
     } else if !rest.is_empty() {
-        active.push(group(GroupKind::Chats, &rest, is_collapsed(CHATS_KEY)));
+        active.push(group(GroupKind::Chats, rest, is_collapsed(CHATS_KEY)));
     }
     ListLayout { active }
 }
@@ -1369,12 +1490,15 @@ fn row_height(compact: bool, shows_branch: bool) -> f32 {
     if shows_branch && !compact { 45. } else { 29. }
 }
 
+fn elapsed_minutes(then: i64, now: i64) -> i64 {
+    (now - then).max(0) / 60
+}
+
 pub(crate) fn format_time_ago(then: i64, now: i64) -> String {
-    let seconds = (now - then).max(0);
-    if seconds < 60 {
+    let minutes = elapsed_minutes(then, now);
+    if minutes < 1 {
         return t!("now").to_string();
     }
-    let minutes = seconds / 60;
     if minutes < 60 {
         return t!("{count}m", count = minutes).to_string();
     }
@@ -1486,13 +1610,14 @@ fn mini_spinner(id: SharedString, cx: &App) -> impl IntoElement {
                     .gap(px(SPINNER_CELL / 2.))
                     .children(ring.iter().enumerate().map(move |(column, position)| {
                         let phase = position / ring_length;
+                        let cell = (row * ring.len() + column) as u64;
                         div()
                             .size(px(SPINNER_CELL))
                             .rounded(px(SPINNER_CELL / 2.))
                             .bg(tint)
                             .with_animation(
-                                ElementId::Name(format!("{id}-{row}-{column}").into()),
-                                Animation::new(SPINNER_PERIOD).repeat(),
+                                ElementId::NamedInteger(id.clone(), cell),
+                                working_animation(SPINNER_PERIOD),
                                 move |cell, delta| cell.opacity(spinner_opacity(delta + phase)),
                             )
                     }))
@@ -1748,59 +1873,14 @@ impl Focusable for AgentPanel {
 
 impl Render for AgentPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let list = self.render_list(cx);
-        if self
-            .hovered_row
-            .as_ref()
-            .is_some_and(|id| !list.rendered_rows.contains(id.as_ref()))
-        {
-            self.hovered_row = None;
-        }
-        let has_any = !self
-            .store
-            .read(cx)
-            .sessions_in(&chat_roots(&self.project, cx), cx)
-            .is_empty();
         let body: AnyElement = if self.showing_saved {
             self.render_saved_messages(cx)
-        } else if has_any {
-            let active: Option<AnyElement> = if list.active.is_empty() {
-                Some(
-                    div()
-                        .px(px(SPACE_SM))
-                        .pb(px(SPACE_SM))
-                        .text_size(ui(12.))
-                        .text_color(text_faint(cx))
-                        .child(if list.searching {
-                            t!("No matching chats")
-                        } else {
-                            t!("No chats yet")
-                        })
-                        .into_any_element(),
-                )
-            } else {
-                Some(
-                    v_flex()
-                        .gap(px(LIST_GAP))
-                        .pb(px(SPACE_SM))
-                        .children(list.active)
-                        .into_any_element(),
-                )
-            };
-            faded_list(
-                &self.list_scroll,
-                v_flex()
-                    .id("agent-sessions")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.list_scroll)
-                    .px(px(SPACE_SM))
-                    .pt(px(LIST_PAD_TOP))
-                    .children(active),
-            )
-            .into_any_element()
         } else {
-            self.render_empty_state(cx).into_any_element()
+            self.refresh_list_model(OffsetDateTime::now_utc().unix_timestamp(), cx);
+            match &self.list_model {
+                Some(model) if model.has_any => self.render_list(model, cx),
+                _ => self.render_empty_state(cx).into_any_element(),
+            }
         };
         v_flex()
             .id("agent-panel")
@@ -1947,6 +2027,10 @@ mod tests {
         }
     }
 
+    fn shared(sessions: Vec<SessionSummary>) -> Vec<Rc<SessionSummary>> {
+        sessions.into_iter().map(Rc::new).collect()
+    }
+
     fn row_ids(group: &ListGroup) -> Vec<String> {
         group
             .rows
@@ -1969,7 +2053,7 @@ mod tests {
             unseen: true,
             ..session("unseen", "/a")
         };
-        let sessions = vec![working, session("idle", "/a"), waiting, unseen];
+        let sessions = shared(vec![working, session("idle", "/a"), waiting, unseen]);
         let prefs = ChatListPrefs {
             collapsed_sections: vec![CHATS_KEY.to_string()],
             ..ChatListPrefs::default()
@@ -1995,7 +2079,7 @@ mod tests {
     #[test]
     fn search_hides_the_chats_group_without_matches() {
         let prefs = ChatListPrefs::default();
-        let sessions = vec![session("loose", "/a")];
+        let sessions = shared(vec![session("loose", "/a")]);
 
         let matching = layout_list(&sessions, &prefs, true);
         let kinds: Vec<&GroupKind> = matching.active.iter().map(|group| &group.kind).collect();
@@ -2003,6 +2087,118 @@ mod tests {
 
         let no_match = layout_list(&[], &prefs, true);
         assert!(no_match.active.is_empty());
+    }
+
+    #[test]
+    fn side_chats_sit_under_their_parent_and_projects_keep_their_order() {
+        let side_chat = |id: &str, parent: &str| SessionSummary {
+            side_chat: true,
+            parent_id: Some(parent.to_string()),
+            ..session(id, "/a")
+        };
+        let pinned = SessionSummary {
+            pinned: true,
+            ..session("pinned", "/b")
+        };
+        let sessions = shared(vec![
+            session("a1", "/a"),
+            side_chat("a1-side", "a1"),
+            session("b1", "/b"),
+            pinned,
+            side_chat("orphan", "gone"),
+            side_chat("pinned-side", "pinned"),
+            session("a2", "/a"),
+        ]);
+        let prefs = ChatListPrefs {
+            group_by_project: true,
+            ..ChatListPrefs::default()
+        };
+
+        let layout = layout_list(&sessions, &prefs, false);
+        let groups: Vec<(GroupKind, Vec<String>)> = layout
+            .active
+            .iter()
+            .map(|group| (group.kind.clone(), row_ids(group)))
+            .collect();
+        let ids = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            groups,
+            [
+                (GroupKind::Pinned, ids(&["pinned", "pinned-side"])),
+                (
+                    GroupKind::Project("/a".into()),
+                    ids(&["a1", "a1-side", "orphan", "a2"])
+                ),
+                (GroupKind::Project("/b".into()), ids(&["b1"])),
+            ]
+        );
+        let nested: Vec<&str> = layout
+            .active
+            .iter()
+            .flat_map(|group| &group.rows)
+            .filter(|row| row.nested)
+            .map(|row| row.session.id.as_str())
+            .collect();
+        assert_eq!(nested, ["pinned-side", "a1-side"]);
+    }
+
+    #[gpui::test]
+    async fn the_list_is_rebuilt_only_when_what_it_shows_changes(cx: &mut gpui::TestAppContext) {
+        use crate::session::tests::{feed_events, new_store};
+        use agent_harness::AgentEvent;
+
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        let project = Project::test(project::FakeFs::new(cx.executor()), [], cx).await;
+        let (multi_workspace, cx) = cx.add_window_view(|window, cx| {
+            workspace::MultiWorkspace::test_new(project.clone(), window, cx)
+        });
+        let workspace = multi_workspace.read_with(cx, |multi, _| multi.workspace().clone());
+        let panel = workspace.update_in(cx, |workspace, window, cx| {
+            let project = workspace.project().clone();
+            let workspace = cx.entity();
+            cx.new(|cx| AgentPanel::new(store.clone(), project, workspace, window, cx))
+        });
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, paths::home_dir().clone(), cx)
+        });
+        let text = |text: &str| vec![AgentEvent::TextDelta { text: text.into() }];
+        let rows = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            panel.update(cx, |panel, cx| {
+                panel.refresh_list_model(0, cx);
+                let model = panel.list_model.as_ref().expect("list model");
+                assert!(model.has_any);
+                model
+                    .groups
+                    .iter()
+                    .flat_map(|group| group.rows.iter().map(|row| row.session.clone()))
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        feed_events(&session, text("one"), cx);
+        let working = rows(cx);
+        assert_eq!(working.len(), 1);
+        assert!(working[0].working);
+
+        feed_events(&session, text(" two"), cx);
+        let streaming = rows(cx);
+        assert!(
+            Rc::ptr_eq(&working[0], &streaming[0]),
+            "streamed text does not rebuild the list"
+        );
+
+        panel.update_in(cx, |panel, window, cx| {
+            panel
+                .search
+                .update(cx, |search, cx| search.set_text("no such chat", window, cx))
+        });
+        assert!(rows(cx).is_empty(), "a search rebuilds the list");
     }
 
     #[test]

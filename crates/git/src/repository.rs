@@ -1229,6 +1229,7 @@ pub struct RealGitRepository {
     pub system_git_binary_path: Option<PathBuf>,
     pub any_git_binary_path: PathBuf,
     any_git_binary_help_output: Arc<Mutex<Option<SharedString>>>,
+    untracked_diff_stat_cache: Arc<Mutex<UntrackedDiffStatCache>>,
     executor: BackgroundExecutor,
     is_trusted: Arc<AtomicBool>,
 }
@@ -1319,6 +1320,7 @@ impl RealGitRepository {
             any_git_binary_path,
             executor,
             any_git_binary_help_output: Arc::new(Mutex::new(None)),
+            untracked_diff_stat_cache: Arc::default(),
             is_trusted: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -2701,6 +2703,7 @@ impl GitRepository for RealGitRepository {
         let path_prefixes = path_prefixes.to_vec();
         let git_binary = self.git_binary_in_worktree();
         let working_directory = self.working_directory();
+        let untracked_diff_stat_cache = self.untracked_diff_stat_cache.clone();
 
         self.executor
             .spawn(async move {
@@ -2709,8 +2712,13 @@ impl GitRepository for RealGitRepository {
                 if diff == DiffStatType::HeadToIndex {
                     return Ok(stat);
                 }
-                let untracked =
-                    untracked_diff_stats(&git_binary, &working_directory?, &path_prefixes).await?;
+                let untracked = untracked_diff_stats(
+                    &git_binary,
+                    &working_directory?,
+                    &path_prefixes,
+                    &untracked_diff_stat_cache,
+                )
+                .await?;
                 Ok(crate::status::merge_untracked_stats(&stat, &untracked))
             })
             .boxed()
@@ -2723,6 +2731,7 @@ impl GitRepository for RealGitRepository {
         let path_prefixes = path_prefixes.to_vec();
         let git_binary = self.git_binary_in_worktree();
         let working_directory = self.working_directory();
+        let untracked_diff_stat_cache = self.untracked_diff_stat_cache.clone();
 
         self.executor
             .spawn(async move {
@@ -2733,7 +2742,12 @@ impl GitRepository for RealGitRepository {
                         numstat(&git_binary, DiffStatType::HeadToWorktree, &path_prefixes),
                         numstat(&git_binary, DiffStatType::HeadToIndex, &path_prefixes),
                         numstat(&git_binary, DiffStatType::IndexToWorktree, &path_prefixes),
-                        untracked_diff_stats(&git_binary, &working_directory, &path_prefixes),
+                        untracked_diff_stats(
+                            &git_binary,
+                            &working_directory,
+                            &path_prefixes,
+                            &untracked_diff_stat_cache,
+                        ),
                     )
                     .await?;
                 Ok(crate::status::GitDiffStats {
@@ -3952,7 +3966,44 @@ fn parse_initial_graph_output<'a>(
 }
 
 const MAX_UNTRACKED_DIFF_STAT_FILE_SIZE: u64 = 2 * 1024 * 1024;
+const MAX_UNTRACKED_DIFF_STAT_FILES_READ_PER_SCAN: usize = 1000;
+const MAX_UNTRACKED_DIFF_STAT_BYTES_READ_PER_SCAN: u64 = 32 * 1024 * 1024;
 const BINARY_CHECK_LENGTH: usize = 8000;
+
+#[derive(Default)]
+struct UntrackedDiffStatCache {
+    entries: HashMap<RepoPath, CachedUntrackedDiffStat>,
+}
+
+#[derive(Clone, Copy)]
+struct CachedUntrackedDiffStat {
+    modified_at: SystemTime,
+    size: u64,
+    diff_stat: Option<crate::status::DiffStat>,
+}
+
+struct UntrackedDiffStatBudget {
+    files: usize,
+    bytes: u64,
+}
+
+impl UntrackedDiffStatBudget {
+    fn per_scan() -> Self {
+        Self {
+            files: MAX_UNTRACKED_DIFF_STAT_FILES_READ_PER_SCAN,
+            bytes: MAX_UNTRACKED_DIFF_STAT_BYTES_READ_PER_SCAN,
+        }
+    }
+
+    fn try_spend(&mut self, file_size: u64) -> bool {
+        if self.files == 0 || self.bytes < file_size {
+            return false;
+        }
+        self.files -= 1;
+        self.bytes -= file_size;
+        true
+    }
+}
 
 async fn numstat(
     git_binary: &GitBinary,
@@ -3988,6 +4039,7 @@ async fn untracked_diff_stats(
     git_binary: &GitBinary,
     working_directory: &Path,
     path_prefixes: &[RepoPath],
+    cache: &Mutex<UntrackedDiffStatCache>,
 ) -> Result<Vec<(RepoPath, crate::status::DiffStat)>> {
     let mut args: Vec<String> = vec![
         "ls-files".into(),
@@ -4004,18 +4056,26 @@ async fn untracked_diff_stats(
         );
     }
     let output = git_binary.run_lossy(&args).await?;
+    let mut budget = UntrackedDiffStatBudget::per_scan();
+    let mut listed_paths = HashSet::new();
     let mut entries = Vec::new();
     for path in output.split('\0').filter(|path| !path.is_empty()) {
         let Ok(repo_path) = RepoPath::new(path) else {
             continue;
         };
         let absolute_path = working_directory.join(repo_path.as_std_path());
-        match untracked_file_diff_stat(&absolute_path).await {
-            Ok(Some(stat)) => entries.push((repo_path, stat)),
+        match untracked_file_diff_stat(&repo_path, &absolute_path, cache, &mut budget).await {
+            Ok(Some(stat)) => entries.push((repo_path.clone(), stat)),
             Ok(None) => {}
             Err(error) => log::debug!("failed to read untracked file {absolute_path:?}: {error:#}"),
         }
+        listed_paths.insert(repo_path);
     }
+    cache.lock().entries.retain(|path, _| {
+        let was_scanned =
+            path_prefixes.is_empty() || path_prefixes.iter().any(|prefix| path.starts_with(prefix));
+        !was_scanned || listed_paths.contains(path)
+    });
     entries.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
     entries.dedup_by(|(a, _), (b, _)| a == b);
     Ok(entries)
@@ -4025,9 +4085,15 @@ async fn untracked_diff_stats(
 /// counts for: directories, binary files, and files too large to be worth
 /// scanning on every refresh. Git stores a symlink as a blob holding the
 /// target path, so numstat reports one added line for it regardless of the
-/// target.
-async fn untracked_file_diff_stat(path: &Path) -> Result<Option<crate::status::DiffStat>> {
-    let metadata = smol::fs::symlink_metadata(path).await?;
+/// target. Also returns `None` for a changed file once `budget` is spent; a
+/// later scan counts it.
+async fn untracked_file_diff_stat(
+    repo_path: &RepoPath,
+    absolute_path: &Path,
+    cache: &Mutex<UntrackedDiffStatCache>,
+    budget: &mut UntrackedDiffStatBudget,
+) -> Result<Option<crate::status::DiffStat>> {
+    let metadata = smol::fs::symlink_metadata(absolute_path).await?;
     if metadata.is_symlink() {
         return Ok(Some(crate::status::DiffStat {
             added: 1,
@@ -4037,6 +4103,33 @@ async fn untracked_file_diff_stat(path: &Path) -> Result<Option<crate::status::D
     if !metadata.is_file() || metadata.len() > MAX_UNTRACKED_DIFF_STAT_FILE_SIZE {
         return Ok(None);
     }
+    let size = metadata.len();
+    let modified_at = metadata.modified().ok();
+    let cached = cache.lock().entries.get(repo_path).copied();
+    if let Some(cached) = cached
+        && Some(cached.modified_at) == modified_at
+        && cached.size == size
+    {
+        return Ok(cached.diff_stat);
+    }
+    if !budget.try_spend(size) {
+        return Ok(None);
+    }
+    let diff_stat = count_untracked_file_lines(absolute_path).await?;
+    if let Some(modified_at) = modified_at {
+        cache.lock().entries.insert(
+            repo_path.clone(),
+            CachedUntrackedDiffStat {
+                modified_at,
+                size,
+                diff_stat,
+            },
+        );
+    }
+    Ok(diff_stat)
+}
+
+async fn count_untracked_file_lines(path: &Path) -> Result<Option<crate::status::DiffStat>> {
     let mut file = smol::fs::File::open(path).await?;
     let mut buffer = [0u8; 8192];
     let mut bytes_checked_for_binary = 0;
@@ -4980,7 +5073,15 @@ mod tests {
     #[test]
     fn test_untracked_file_diff_stat() {
         let dir = tempfile::tempdir().unwrap();
-        let stat = |name: &str| smol::block_on(untracked_file_diff_stat(&dir.path().join(name)));
+        let cache = Mutex::new(UntrackedDiffStatCache::default());
+        let stat = |name: &str| {
+            smol::block_on(untracked_file_diff_stat(
+                &repo_path(name),
+                &dir.path().join(name),
+                &cache,
+                &mut UntrackedDiffStatBudget::per_scan(),
+            ))
+        };
         let lines = |added| Some(crate::status::DiffStat { added, deleted: 0 });
 
         fs::write(dir.path().join("no_newline.txt"), "bb").unwrap();
@@ -5018,6 +5119,123 @@ mod tests {
             assert_eq!(stat("dangling").unwrap(), lines(1));
             assert_eq!(stat("dir_link").unwrap(), lines(1));
         }
+    }
+
+    #[test]
+    fn test_untracked_file_diff_stat_cache_and_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Mutex::new(UntrackedDiffStatCache::default());
+        let stat = |name: &str, budget: &mut UntrackedDiffStatBudget| {
+            smol::block_on(untracked_file_diff_stat(
+                &repo_path(name),
+                &dir.path().join(name),
+                &cache,
+                budget,
+            ))
+            .unwrap()
+        };
+        let lines = |added| Some(crate::status::DiffStat { added, deleted: 0 });
+        let mut budget = UntrackedDiffStatBudget { files: 2, bytes: 6 };
+
+        fs::write(dir.path().join("first.txt"), "a\nb\n").unwrap();
+        fs::write(dir.path().join("second.txt"), "a\n").unwrap();
+        fs::write(dir.path().join("third.txt"), "a\n").unwrap();
+        fs::write(dir.path().join("binary.dat"), b"a\0b\n").unwrap();
+
+        assert_eq!(stat("first.txt", &mut budget), lines(2));
+        assert_eq!(budget.files, 1);
+        assert_eq!(budget.bytes, 2);
+
+        cache
+            .lock()
+            .entries
+            .get_mut(&repo_path("first.txt"))
+            .unwrap()
+            .diff_stat = lines(99);
+        assert_eq!(stat("first.txt", &mut budget), lines(99));
+        assert_eq!(budget.files, 1);
+        assert_eq!(budget.bytes, 2);
+
+        assert_eq!(stat("binary.dat", &mut budget), None);
+        assert!(!cache.lock().entries.contains_key(&repo_path("binary.dat")));
+        assert_eq!(budget.bytes, 2);
+
+        assert_eq!(stat("second.txt", &mut budget), lines(1));
+        assert_eq!(budget.files, 0);
+        assert_eq!(stat("third.txt", &mut budget), None);
+        assert!(!cache.lock().entries.contains_key(&repo_path("third.txt")));
+        assert_eq!(stat("second.txt", &mut budget), lines(1));
+
+        let mut budget = UntrackedDiffStatBudget::per_scan();
+        assert_eq!(stat("third.txt", &mut budget), lines(1));
+        assert_eq!(stat("binary.dat", &mut budget), None);
+        assert!(cache.lock().entries.contains_key(&repo_path("binary.dat")));
+
+        fs::write(dir.path().join("first.txt"), "a\nb\nc\n").unwrap();
+        assert_eq!(stat("first.txt", &mut budget), lines(3));
+    }
+
+    #[gpui::test]
+    async fn test_diff_stats_caches_untracked_files(cx: &mut TestAppContext) {
+        disable_git_global_config();
+        cx.executor().allow_parking();
+
+        let repo_dir = tempfile::tempdir().unwrap();
+        git_init_repo(repo_dir.path());
+        fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+        git_command(repo_dir.path(), ["add", "tracked.txt"]);
+        git_command(repo_dir.path(), ["commit", "-m", "base"]);
+        fs::write(repo_dir.path().join("new.txt"), "a\nb\n").unwrap();
+        fs::create_dir(repo_dir.path().join("dir")).unwrap();
+        fs::write(repo_dir.path().join("dir/other.txt"), "a\n").unwrap();
+
+        let repository = RealGitRepository::new(
+            &repo_dir.path().join(".git"),
+            None,
+            Some("git".into()),
+            cx.executor(),
+        )
+        .unwrap();
+        let untracked_stats = |stats: crate::status::GitDiffStats| {
+            stats
+                .head_to_worktree
+                .entries
+                .iter()
+                .map(|(path, stat)| (path.as_unix_str().to_string(), stat.added))
+                .collect::<Vec<_>>()
+        };
+        let cached_paths = |repository: &RealGitRepository| {
+            let mut paths = repository
+                .untracked_diff_stat_cache
+                .lock()
+                .entries
+                .keys()
+                .map(|path| path.as_unix_str().to_string())
+                .collect::<Vec<_>>();
+            paths.sort();
+            paths
+        };
+
+        assert_eq!(
+            untracked_stats(repository.diff_stats(&[]).await.unwrap()),
+            [("dir/other.txt".to_string(), 1), ("new.txt".to_string(), 2)]
+        );
+        assert_eq!(cached_paths(&repository), ["dir/other.txt", "new.txt"]);
+
+        fs::remove_file(repo_dir.path().join("dir/other.txt")).unwrap();
+        fs::write(repo_dir.path().join("new.txt"), "a\nb\nc\n").unwrap();
+        assert!(
+            untracked_stats(repository.diff_stats(&[repo_path("dir")]).await.unwrap()).is_empty()
+        );
+        assert_eq!(cached_paths(&repository), ["new.txt"]);
+
+        assert_eq!(
+            untracked_stats(repository.diff_stats(&[]).await.unwrap()),
+            [("new.txt".to_string(), 3)]
+        );
+        git_command(repo_dir.path(), ["add", "new.txt"]);
+        repository.diff_stats(&[]).await.unwrap();
+        assert_eq!(cached_paths(&repository), Vec::<String>::new());
     }
 
     #[gpui::test]
@@ -5225,6 +5443,56 @@ mod tests {
                     RepoPath::new("file.txt").unwrap(),
                     TreeDiffStatus::Modified { old: base_oid },
                 )]),
+            }
+        );
+    }
+
+    #[gpui::test]
+    async fn test_diff_tree_lists_root_commit_files_against_empty_tree(cx: &mut TestAppContext) {
+        disable_git_global_config();
+        cx.executor().allow_parking();
+
+        let repo_dir = tempfile::tempdir().unwrap();
+        git_init_repo(repo_dir.path());
+        fs::create_dir(repo_dir.path().join("src")).unwrap();
+        fs::write(repo_dir.path().join("README.md"), "readme\n").unwrap();
+        fs::write(repo_dir.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+        git_command(repo_dir.path(), ["add", "."]);
+        git_command(repo_dir.path(), ["commit", "-m", "root"]);
+        let root_sha: Oid = git_command_output(repo_dir.path(), ["rev-parse", "HEAD"])
+            .parse()
+            .unwrap();
+
+        let repository = RealGitRepository::new(
+            &repo_dir.path().join(".git"),
+            None,
+            Some("git".into()),
+            cx.executor(),
+        )
+        .unwrap();
+
+        assert!(
+            repository
+                .diff_tree(DiffTreeType::Since {
+                    base: format!("{root_sha}^").into(),
+                    head: root_sha.to_string().into(),
+                })
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            repository
+                .diff_tree(DiffTreeType::Since {
+                    base: root_sha.empty_tree_id().into(),
+                    head: root_sha.to_string().into(),
+                })
+                .await
+                .unwrap(),
+            TreeDiff {
+                entries: HashMap::from_iter([
+                    (repo_path("README.md"), TreeDiffStatus::Added),
+                    (repo_path("src/main.rs"), TreeDiffStatus::Added),
+                ]),
             }
         );
     }

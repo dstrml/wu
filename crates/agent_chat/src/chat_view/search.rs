@@ -64,12 +64,6 @@ impl ChatView {
         self.search.highlighted.push(markdown.clone());
     }
 
-    pub(super) fn turn_for_entry(&self, entry: usize) -> Option<usize> {
-        self.turns
-            .iter()
-            .position(|turn| turn.user == Some(entry) || turn.items.contains(&entry))
-    }
-
     pub(super) fn clear_search_highlights(&mut self, cx: &mut App) {
         for markdown in std::mem::take(&mut self.search.highlighted) {
             markdown.update(cx, |markdown, cx| markdown.clear_search_highlights(cx));
@@ -81,11 +75,8 @@ impl ChatView {
             .list
             .logical_scroll_top()
             .item_ix
-            .min(self.turns.len().saturating_sub(1));
-        self.turns
-            .get(top)
-            .and_then(|turn| turn.user.or_else(|| turn.items.first().copied()))
-            .unwrap_or(0)
+            .min(self.transcript.rows.len().saturating_sub(1));
+        self.transcript.entry_for_row(top).unwrap_or(0)
     }
 }
 
@@ -194,18 +185,20 @@ impl SearchableItem for ChatView {
         };
         self.search.active = Some(index);
         self.list.pause_following_tail();
-        let Some(turn) = self.turn_for_entry(found.entry) else {
+        let Some(row_index) = self.transcript.row_for_entry(found.entry) else {
             return;
         };
         let visible = self.container_bounds.get().is_some_and(|viewport| {
-            self.painted_turns
-                .borrow()
-                .get(&turn)
-                .is_some_and(|bounds| bounds.intersects(&viewport))
+            self.transcript.rows.get(row_index).is_some_and(|row| {
+                self.painted_rows
+                    .borrow()
+                    .get(&row.identity())
+                    .is_some_and(|bounds| bounds.intersects(&viewport))
+            })
         });
         if !visible {
             self.list.scroll_to(ListOffset {
-                item_ix: turn,
+                item_ix: row_index,
                 offset_in_item: gpui::px(0.),
             });
         }
@@ -431,10 +424,17 @@ mod tests {
         });
         draw(cx);
         draw(cx);
-        let message_turn = chat.read_with(cx, |chat, _| chat.turn_for_entry(message_entry));
-        let painted = chat.read_with(cx, |chat, _| chat.painted_turns.borrow().clone());
+        let is_painted = |entry: usize, cx: &mut VisualTestContext| {
+            chat.read_with(cx, |chat, _| {
+                let row = chat
+                    .transcript
+                    .row_for_entry(entry)
+                    .and_then(|row| chat.transcript.rows.get(row).copied());
+                row.is_some_and(|row| chat.painted_rows.borrow().contains_key(&row.identity()))
+            })
+        };
         assert!(
-            message_turn.is_some_and(|turn| painted.contains_key(&turn)),
+            is_painted(message_entry, cx),
             "the list scrolled to the message match"
         );
         assert_eq!(
@@ -458,9 +458,7 @@ mod tests {
         });
         draw(cx);
         draw(cx);
-        let reply_turn = chat.read_with(cx, |chat, _| chat.turn_for_entry(reply_entry));
-        let painted = chat.read_with(cx, |chat, _| chat.painted_turns.borrow().clone());
-        assert!(reply_turn.is_some_and(|turn| painted.contains_key(&turn)));
+        assert!(is_painted(reply_entry, cx));
         assert_eq!(
             reply_markdown.read_with(cx, |markdown, _| markdown.active_search_highlight()),
             Some(0)
@@ -491,6 +489,67 @@ mod tests {
             reply_markdown.read_with(cx, |markdown, _| markdown.search_highlights().is_empty()),
             "closing the chat clears its highlights"
         );
+    }
+
+    #[gpui::test]
+    async fn streaming_refreshes_matches_once_per_delay(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| store.skip_plan_usage());
+        let project = project::Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let reply = |text: &str| vec![AgentEvent::TextDelta { text: text.into() }];
+        feed_user(&session, "find it", cx);
+        feed_events(&session, reply("needle"), cx);
+        let (chat, cx) = cx.add_window_view(|window, cx| {
+            ChatView::new(
+                session.clone(),
+                store.clone(),
+                project,
+                WeakEntity::new_invalid(),
+                window,
+                cx,
+            )
+        });
+        let refreshes = std::rc::Rc::new(std::cell::Cell::new(0));
+        cx.update(|_, cx| {
+            cx.subscribe(&chat, {
+                let refreshes = refreshes.clone();
+                move |_, event: &workspace::searchable::SearchEvent, _| {
+                    if matches!(
+                        event,
+                        workspace::searchable::SearchEvent::MatchesInvalidated
+                    ) {
+                        refreshes.set(refreshes.get() + 1);
+                    }
+                }
+            })
+            .detach()
+        });
+        chat.update_in(cx, |chat, window, cx| {
+            let found = [ChatMatch {
+                entry: 1,
+                range: 0..6,
+            }];
+            chat.update_matches(&found, Some(0), SearchToken::default(), window, cx)
+        });
+        for _ in 0..5 {
+            feed_events(&session, reply(" hay"), cx);
+            session.update(cx, |_, cx| cx.notify());
+            cx.run_until_parked();
+        }
+        assert_eq!(refreshes.get(), 0, "tokens alone do not rerun the search");
+
+        cx.executor()
+            .advance_clock(super::super::SEARCH_REFRESH_DELAY);
+        cx.run_until_parked();
+        assert_eq!(refreshes.get(), 1);
     }
 
     #[test]

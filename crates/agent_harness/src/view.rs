@@ -72,7 +72,7 @@ fn tool_name_label(name: &str) -> String {
     .to_string()
 }
 
-pub fn tool_group_summary(tools: &[(crate::ToolCall, bool)]) -> String {
+pub fn tool_group_summary(tools: &[(&crate::ToolCall, bool)]) -> String {
     use crate::ToolCall;
     let mut commands = 0usize;
     let mut edited: Vec<&str> = Vec::new();
@@ -82,8 +82,8 @@ pub fn tool_group_summary(tools: &[(crate::ToolCall, bool)]) -> String {
     let mut todos = 0usize;
     let mut other = 0usize;
     let mut failed = 0usize;
-    for (call, is_error) in tools {
-        if *is_error {
+    for &(call, is_error) in tools {
+        if is_error {
             failed += 1;
         }
         match call {

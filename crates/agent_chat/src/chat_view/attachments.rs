@@ -335,6 +335,7 @@ impl ChatView {
                                         .cursor_pointer()
                                         .child(
                                             img(path.clone())
+                                                .image_cache(&self.images)
                                                 .w(px(THUMBNAIL_SIZE - 2.))
                                                 .h(px(THUMBNAIL_SIZE - 2.))
                                                 .rounded(px(7.))

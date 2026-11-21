@@ -17,9 +17,9 @@ use tokio::sync::mpsc;
 use crate::jsonrpc::{Incoming, RpcClient};
 use crate::process::{Child, Stdio};
 use crate::{
-    AgentEvent, DoneStatus, ExternalSession, Harness, HarnessError, HarnessId, Model,
-    PermissionMode, ReasoningLevel, RunControls, RunRequest, SlashCommand, SteeringMode,
-    UserInputAnswer, UserInputQuestion, shutdown_child,
+    AgentEvent, CancellationToken, DoneStatus, ExternalSession, Harness, HarnessError, HarnessId,
+    Model, PermissionMode, ReasoningLevel, RunControls, RunRequest, SlashCommand, Steer,
+    SteeringMode, TurnSettings, UserInputAnswer, UserInputQuestion, shutdown_child,
 };
 use normalize::Feed;
 
@@ -179,7 +179,8 @@ impl AcpHarness {
             body(client.clone(), incoming).await
         };
         let result = tokio::time::timeout(timeout, probe).await;
-        shutdown_child(&mut child, self.kill_grace).await;
+        let kill_grace = self.kill_grace;
+        tokio::spawn(async move { shutdown_child(&mut child, kill_grace).await });
         match result {
             Ok(inner) => inner.map_err(|error| signed_out(self.agent, error)),
             Err(_) => Err(HarnessError::Protocol(timeout_message.into())),
@@ -486,21 +487,66 @@ impl Config {
         session_id: &str,
         category: &str,
         value: &str,
-    ) -> Result<(), HarnessError> {
+    ) -> Result<Vec<Value>, HarnessError> {
         if self.current(category) == Some(value) || !self.offers(category, value) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let Some((method, params)) = self.set_request(session_id, category, value) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
-        let (result, _) = request_collecting(client, incoming, method, params).await?;
+        let (result, updates) = request_collecting(client, incoming, method, params).await?;
         if result.get("configOptions").is_some() {
             self.replace(&result);
         } else {
             self.assume(category, value);
         }
-        Ok(())
+        Ok(updates)
     }
+
+    async fn apply_all(
+        &mut self,
+        client: &RpcClient,
+        incoming: &mut mpsc::Receiver<Incoming>,
+        session_id: &str,
+        wanted: &[(&str, &str)],
+    ) -> Applied {
+        let mut applied = Applied::default();
+        for (category, value) in wanted {
+            match self
+                .apply(client, incoming, session_id, category, value)
+                .await
+            {
+                Ok(updates) => applied.updates_meanwhile.extend(updates),
+                Err(error) => applied.problems.push(error.to_string()),
+            }
+        }
+        applied
+    }
+}
+
+#[derive(Default)]
+struct Applied {
+    updates_meanwhile: Vec<Value>,
+    problems: Vec<String>,
+}
+
+fn wanted_settings<'a>(
+    model: Option<&'a str>,
+    mode: Option<&'a str>,
+    reasoning: Option<ReasoningLevel>,
+) -> Vec<(&'static str, &'a str)> {
+    let mut wanted = Vec::new();
+    if let Some(model) = model.filter(|model| !model.is_empty()) {
+        wanted.push((MODEL, model));
+    }
+    if let Some(mode) = mode {
+        wanted.push((MODE, mode));
+    }
+    // The thinking levels on offer depend on the model, so this goes after the model switch.
+    if let Some(level) = reasoning.map(thought_level) {
+        wanted.push((THOUGHT_LEVEL, level));
+    }
+    wanted
 }
 
 fn thought_level(level: ReasoningLevel) -> &'static str {
@@ -537,6 +583,18 @@ impl Harness for AcpHarness {
     }
     fn reasoning_levels(&self) -> &[ReasoningLevel] {
         self.agent.reasoning_levels
+    }
+    fn stops_turn_in_place(&self) -> bool {
+        true
+    }
+    fn applies_settings_live(&self, before: &TurnSettings, after: &TurnSettings) -> bool {
+        let model_known = after.model == before.model
+            || after
+                .model
+                .as_deref()
+                .is_some_and(|model| !model.is_empty());
+        let level_known = after.reasoning == before.reasoning || after.reasoning.is_some();
+        model_known && level_known && after.model_options == before.model_options
     }
     fn installed(&self) -> bool {
         self.resolve_executable().is_ok()
@@ -797,25 +855,15 @@ async fn open_session(
         }
     };
 
-    let mut wanted = Vec::new();
-    if let Some(model) = request.model.as_deref().filter(|model| !model.is_empty()) {
-        wanted.push((MODEL, model));
-    }
-    if let Some(mode) = agent.mode(request.permission.for_harness(agent.id)) {
-        wanted.push((MODE, mode));
-    }
-    // The thinking levels on offer depend on the model, so this goes after the model switch.
-    if let Some(level) = request.reasoning.map(thought_level) {
-        wanted.push((THOUGHT_LEVEL, level));
-    }
-    for (category, value) in wanted {
-        if let Err(error) = config
-            .apply(client, incoming, &session_id, category, value)
-            .await
-        {
-            problems.push(error.to_string());
-        }
-    }
+    let wanted = wanted_settings(
+        request.model.as_deref(),
+        agent.mode(request.permission.for_harness(agent.id)),
+        request.reasoning,
+    );
+    let applied = config
+        .apply_all(client, incoming, &session_id, &wanted)
+        .await;
+    problems.extend(applied.problems);
     Ok(Opened {
         session_id,
         config,
@@ -1024,8 +1072,65 @@ async fn run_session(session: Session) {
     let mut steering_open = true;
     let mut interrupted = false;
     let mut interrupt_sent = false;
+    let mut stopping = false;
+    let mut stop_ack = None;
+    let mut stop_kill_starts_at = None;
+    let mut stopped_turn_may_trail = false;
+    let mut pending_settings: Option<TurnSettings> = None;
+    let mut unanswered = CancellationToken::new();
     let mut done_sent = false;
     let mut escalation: Option<tokio::task::JoinHandle<()>> = None;
+
+    macro_rules! forward_update {
+        ($update:expr, $label:lifetime) => {{
+            let update: &Value = $update;
+            config.note_update(update);
+            if !(stopped_turn_may_trail && normalize::is_turn_content(update)) {
+                for event in feed.update(update) {
+                    if !send(&event_tx, event).await {
+                        break $label;
+                    }
+                }
+            }
+        }};
+    }
+
+    macro_rules! start_prompt {
+        ($blocks:expr, $label:lifetime) => {{
+            if !running && let Some(settings) = pending_settings.take() {
+                let wanted = wanted_settings(settings.model.as_deref(), None, settings.reasoning);
+                let applied = tokio::select! {
+                    applied = config.apply_all(&client, &mut incoming, &session_id, &wanted) => applied,
+                    _ = interrupt.cancelled() => Applied::default(),
+                };
+                for update in updates_for(&applied.updates_meanwhile, &session_id) {
+                    forward_update!(update, $label);
+                }
+                for message in applied.problems {
+                    if !send(&event_tx, AgentEvent::Error { message }).await {
+                        break $label;
+                    }
+                }
+            }
+            generation += 1;
+            prompts.push(send_prompt(&client, &session_id, generation, $blocks));
+            running = true;
+            done_sent = false;
+            stopped_turn_may_trail = false;
+            let (previous, next) = feed.rotate();
+            if !send(
+                &event_tx,
+                AgentEvent::Steered {
+                    assistant_message_id: Some(previous),
+                    next_assistant_message_id: Some(next),
+                },
+            )
+            .await
+            {
+                break $label;
+            }
+        }};
+    }
 
     'main: loop {
         tokio::select! {
@@ -1039,16 +1144,19 @@ async fn run_session(session: Session) {
                         continue;
                     }
                     let Some(update) = params.get("update") else { continue };
-                    config.note_update(update);
-                    for event in feed.update(update) {
-                        if !send(&event_tx, event).await {
-                            break 'main;
-                        }
-                    }
+                    forward_update!(update, 'main);
                 }
                 Some(Incoming::Request { id, method, params }) => {
                     if method == "session/request_permission" {
-                        answer_permission(agent, &client, id, &params, permission.skips_prompts(), &request_input);
+                        answer_permission(
+                            agent,
+                            &client,
+                            id,
+                            &params,
+                            permission.skips_prompts(),
+                            &request_input,
+                            &unanswered,
+                        );
                     } else {
                         tracing::debug!(target: "agent_harness::acp", agent = agent.name, "unhandled server request: {method}");
                         client.respond_error(&id, -32601, &format!("unsupported method: {method}"));
@@ -1063,9 +1171,10 @@ async fn run_session(session: Session) {
                     continue;
                 }
                 running = false;
+                let cancelled = interrupted || stopping;
                 let (status, error) = match &result {
-                    Ok(result) => stop_status(agent, result, interrupted),
-                    Err(_) if interrupted => (DoneStatus::Interrupted, None),
+                    Ok(result) => stop_status(agent, result, cancelled),
+                    Err(_) if cancelled => (DoneStatus::Interrupted, None),
                     Err(error) => (DoneStatus::Errored, Some(sign_in_message(agent, error))),
                 };
                 if let Some(usage) = result.as_ref().ok().and_then(usage_event)
@@ -1077,6 +1186,12 @@ async fn run_session(session: Session) {
                     break 'main;
                 }
                 done_sent = true;
+                if stopping
+                    && !interrupted
+                    && !crate::confirm_stop(&mut stop_ack, stop_kill_starts_at, &mut escalation)
+                {
+                    interrupted = true;
+                }
                 if !send(&event_tx, AgentEvent::Done {
                     status,
                     result: None,
@@ -1088,50 +1203,50 @@ async fn run_session(session: Session) {
                 {
                     break 'main;
                 }
-                if let Some(blocks) = queued.pop_front() {
-                    generation += 1;
-                    prompts.push(send_prompt(&client, &session_id, generation, blocks));
-                    running = true;
-                    done_sent = false;
-                    let (previous, next) = feed.rotate();
-                    if !send(&event_tx, AgentEvent::Steered {
-                        assistant_message_id: Some(previous),
-                        next_assistant_message_id: Some(next),
-                    })
-                    .await
-                    {
-                        break 'main;
+                if stopping {
+                    stopping = false;
+                    stopped_turn_may_trail = true;
+                    feed.close_tools();
+                    if let Some(handle) = escalation.take() {
+                        handle.abort();
                     }
+                }
+                if let Some(blocks) = queued.pop_front() {
+                    start_prompt!(blocks, 'main);
                 } else if !steering_open {
                     break 'main;
                 }
             },
 
-            steer = steering.recv(), if steering_open && !interrupted => match steer {
-                Some(message) => {
+            // A message sent after a stop waits here until the stopped turn has ended.
+            steer = steering.recv(), if steering_open && !interrupted && !stopping => match steer {
+                Some(Steer::StopTurn(ack)) => {
+                    if running {
+                        stopping = true;
+                        stop_ack = Some(ack);
+                        stop_kill_starts_at = Some(tokio::time::Instant::now() + interrupt_grace);
+                        queued.clear();
+                        unanswered.cancel();
+                        unanswered = CancellationToken::new();
+                        client.notify("session/cancel", Some(json!({ "sessionId": session_id })));
+                        escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                    }
+                }
+                Some(Steer::Message(message)) => {
                     let (blocks, problems) = prompt_blocks(&message.prompt, &message.attachments).await;
                     for message in problems {
                         if !send(&event_tx, AgentEvent::Error { message }).await {
                             break 'main;
                         }
                     }
+                    if message.settings.is_some() {
+                        pending_settings = message.settings;
+                    }
                     if running && !agent.steers_mid_turn {
                         queued.push_back(blocks);
                         continue;
                     }
-                    generation += 1;
-                    prompts.push(send_prompt(&client, &session_id, generation, blocks));
-                    running = true;
-                    done_sent = false;
-                    let (previous, next) = feed.rotate();
-                    if !send(&event_tx, AgentEvent::Steered {
-                        assistant_message_id: Some(previous),
-                        next_assistant_message_id: Some(next),
-                    })
-                    .await
-                    {
-                        break 'main;
-                    }
+                    start_prompt!(blocks, 'main);
                 }
                 None => {
                     steering_open = false;
@@ -1166,8 +1281,10 @@ async fn run_session(session: Session) {
                 interrupt_sent = true;
                 interrupted = true;
                 if running {
-                    client.notify("session/cancel", Some(json!({ "sessionId": session_id })));
-                    escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                    if !stopping {
+                        client.notify("session/cancel", Some(json!({ "sessionId": session_id })));
+                        escalation = crate::process::escalate_interrupt(&child, interrupt_grace, kill_grace);
+                    }
                 } else {
                     break 'main;
                 }
@@ -1177,9 +1294,10 @@ async fn run_session(session: Session) {
         }
     }
 
+    let cancelled = interrupted || stopping;
     if !event_tx.is_closed() && !done_sent {
         let mut error = None;
-        if !interrupted {
+        if !cancelled {
             let exit = tokio::time::timeout(Duration::from_secs(1), child.wait())
                 .await
                 .ok()
@@ -1196,7 +1314,7 @@ async fn run_session(session: Session) {
         send_final(
             &event_tx,
             AgentEvent::Done {
-                status: if interrupted {
+                status: if cancelled {
                     DoneStatus::Interrupted
                 } else {
                     DoneStatus::Errored
@@ -1306,12 +1424,11 @@ fn answer_permission(
     params: &Value,
     auto_approve: bool,
     request_input: &Arc<RequestInputFn>,
+    unanswered: &CancellationToken,
 ) {
     let choices = permission_choices(params);
-    let refusal = choices.deny.as_deref().map_or_else(
-        || json!({ "outcome": { "outcome": "cancelled" } }),
-        selected,
-    );
+    let withdrawn = || json!({ "outcome": { "outcome": "cancelled" } });
+    let refusal = choices.deny.as_deref().map_or_else(withdrawn, selected);
     let Some(allow) = choices.allow else {
         client.respond(&id, refusal);
         return;
@@ -1323,10 +1440,15 @@ fn answer_permission(
     let question = permission_question(agent, params);
     let client = client.clone();
     let request_input = Arc::clone(request_input);
+    let unanswered = unanswered.clone();
     tokio::spawn(async move {
-        let answers = (request_input)(vec![question.clone()])
-            .await
-            .unwrap_or_default();
+        let answers = tokio::select! {
+            answers = (request_input)(vec![question.clone()]) => answers.unwrap_or_default(),
+            _ = unanswered.cancelled() => {
+                client.respond(&id, withdrawn());
+                return;
+            }
+        };
         let allowed = answers
             .iter()
             .filter(|answer| answer.question_id == question.id)

@@ -235,6 +235,12 @@ fn clip_title(text: &str) -> String {
     }
 }
 
+const TITLE_RECORD_MARKERS: [&str; 3] = [
+    "\"type\":\"custom-title\"",
+    "\"type\":\"ai-title\"",
+    "\"type\":\"summary\"",
+];
+
 /// Only parses the lines that can hold a title, since chat files can be many megabytes.
 fn title_records(path: &Path) -> std::io::Result<Vec<Value>> {
     let file = std::fs::File::open(path)?;
@@ -250,9 +256,9 @@ fn title_records(path: &Path) -> std::io::Result<Vec<Value>> {
         let Ok(text) = std::str::from_utf8(&line) else {
             continue;
         };
-        let is_title = ["\"custom-title\"", "\"ai-title\"", "\"summary\""]
+        let is_title = TITLE_RECORD_MARKERS
             .iter()
-            .any(|kind| text.contains(&format!("\"type\":{kind}")));
+            .any(|marker| text.contains(marker));
         let is_message = !found_message && text.contains("\"type\":\"user\"");
         if !is_title && !is_message {
             continue;
@@ -295,33 +301,42 @@ fn session_title(records: &[Value]) -> Option<String> {
         .or(has_message)
 }
 
-fn modified_at(path: &Path) -> i64 {
-    std::fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |duration| duration.as_secs() as i64)
-}
+const MAX_LISTED_SESSIONS: usize = 500;
 
 #[derive(Default)]
 pub(crate) struct TitleCache(Mutex<HashMap<PathBuf, (SystemTime, u64, Option<String>)>>);
 
 impl TitleCache {
-    fn title(&self, path: &Path) -> Option<String> {
-        let metadata = std::fs::metadata(path).ok()?;
-        let stamp = (metadata.modified().ok()?, metadata.len());
-        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((modified, length, title)) = cache.get(path)
-            && (*modified, *length) == stamp
-        {
-            return title.clone();
+    fn title(&self, path: &Path, modified: SystemTime, length: u64) -> Option<String> {
+        let cached = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(path)
+            .filter(|(cached_modified, cached_length, _)| {
+                (*cached_modified, *cached_length) == (modified, length)
+            })
+            .map(|(_, _, title)| title.clone());
+        if let Some(title) = cached {
+            return title;
         }
         let title = title_records(path)
             .ok()
             .and_then(|records| session_title(&records));
-        cache.insert(path.to_owned(), (stamp.0, stamp.1, title.clone()));
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path.to_owned(), (modified, length, title.clone()));
         title
     }
+}
+
+struct SessionFile {
+    id: String,
+    path: PathBuf,
+    modified: SystemTime,
+    length: u64,
+    updated_at: i64,
 }
 
 pub(crate) fn list_sessions(
@@ -332,7 +347,7 @@ pub(crate) fn list_sessions(
     let Ok(entries) = std::fs::read_dir(project_dir(config_dir, cwd)) else {
         return Vec::new();
     };
-    let mut sessions: Vec<ExternalSession> = entries
+    let mut files: Vec<SessionFile> = entries
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
@@ -346,15 +361,31 @@ pub(crate) fn list_sessions(
             if !valid_session_id(&id) {
                 return None;
             }
-            Some(ExternalSession {
-                title: titles.title(&path)?,
-                updated_at: modified_at(&path),
+            let metadata = std::fs::metadata(&path).ok()?;
+            let modified = metadata.modified().ok()?;
+            Some(SessionFile {
                 id,
+                updated_at: modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_secs() as i64),
+                modified,
+                length: metadata.len(),
+                path,
             })
         })
         .collect();
-    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
-    sessions
+    files.sort_by_key(|file| std::cmp::Reverse(file.updated_at));
+    files.truncate(MAX_LISTED_SESSIONS);
+    files
+        .into_iter()
+        .filter_map(|file| {
+            Some(ExternalSession {
+                title: titles.title(&file.path, file.modified, file.length)?,
+                updated_at: file.updated_at,
+                id: file.id,
+            })
+        })
+        .collect()
 }
 
 pub(crate) enum ResumePoint {
@@ -591,6 +622,61 @@ mod tests {
                 .expect("history")
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn only_the_newest_sessions_are_listed_and_edits_refresh_a_title() {
+        let config = tempfile::tempdir().expect("config folder");
+        let cwd = Path::new("/work/busy");
+        let start = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let set_age = |id: &str, seconds: u64| {
+            let path = project_dir(config.path(), cwd).join(format!("{id}.jsonl"));
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .and_then(|file| file.set_modified(start + std::time::Duration::from_secs(seconds)))
+                .expect("set modification time");
+        };
+        let extra = 3;
+        for index in 0..MAX_LISTED_SESSIONS + extra {
+            let id = format!("session-{index:04}");
+            let prompt = format!("Question {index}");
+            write_session(config.path(), cwd, &id, &[user("u1", None, json!(prompt))]);
+            set_age(&id, index as u64);
+        }
+
+        let titles = TitleCache::default();
+        let sessions = list_sessions(config.path(), cwd, &titles);
+        assert_eq!(sessions.len(), MAX_LISTED_SESSIONS);
+        assert_eq!(
+            sessions[0].id,
+            format!("session-{:04}", MAX_LISTED_SESSIONS + extra - 1)
+        );
+        assert_eq!(
+            sessions[0].title,
+            format!("Question {}", MAX_LISTED_SESSIONS + extra - 1)
+        );
+        assert_eq!(
+            sessions.last().map(|session| session.id.as_str()),
+            Some("session-0003")
+        );
+
+        write_session(
+            config.path(),
+            cwd,
+            "session-0000",
+            &[
+                user("u1", None, json!("Question 0")),
+                json!({"type": "custom-title", "customTitle": "Renamed"}),
+            ],
+        );
+        set_age("session-0000", 10_000);
+        let sessions = list_sessions(config.path(), cwd, &titles);
+        assert_eq!(sessions.len(), MAX_LISTED_SESSIONS);
+        assert_eq!(
+            (sessions[0].id.as_str(), sessions[0].title.as_str()),
+            ("session-0000", "Renamed")
         );
     }
 }

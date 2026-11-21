@@ -19,12 +19,6 @@ const RAIL_VERTICAL_MARGIN: f32 = 24.;
 const MAX_RAIL_TICKS: usize = 12;
 const READING_INSET: f32 = 16.;
 
-struct Tick {
-    entry_index: usize,
-    prompt: String,
-    reply: Option<String>,
-}
-
 fn clip(text: &str, max: usize) -> String {
     let line = agent_harness::view::single_line(text);
     if line.chars().count() <= max {
@@ -35,35 +29,34 @@ fn clip(text: &str, max: usize) -> String {
     clipped
 }
 
-fn ticks(entries: &[Entry], cx: &gpui::App) -> Vec<Tick> {
-    let mut ticks: Vec<Tick> = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
-        match entry {
-            Entry::User {
-                text, attachments, ..
-            } => ticks.push(Tick {
-                entry_index: index,
-                prompt: if text.trim().is_empty() && !attachments.is_empty() {
-                    t!("Attached images").to_string()
-                } else {
-                    clip(text, PREVIEW_PROMPT_CHARS)
-                },
-                reply: None,
-            }),
-            Entry::Assistant { markdown, .. } => {
-                if let Some(tick) = ticks.last_mut()
-                    && tick.reply.is_none()
-                {
-                    let source = markdown.read(cx).source();
-                    if !source.trim().is_empty() {
-                        tick.reply = Some(clip(source, PREVIEW_REPLY_CHARS));
-                    }
-                }
-            }
-            _ => {}
+fn prompt_preview(entry: Option<&Entry>) -> String {
+    match entry {
+        Some(Entry::User {
+            text, attachments, ..
+        }) if text.trim().is_empty() && !attachments.is_empty() => {
+            t!("Attached images").to_string()
         }
+        Some(Entry::User { text, .. }) => clip(text, PREVIEW_PROMPT_CHARS),
+        _ => String::new(),
     }
-    ticks
+}
+
+fn reply_preview(replies: &[Entry], cx: &gpui::App) -> Option<String> {
+    replies.iter().find_map(|entry| match entry {
+        Entry::Assistant { markdown, .. } => {
+            let source = markdown.read(cx).source();
+            (!source.trim().is_empty()).then(|| clip(source, PREVIEW_REPLY_CHARS))
+        }
+        _ => None,
+    })
+}
+
+fn turn_for_tick(tick: usize, leading_turns: usize) -> usize {
+    tick + leading_turns
+}
+
+fn tick_for_turn(turn: usize, leading_turns: usize) -> usize {
+    turn.saturating_sub(leading_turns)
 }
 
 fn rail_slots(height: f32) -> usize {
@@ -82,33 +75,33 @@ fn tick_buckets(count: usize, capacity: usize) -> Vec<(usize, usize)> {
 }
 
 impl ChatView {
-    fn jump_to_entry(&mut self, entry_index: usize, cx: &mut Context<Self>) {
-        let Some(turn_index) = self
-            .turns
-            .iter()
-            .position(|turn| turn.user == Some(entry_index))
-        else {
+    fn leading_turns(&self) -> usize {
+        match self.transcript.turns.first() {
+            Some(turn) if turn.user.is_none() => 1,
+            _ => 0,
+        }
+    }
+
+    fn jump_to_tick(&mut self, tick: usize, cx: &mut Context<Self>) {
+        let turn = turn_for_tick(tick, self.leading_turns());
+        if turn >= self.transcript.turns.len() {
             return;
-        };
+        }
         self.list.scroll_to(ListOffset {
-            item_ix: turn_index,
+            item_ix: self.transcript.turn_rows(turn).start,
             offset_in_item: px(0.),
         });
         cx.notify();
     }
 
-    fn active_tick(&self, ticks: &[Tick]) -> Option<usize> {
+    fn active_tick(&self) -> Option<usize> {
         let reading_line = self.scroll_top() + px(READING_INSET + 0.5);
-        let top_turn = (0..self.turns.len())
-            .take_while(|index| self.list.offset_for_item(*index) <= reading_line)
-            .last()?;
-        let last_entry = self.turns[top_turn].user.or_else(|| self.turns[top_turn].items.first().copied())?;
-        Some(
-            ticks
-                .iter()
-                .rposition(|tick| tick.entry_index <= last_entry)
-                .unwrap_or(0),
-        )
+        let top_turn = self
+            .transcript
+            .turn_rows
+            .partition_point(|first_row| self.list.offset_for_item(*first_row) <= reading_line)
+            .checked_sub(1)?;
+        Some(tick_for_turn(top_turn, self.leading_turns()))
     }
 
     pub(super) fn render_outline(&self, cx: &Context<Self>) -> Option<AnyElement> {
@@ -116,13 +109,14 @@ impl ChatView {
         if f32::from(container.size.width) < MIN_CONTAINER_WIDTH {
             return None;
         }
-        let ticks = ticks(self.entries(cx), cx);
-        if ticks.len() < 2 {
+        let leading_turns = self.leading_turns();
+        let tick_count = self.transcript.turns.len().saturating_sub(leading_turns);
+        if tick_count < 2 {
             return None;
         }
         let colors = cx.theme().colors();
-        let active = self.active_tick(&ticks);
-        let buckets = tick_buckets(ticks.len(), rail_slots(f32::from(container.size.height)));
+        let active = self.active_tick();
+        let buckets = tick_buckets(tick_count, rail_slots(f32::from(container.size.height)));
         let active_bucket = active.and_then(|active| {
             buckets
                 .iter()
@@ -145,13 +139,26 @@ impl ChatView {
                     let representative = active
                         .filter(|active| *active >= start && *active < end)
                         .unwrap_or(start);
-                    let tick = &ticks[representative];
-                    let entry_index = tick.entry_index;
                     let bucket_len = end - start;
                     let is_hovered = hovered == Some(bucket);
                     let is_active = active_bucket == Some(bucket);
-                    let preview_prompt: SharedString = tick.prompt.clone().into();
-                    let preview_reply = tick.reply.clone().map(SharedString::from);
+                    let preview = is_hovered
+                        .then(|| {
+                            self.transcript
+                                .turns
+                                .get(turn_for_tick(representative, leading_turns))
+                        })
+                        .flatten()
+                        .map(|turn| {
+                            let entries = self.entries(cx);
+                            let prompt =
+                                prompt_preview(turn.user.and_then(|user| entries.get(user)));
+                            let replies = entries.get(turn.items.clone()).unwrap_or_default();
+                            (
+                                SharedString::from(prompt),
+                                reply_preview(replies, cx).map(SharedString::from),
+                            )
+                        });
                     div()
                         .id(("agent-outline", bucket))
                         .relative()
@@ -180,9 +187,9 @@ impl ChatView {
                             cx.notify();
                         }))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.jump_to_entry(entry_index, cx)
+                            this.jump_to_tick(representative, cx)
                         }))
-                        .when(is_hovered, |this| {
+                        .when_some(preview, |this, (preview_prompt, preview_reply)| {
                             this.child(deferred(
                                 anchored()
                                     .anchor(Anchor::LeftCenter)
@@ -225,5 +232,67 @@ impl ChatView {
                 }))
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        AgentKind,
+        session::tests::{feed_events, feed_user, new_store},
+    };
+    use agent_harness::AgentEvent;
+    use gpui::{TestAppContext, WeakEntity};
+    use project::FakeFs;
+
+    #[gpui::test]
+    async fn ticks_follow_the_messages_the_user_sent(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            workspace::AppState::test(cx);
+            editor::init(cx);
+        });
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = new_store(directory.path(), cx);
+        store.update(cx, |store, _| store.skip_plan_usage());
+        let project = project::Project::test(FakeFs::new(cx.executor()), [], cx).await;
+        let session = store.update(cx, |store, cx| {
+            store.create_session(AgentKind::Claude, directory.path().to_path_buf(), cx)
+        });
+        let reply = |text: &str| vec![AgentEvent::TextDelta { text: text.into() }];
+        feed_events(&session, reply("Before any message."), cx);
+        for turn in 0..3 {
+            feed_user(&session, &format!("question {turn}"), cx);
+            feed_events(&session, reply(&format!("Answer {turn}.")), cx);
+        }
+        let (chat, cx) = cx.add_window_view(|window, cx| {
+            ChatView::new(
+                session.clone(),
+                store.clone(),
+                project,
+                WeakEntity::new_invalid(),
+                window,
+                cx,
+            )
+        });
+        chat.update(cx, |chat, cx| {
+            assert_eq!(chat.leading_turns(), 1);
+            assert_eq!(chat.transcript.turns.len(), 4);
+            chat.jump_to_tick(1, cx);
+            let second_question = chat.transcript.turn_rows(2).start;
+            assert_eq!(chat.list.logical_scroll_top().item_ix, second_question);
+            assert_eq!(chat.transcript.entry_for_row(second_question), Some(3));
+
+            let entries = chat.entries(cx);
+            let turn = &chat.transcript.turns[2];
+            assert_eq!(
+                prompt_preview(turn.user.and_then(|user| entries.get(user))),
+                "question 1"
+            );
+            let replies = entries.get(turn.items.clone()).unwrap_or_default();
+            assert_eq!(reply_preview(replies, cx).as_deref(), Some("Answer 1."));
+        });
+        assert_eq!(tick_for_turn(0, 1), 0);
+        assert_eq!(tick_for_turn(3, 1), 2);
     }
 }

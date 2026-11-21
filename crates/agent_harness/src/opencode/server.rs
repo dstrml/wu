@@ -502,6 +502,14 @@ impl Server {
         )))
     }
 
+    pub(super) fn kill_now(&mut self) {
+        if let Some(child) = self.child.as_mut()
+            && let Err(error) = child.start_kill()
+        {
+            log::debug!("failed to kill opencode serve: {error}");
+        }
+    }
+
     pub(super) async fn shutdown(&mut self, kill_grace: Duration) {
         if let Some(child) = self.child.as_mut() {
             crate::shutdown_child(child, kill_grace).await;

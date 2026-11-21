@@ -248,6 +248,7 @@ impl ChatView {
                             .overflow_hidden()
                             .child(
                                 img(path.clone())
+                                    .image_cache(&self.images)
                                     .w(px(38.))
                                     .h(px(26.))
                                     .rounded(px(4.))

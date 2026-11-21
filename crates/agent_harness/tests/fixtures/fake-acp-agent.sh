@@ -56,6 +56,9 @@ while read -r line; do
       if has "$line" 'commands'; then
         update '{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal","description":"Run until the goal is done."}]}'
       fi
+      if has "$line" 'stubborn'; then
+        trap '' TERM
+      fi
       ;;
     *'"method":"session/resume"'*)
       if has "$line" '"sessionId":"gone"'; then
@@ -125,6 +128,22 @@ while read -r line; do
         read -r cancel || exit 1
         has "$cancel" '"method":"session/cancel"' || exit 1
         emit '{"jsonrpc":"2.0","id":'$id',"result":{"stopReason":"cancelled"}}'
+      elif has "$line" '"text":"halt"'; then
+        text 'halting'
+        emit '{"jsonrpc":"2.0","id":"p2","method":"session/request_permission","params":{"sessionId":"'$sid'","toolCall":{"toolCallId":"c2","name":"run_command","kind":"execute","title":"ls","rawInput":{"CommandLine":"ls"}},"options":[{"optionId":"yes","name":"Allow","kind":"allow_once"},{"optionId":"no","name":"Deny","kind":"reject_once"}]}}'
+        read -r first || exit 1
+        read -r second || exit 1
+        has "$first$second" '"method":"session/cancel"' || exit 1
+        has "$first$second" '"outcome":"cancelled"' || exit 1
+        emit '{"jsonrpc":"2.0","id":'$id',"result":{"stopReason":"cancelled"}}'
+        sleep 0.1
+        text 'late'
+      elif has "$line" '"text":"deaf"'; then
+        text 'stuck'
+        while read -r ignored; do :; done
+      elif has "$line" '"text":"pid"'; then
+        text "pid=$$"
+        emit '{"jsonrpc":"2.0","id":'$id',"result":{"stopReason":"end_turn"}}'
       elif has "$line" '"text":"crash"'; then
         echo "agy: lost connection" >&2
         exit 3
