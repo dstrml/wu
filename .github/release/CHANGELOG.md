@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+## 1.5.0 - 2026-11-22
+
 - Add support Antigravity.
 - Thinner, rounded scrollbar in the editor.
 - Much lower CPU use while agents are working, and smoother long chats.
