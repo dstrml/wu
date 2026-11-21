@@ -1,8 +1,8 @@
 use agent_harness::{PermissionMode, ReasoningLevel};
 use settings::{
-    AgentChatAgent, AgentChatDefaultEffort, AgentChatWhileWorking, ClaudeCodePermissionDefault,
-    CodexPermissionDefault, ContextTokens, DockSide, OpencodePermissionDefault, RegisterSetting,
-    Settings,
+    AgentChatAgent, AgentChatDefaultEffort, AgentChatWhileWorking, AntigravityPermissionDefault,
+    ClaudeCodePermissionDefault, CodexPermissionDefault, ContextTokens, DockSide,
+    OpencodePermissionDefault, RegisterSetting, Settings,
 };
 pub use settings::{AgentChatModelPickerLayout, AgentChatSendKey};
 
@@ -24,7 +24,7 @@ pub struct AgentChatSettings {
     pub notify_only_in_background: bool,
     pub auto_compact_tokens: Option<u64>,
     pub default_effort: Option<ReasoningLevel>,
-    default_permissions: [(AgentKind, PermissionMode); 3],
+    default_permissions: [(AgentKind, PermissionMode); 4],
     agents: Vec<AgentKind>,
     pub steer_while_working: bool,
     pub confirm_quit_while_working: bool,
@@ -62,6 +62,7 @@ impl Settings for AgentChatSettings {
             (AgentKind::Claude, shown.claude_code),
             (AgentKind::Codex, shown.codex),
             (AgentKind::Opencode, shown.opencode),
+            (AgentKind::Antigravity, shown.antigravity),
         ]
         .into_iter()
         .filter(|(_, shown)| shown.unwrap_or(true))
@@ -102,6 +103,10 @@ impl Settings for AgentChatSettings {
                 (
                     AgentKind::Opencode,
                     opencode_permission(permission.opencode.unwrap_or_default()),
+                ),
+                (
+                    AgentKind::Antigravity,
+                    antigravity_permission(permission.antigravity.unwrap_or_default()),
                 ),
             ],
             agents,
@@ -166,6 +171,15 @@ fn opencode_permission(mode: OpencodePermissionDefault) -> PermissionMode {
     }
 }
 
+fn antigravity_permission(mode: AntigravityPermissionDefault) -> PermissionMode {
+    match mode {
+        AntigravityPermissionDefault::Ask => PermissionMode::Ask,
+        AntigravityPermissionDefault::AcceptEdits => PermissionMode::AcceptEdits,
+        AntigravityPermissionDefault::Auto => PermissionMode::Auto,
+        AntigravityPermissionDefault::FullAccess => PermissionMode::FullAccess,
+    }
+}
+
 impl AgentKind {
     pub(crate) fn from_setting(agent: AgentChatAgent) -> Option<Self> {
         match agent {
@@ -173,6 +187,7 @@ impl AgentKind {
             AgentChatAgent::ClaudeCode => Some(AgentKind::Claude),
             AgentChatAgent::Codex => Some(AgentKind::Codex),
             AgentChatAgent::Opencode => Some(AgentKind::Opencode),
+            AgentChatAgent::Antigravity => Some(AgentKind::Antigravity),
         }
     }
 
@@ -181,6 +196,7 @@ impl AgentKind {
             AgentKind::Claude => AgentChatAgent::ClaudeCode,
             AgentKind::Codex => AgentChatAgent::Codex,
             AgentKind::Opencode => AgentChatAgent::Opencode,
+            AgentKind::Antigravity => AgentChatAgent::Antigravity,
         }
     }
 }

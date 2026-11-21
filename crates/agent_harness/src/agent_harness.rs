@@ -30,6 +30,9 @@ fn missing_agent_message(agent: HarnessId) -> i18n::SharedString {
             "Codex isn't installed. Install it, or use OpenCode to connect your own API or a local model."
         ),
         HarnessId::Opencode => i18n::t!("OpenCode isn't installed. Install it and try again."),
+        HarnessId::Antigravity => {
+            i18n::t!("Antigravity isn't installed. Install the Antigravity CLI and try again.")
+        }
     }
 }
 
@@ -138,6 +141,8 @@ pub trait Harness: Send + Sync {
 }
 
 pub mod accounts;
+pub mod acp;
+pub mod antigravity;
 mod catalog;
 mod catalog_failure;
 pub use catalog_failure::{CatalogFailure, CatalogFailureCode};
@@ -334,6 +339,7 @@ pub(crate) fn crash_message(
     }
 }
 
+pub use acp::{AcpAgent, AcpHarness};
 pub use claude::ClaudeHarness;
 pub use codex::CodexHarness;
 pub use opencode::OpencodeHarness;

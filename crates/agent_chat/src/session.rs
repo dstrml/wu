@@ -1,8 +1,8 @@
 use agent_harness::{
-    AgentEvent, CancellationToken, ClaudeHarness, CodexHarness, DoneStatus, ExternalSession,
-    Harness, HarnessId, Model, OpencodeHarness, PermissionMode, ReasoningLevel, RunControls,
-    RunRequest, SkillRef, SlashCommand, SteerMessage, ToolCall, UserInputAnswer, UserInputQuestion,
-    usage::PlanUsage,
+    AcpHarness, AgentEvent, CancellationToken, ClaudeHarness, CodexHarness, DoneStatus,
+    ExternalSession, Harness, HarnessId, Model, OpencodeHarness, PermissionMode, ReasoningLevel,
+    RunControls, RunRequest, SkillRef, SlashCommand, SteerMessage, ToolCall, UserInputAnswer,
+    UserInputQuestion, usage::PlanUsage,
 };
 use anyhow::{Context as _, Result};
 use collections::{HashMap, HashSet};
@@ -167,6 +167,7 @@ impl AgentKind {
             AgentKind::Claude => HarnessId::ClaudeCode,
             AgentKind::Codex => HarnessId::Codex,
             AgentKind::Opencode => HarnessId::Opencode,
+            AgentKind::Antigravity => HarnessId::Antigravity,
         }
     }
 
@@ -175,6 +176,9 @@ impl AgentKind {
             AgentKind::Claude => Arc::new(ClaudeHarness::new()),
             AgentKind::Codex => Arc::new(CodexHarness::new()),
             AgentKind::Opencode => Arc::new(OpencodeHarness::new()),
+            AgentKind::Antigravity => {
+                Arc::new(AcpHarness::new(&agent_harness::antigravity::ANTIGRAVITY))
+            }
         }
     }
 }
@@ -1435,7 +1439,8 @@ impl AgentSession {
             for id in waiting {
                 self.answer_permission(&id, true, cx);
             }
-        } else if self.working && self.kind() != AgentKind::Claude {
+        } else if self.working && !matches!(self.kind(), AgentKind::Claude | AgentKind::Antigravity)
+        {
             let notice = i18n::format(
                 SharedString::new_static(KEEPS_LIMITS_NOTICE),
                 &[("agent", &self.kind().label())],

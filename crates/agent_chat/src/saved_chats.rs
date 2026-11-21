@@ -179,7 +179,7 @@ impl PickerDelegate for SavedChatDelegate {
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        t!("Continue a chat from Claude Code, Codex or OpenCode…")
+        t!("Continue a chat from Claude Code, Codex, OpenCode or Antigravity…")
             .as_str()
             .into()
     }

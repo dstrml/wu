@@ -4,6 +4,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Add Antigravity as a coding agent.
 - Thinner, rounded scrollbar in the editor.
 
 ## 1.4.0 - 2026-11-21

@@ -24,6 +24,13 @@ pub(crate) fn context(
             vec![root.join("settings.json"), root.join(".credentials.json")]
         }
         HarnessId::Opencode => opencode_files(&home),
+        HarnessId::Antigravity => {
+            let root = home.join(".gemini");
+            vec![
+                root.join("config").join("config.json"),
+                root.join("antigravity-cli").join("installation_id"),
+            ]
+        }
     };
     let binary = binary
         .canonicalize()
@@ -51,6 +58,7 @@ pub(crate) fn context(
         HarnessId::Codex => &["CODEX_", "OPENAI_"],
         HarnessId::ClaudeCode => &["CLAUDE_", "ANTHROPIC_", "AWS_"],
         HarnessId::Opencode => &["OPENCODE_", "OPENAI_", "ANTHROPIC_", "GOOGLE_"],
+        HarnessId::Antigravity => &["AGY_", "GEMINI_", "GOOGLE_"],
     };
     let mut env: Vec<_> = std::env::vars_os()
         .filter(|(key, _)| {

@@ -771,7 +771,7 @@ enum StdinMsg {
 // The API rejects larger inline images.
 const MAX_INLINE_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 
-fn image_media_type(path: &std::path::Path, bytes: &[u8]) -> Option<&'static str> {
+pub(crate) fn image_media_type(path: &std::path::Path, bytes: &[u8]) -> Option<&'static str> {
     let by_extension = match path
         .extension()
         .and_then(|extension| extension.to_str())

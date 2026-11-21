@@ -5,7 +5,7 @@
   },
   "agent_chat::ContinueSavedChat": {
     "name": "继续已保存的对话",
-    "description": "继续在 Claude Code、Codex 或 OpenCode 中开始的对话。"
+    "description": "继续在 Claude Code、Codex、OpenCode 或 Antigravity 中开始的对话。"
   },
   "agent_chat::DismissCommands": {
     "name": "关闭命令菜单",
@@ -18,6 +18,10 @@
   "agent_chat::MoveChatToTab": {
     "name": "将对话移回标签页",
     "description": "把对话面板中的对话移回标签页。"
+  },
+  "agent_chat::NewAntigravityChat": {
+    "name": "新建 Antigravity 对话",
+    "description": "开始新的 Antigravity 对话。"
   },
   "agent_chat::NewClaudeChat": {
     "name": "新建 Claude 对话",

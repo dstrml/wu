@@ -36,7 +36,7 @@ pub fn generate_commit_message(
                 .discovered_models(kind)
                 .map(<[Model]>::to_vec);
             let harness = store.update(cx, |store, cx| {
-                if kind == AgentKind::Codex {
+                if matches!(kind, AgentKind::Codex | AgentKind::Antigravity) {
                     store.ensure_models(kind, cx);
                 }
                 store.harness(kind)
@@ -57,7 +57,7 @@ pub fn generate_commit_message(
             .find(|candidate| !checks_install || candidate.harness.installed());
         let Some(candidate) = candidate else {
             return Err(anyhow!(t!(
-                "Install Claude Code, Codex or OpenCode to write commit messages."
+                "Install Claude Code, Codex, OpenCode or Antigravity to write commit messages."
             )));
         };
         let model = match chosen_model {
@@ -78,7 +78,11 @@ struct Candidate {
 async fn small_model(candidate: &Candidate) -> Option<String> {
     match candidate.kind {
         AgentKind::Claude => Some("haiku".to_owned()),
-        AgentKind::Codex => {
+        AgentKind::Codex | AgentKind::Antigravity => {
+            let small = match candidate.kind {
+                AgentKind::Antigravity => "flash",
+                _ => "mini",
+            };
             let models = match &candidate.discovered_models {
                 Some(models) => models.clone(),
                 None => match candidate.harness.models().await {
@@ -88,7 +92,7 @@ async fn small_model(candidate: &Candidate) -> Option<String> {
             };
             models
                 .into_iter()
-                .find(|model| model.id.contains("mini"))
+                .find(|model| model.id.contains(small))
                 .map(|model| model.id)
         }
         AgentKind::Opencode => None,
@@ -104,10 +108,10 @@ async fn run_once(
 ) -> Result<String> {
     let permission = match kind {
         AgentKind::Codex => PermissionMode::ReadOnly,
-        AgentKind::Claude | AgentKind::Opencode => PermissionMode::Ask,
+        AgentKind::Claude | AgentKind::Opencode | AgentKind::Antigravity => PermissionMode::Ask,
     };
     let reasoning = match kind {
-        AgentKind::Claude | AgentKind::Codex => Some(ReasoningLevel::Low),
+        AgentKind::Claude | AgentKind::Codex | AgentKind::Antigravity => Some(ReasoningLevel::Low),
         AgentKind::Opencode => None,
     };
     let request = RunRequest {

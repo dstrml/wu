@@ -141,6 +141,7 @@ pub(crate) fn translated_setting_value(label: &str) -> Option<SharedString> {
         "Alt" => tc!("setting value", "Alt"),
         "Always" => tc!("setting value", "Always"),
         "AlwaysHome" => tc!("setting value", "Always Home"),
+        "Antigravity" => tc!("setting value", "Antigravity"),
         "Anywhere" => tc!("setting value", "Anywhere"),
         "Approve for Me" => tc!("setting value", "Approve for Me"),
         "Ask" => tc!("setting value", "Ask"),

@@ -52,7 +52,7 @@ export const zhCN: Messages = {
     },
     agents: {
       title: '内置你的编程智能体',
-      body: '在代码旁边直接使用 Claude Code、Codex 和 OpenCode，用的就是你已经登录的账号。',
+      body: '在代码旁边直接使用 Claude Code、Codex、OpenCode 和 Antigravity，用的就是你已经登录的账号。',
       link: '了解用法'
     },
     openSource: {
@@ -90,7 +90,7 @@ export const zhCN: Messages = {
       {
         question: 'Wu 支持 AI 编程智能体吗？',
         answer:
-          '支持。Wu 内置了对 Claude Code、Codex 和 OpenCode 等编程智能体的支持。不过，Wu 不支持 Zed 的 AI 功能，比如行内助手和编辑预测。'
+          '支持。Wu 内置了对 Claude Code、Codex、OpenCode 和 Antigravity 等编程智能体的支持。不过，Wu 不支持 Zed 的 AI 功能，比如行内助手和编辑预测。'
       },
       {
         question: 'Zed 扩展能在 Wu 里用吗？',
@@ -108,7 +108,7 @@ export const zhCN: Messages = {
       {
         question: 'Wu 和 Zed 有什么不同？',
         answer:
-          'Wu 去掉了 Zed 的 AI 服务、协作和遥测功能。它有自己的智能体对话，基于 Claude Code、Codex 和 OpenCode 的命令行工具，也有自己的外观，还在其他好几个地方比 Zed 更好用。详情请看[文档](/zh/docs/)。'
+          'Wu 去掉了 Zed 的 AI 服务、协作和遥测功能。它有自己的智能体对话，基于 Claude Code、Codex、OpenCode 和 Antigravity 的命令行工具，也有自己的外观，还在其他好几个地方比 Zed 更好用。详情请看[文档](/zh/docs/)。'
       },
       {
         question: '在哪里报告问题？',
@@ -133,7 +133,7 @@ export const zhCN: Messages = {
     agentChat: {
       title: '智能体对话',
       intro:
-        '在 Wu 里和 Claude Code、Codex 或 OpenCode 对话。它用的是你已经安装并登录的命令行工具，所以不需要 API 密钥，也不需要 Wu 账号。',
+        '在 Wu 里和 Claude Code、Codex、OpenCode 或 Antigravity 对话。它用的是你已经安装并登录的命令行工具，所以不需要 API 密钥，也不需要 Wu 账号。',
       items: [
         '**开始对话：**点击活动栏里的智能体图标。用“继续已保存的对话”可以接着在终端里开始的对话继续。',
         '**输入** `/` 使用命令，`@` 提及文件，`$` 使用技能。粘贴或拖入图片即可附加。',

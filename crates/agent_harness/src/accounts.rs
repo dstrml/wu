@@ -38,17 +38,27 @@ pub struct Account {
 const OPENCODE_NO_ACCOUNTS: &str = i18n::n!(
     "OpenCode manages its own provider logins (`opencode auth login`); Wu can't switch them"
 );
+const ANTIGRAVITY_NO_ACCOUNTS: &str =
+    i18n::n!("Antigravity manages its own Google sign-in (`agy`); Wu can't switch it");
+
+fn unmanaged(harness: HarnessId) -> Option<&'static str> {
+    match harness {
+        HarnessId::Opencode => Some(OPENCODE_NO_ACCOUNTS),
+        HarnessId::Antigravity => Some(ANTIGRAVITY_NO_ACCOUNTS),
+        HarnessId::ClaudeCode | HarnessId::Codex => None,
+    }
+}
 
 pub async fn list(harness: HarnessId, data_dir: &Path) -> Result<Vec<Account>, String> {
-    if harness == HarnessId::Opencode {
+    if unmanaged(harness).is_some() {
         return Ok(Vec::new());
     }
     Stores::detect(data_dir)?.list(harness).await
 }
 
 pub async fn activate(harness: HarnessId, account_id: &str, data_dir: &Path) -> Result<(), String> {
-    if harness == HarnessId::Opencode {
-        return Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string());
+    if let Some(reason) = unmanaged(harness) {
+        return Err(i18n::translate(reason).to_string());
     }
     Stores::detect(data_dir)?
         .activate(harness, account_id)
@@ -63,14 +73,17 @@ pub async fn usage_request(
     if harness == HarnessId::Opencode {
         return Err(i18n::translate(crate::usage::OPENCODE_NO_USAGE).to_string());
     }
+    if harness == HarnessId::Antigravity {
+        return Err(i18n::translate(crate::usage::ANTIGRAVITY_NO_USAGE).to_string());
+    }
     Stores::detect(data_dir)?
         .usage_request(harness, account_id)
         .await
 }
 
 pub async fn remove(harness: HarnessId, account_id: &str, data_dir: &Path) -> Result<(), String> {
-    if harness == HarnessId::Opencode {
-        return Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string());
+    if let Some(reason) = unmanaged(harness) {
+        return Err(i18n::translate(reason).to_string());
     }
     Stores::detect(data_dir)?.remove(harness, account_id).await
 }
@@ -277,7 +290,9 @@ impl Stores {
         match harness {
             HarnessId::ClaudeCode => self.activate_claude(&slot).await,
             HarnessId::Codex => self.activate_codex(&slot),
-            HarnessId::Opencode => Err(i18n::translate(OPENCODE_NO_ACCOUNTS).to_string()),
+            HarnessId::Opencode | HarnessId::Antigravity => {
+                Err(i18n::translate(unmanaged(harness).unwrap_or(OPENCODE_NO_ACCOUNTS)).to_string())
+            }
         }
     }
 
@@ -354,7 +369,7 @@ impl Stores {
         let live_key = match harness {
             HarnessId::ClaudeCode => self.claude_identity().map(|identity| identity.0),
             HarnessId::Codex => self.detect_codex().map(|live| live.account_key),
-            HarnessId::Opencode => None,
+            HarnessId::Opencode | HarnessId::Antigravity => None,
         };
         if live_key.is_some_and(|key| slot_id_for(harness, &key) == account_id)
             && let Some(Detected {
@@ -371,6 +386,9 @@ impl Stores {
             HarnessId::Codex => codex_usage_request(&slot.credentials),
             HarnessId::Opencode => {
                 Err(i18n::translate(crate::usage::OPENCODE_NO_USAGE).to_string())
+            }
+            HarnessId::Antigravity => {
+                Err(i18n::translate(crate::usage::ANTIGRAVITY_NO_USAGE).to_string())
             }
         }
     }
@@ -392,7 +410,7 @@ impl Stores {
         let live = match harness {
             HarnessId::ClaudeCode => self.detect_claude().await,
             HarnessId::Codex => self.detect_codex(),
-            HarnessId::Opencode => None,
+            HarnessId::Opencode | HarnessId::Antigravity => None,
         };
         if let Some(live) = &live
             && let Ok(Some(credentials)) = &live.credentials
@@ -561,6 +579,7 @@ fn harness_slug(harness: HarnessId) -> &'static str {
         HarnessId::ClaudeCode => "claude-code",
         HarnessId::Codex => "codex",
         HarnessId::Opencode => "opencode",
+        HarnessId::Antigravity => "antigravity",
     }
 }
 

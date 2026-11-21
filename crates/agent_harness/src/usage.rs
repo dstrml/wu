@@ -46,7 +46,7 @@ impl UsageRequest {
         let mut usage = match harness {
             HarnessId::ClaudeCode => claude_usage_windows(body),
             HarnessId::Codex => codex_usage_snapshot(body),
-            HarnessId::Opencode => None,
+            HarnessId::Opencode | HarnessId::Antigravity => None,
         }?;
         if usage.plan_label.is_none() {
             usage.plan_label = self.plan_label.clone();
@@ -69,10 +69,12 @@ pub async fn usage_request(harness: HarnessId) -> Result<UsageRequest, String> {
             codex_usage_request(&auth)
         }
         HarnessId::Opencode => Err(i18n::translate(OPENCODE_NO_USAGE).to_string()),
+        HarnessId::Antigravity => Err(i18n::translate(ANTIGRAVITY_NO_USAGE).to_string()),
     }
 }
 
 pub const OPENCODE_NO_USAGE: &str = i18n::n!("OpenCode doesn't report plan usage");
+pub const ANTIGRAVITY_NO_USAGE: &str = i18n::n!("Antigravity doesn't report plan usage");
 
 pub(crate) fn claude_usage_request(credentials: &Value) -> Result<UsageRequest, String> {
     let oauth = credentials

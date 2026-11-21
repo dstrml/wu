@@ -41,7 +41,9 @@ actions!(
         NewCodexChat,
         /// Starts a new OpenCode chat.
         NewOpencodeChat,
-        /// Continues a chat started in Claude Code, Codex or OpenCode.
+        /// Starts a new Antigravity chat.
+        NewAntigravityChat,
+        /// Continues a chat started in Claude Code, Codex, OpenCode or Antigravity.
         ContinueSavedChat,
         /// Sends the message in the chat box.
         Send,
@@ -76,23 +78,30 @@ pub enum AgentKind {
     Claude,
     Codex,
     Opencode,
+    Antigravity,
 }
 
 impl AgentKind {
-    pub const ALL: [AgentKind; 3] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode];
+    pub const ALL: [AgentKind; 4] = [
+        AgentKind::Claude,
+        AgentKind::Codex,
+        AgentKind::Opencode,
+        AgentKind::Antigravity,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             AgentKind::Claude => "Claude Code",
             AgentKind::Codex => "Codex",
             AgentKind::Opencode => "OpenCode",
+            AgentKind::Antigravity => "Antigravity",
         }
     }
 
     pub(crate) fn has_plan_usage(self) -> bool {
         match self {
             AgentKind::Claude | AgentKind::Codex => true,
-            AgentKind::Opencode => false,
+            AgentKind::Opencode | AgentKind::Antigravity => false,
         }
     }
 }

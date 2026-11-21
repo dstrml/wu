@@ -6,6 +6,7 @@ pub enum HarnessId {
     ClaudeCode,
     Codex,
     Opencode,
+    Antigravity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -61,7 +62,9 @@ impl PermissionMode {
                 Self::ApproveForMe,
                 Self::FullAccess,
             ],
-            HarnessId::Opencode => &[Self::Ask, Self::AcceptEdits, Self::Auto, Self::FullAccess],
+            HarnessId::Opencode | HarnessId::Antigravity => {
+                &[Self::Ask, Self::AcceptEdits, Self::Auto, Self::FullAccess]
+            }
         }
     }
 

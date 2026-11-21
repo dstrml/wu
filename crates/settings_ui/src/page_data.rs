@@ -7937,7 +7937,7 @@ fn agent_chat_page() -> SettingsPage {
         ]
     }
 
-    fn new_chats_section() -> [SettingsPageItem; 5] {
+    fn new_chats_section() -> [SettingsPageItem; 6] {
         [
             SettingsPageItem::SectionHeader(n!("New Chats")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8060,10 +8060,41 @@ fn agent_chat_page() -> SettingsPage {
                 })),
                 files: USER,
             }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Antigravity Permission"),
+                description: n!(
+                    "The permission mode new Antigravity chats start with. You can still change it in each chat."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.default_permission.antigravity"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .default_permission
+                            .as_ref()?
+                            .antigravity
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .default_permission
+                            .get_or_insert_default()
+                            .antigravity = value;
+                    },
+                }),
+                metadata: Some(Box::new(SettingsFieldMetadata {
+                    should_do_titlecase: Some(false),
+                    ..Default::default()
+                })),
+                files: USER,
+            }),
         ]
     }
 
-    fn agents_section() -> [SettingsPageItem; 5] {
+    fn agents_section() -> [SettingsPageItem; 6] {
         [
             SettingsPageItem::SectionHeader(n!("Agents")),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8172,6 +8203,35 @@ fn agent_chat_page() -> SettingsPage {
                             .get_or_insert_default();
                         agents.opencode = value;
                         keep_one_agent_shown(agents, |agents| &mut agents.opencode);
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: n!("Antigravity"),
+                description: n!(
+                    "Show Antigravity in the new chat menu and in Continue Saved Chat. At least one agent stays shown."
+                ),
+                field: Box::new(SettingField {
+                    json_path: Some("agent_chat.agents.antigravity"),
+                    pick: |settings_content| {
+                        settings_content
+                            .agent_chat
+                            .as_ref()?
+                            .agents
+                            .as_ref()?
+                            .antigravity
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        let agents = settings_content
+                            .agent_chat
+                            .get_or_insert_default()
+                            .agents
+                            .get_or_insert_default();
+                        agents.antigravity = value;
+                        keep_one_agent_shown(agents, |agents| &mut agents.antigravity);
                     },
                 }),
                 metadata: None,
@@ -8375,9 +8435,14 @@ fn keep_one_agent_shown(
     agents: &mut settings::AgentChatAgentsContent,
     changed: fn(&mut settings::AgentChatAgentsContent) -> &mut Option<bool>,
 ) {
-    let all_hidden = [agents.claude_code, agents.codex, agents.opencode]
-        .iter()
-        .all(|shown| *shown == Some(false));
+    let all_hidden = [
+        agents.claude_code,
+        agents.codex,
+        agents.opencode,
+        agents.antigravity,
+    ]
+    .iter()
+    .all(|shown| *shown == Some(false));
     if all_hidden {
         *changed(agents) = None;
     }
@@ -10293,6 +10358,7 @@ mod tests {
             claude_code: Some(false),
             codex: Some(false),
             opencode: None,
+            antigravity: Some(false),
         };
         keep_one_agent_shown(&mut agents, |agents| &mut agents.opencode);
         assert_eq!(agents.opencode, None);
