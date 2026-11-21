@@ -924,7 +924,7 @@
   "Workspace Restoration": "工作区恢复",
   "Wrap Guides": "换行参考线",
   "Wrapping": "换行",
-  "Wu \u2014 Settings": "Wu 设置",
+  "Wu — Settings": "Wu 设置",
   "Zoomed Padding": "缩放时的内边距",
   "setting value|Accept Edits": "接受编辑",
   "setting value|Active Editor": "当前编辑器",
@@ -1112,5 +1112,11 @@
   "setting value|Warning": "警告",
   "setting value|With Arguments": "带参数",
   "setting value|Wrapped": "按换行",
-  "setting value|X-High": "超高"
+  "setting value|X-High": "超高",
+  "omp Permission": "omp 权限",
+  "The permission mode new omp chats start with. You can still change it in each chat.": "新 omp 会话默认使用的权限模式。之后你仍可在每个会话中修改。",
+  "Show omp in the new chat menu and in Continue Saved Chat. At least one agent stays shown.": "在新会话菜单和继续保存的会话中显示 omp。至少保留一个 agent 显示。",
+  "pi Permission": "pi 权限",
+  "The permission mode new pi chats start with. You can still change it in each chat.": "新 pi 会话默认使用的权限模式。之后你仍可在每个会话中修改。",
+  "Show pi in the new chat menu and in Continue Saved Chat. At least one agent stays shown.": "在新会话菜单和继续保存的会话中显示 pi。至少保留一个 agent 显示。"
 }

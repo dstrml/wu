@@ -6,6 +6,8 @@ pub enum HarnessId {
     ClaudeCode,
     Codex,
     Opencode,
+    Omp,
+    Pi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -62,6 +64,7 @@ impl PermissionMode {
                 Self::FullAccess,
             ],
             HarnessId::Opencode => &[Self::Ask, Self::AcceptEdits, Self::Auto, Self::FullAccess],
+            HarnessId::Omp | HarnessId::Pi => &[Self::Ask, Self::AcceptEdits, Self::Auto, Self::FullAccess],
         }
     }
 

@@ -10,7 +10,9 @@ use strum::{EnumIter, EnumString, IntoStaticStr};
 pub enum IconName {
     AgentClaude,
     AgentCodex,
+    AgentOmp,
     AgentOpencode,
+    AgentPi,
     AgentFast,
     AgentFastFilled,
     AgentArrowDown,

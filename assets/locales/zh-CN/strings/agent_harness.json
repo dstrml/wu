@@ -17,6 +17,7 @@
   "Approves routine actions, asks about risky ones": "自动批准常规操作，有风险的操作会先询问",
   "Ask": "询问",
   "Asks before commands and file edits": "运行命令和编辑文件前先询问",
+  "Asks before omp's gated tool calls": "在 omp 的受限工具调用前询问",
   "Authentication failed. Sign in to Claude again.": "身份验证失败。请重新登录 Claude。",
   "Auto": "自动",
   "Billing error. Check your Claude plan or payment method.": "账单错误。请检查你的 Claude 套餐或付款方式。",
@@ -183,6 +184,10 @@
   "model option|Thinking": "思考",
   "more file access": "更多文件访问权限",
   "network access": "网络访问权限",
+  "omp doesn't report plan usage": "omp 不提供套餐用量",
+  "omp isn't installed. Install it and try again.": "未安装 omp。请安装后重试。",
+  "omp stopped the turn: {reason}": "omp 中止了本轮对话：{reason}",
+  "omp uses the provider keys configured in `~/.omp`; Wu can't switch them": "omp 使用 `~/.omp` 中配置的提供商密钥，Wu 无法切换",
   "opencode made no progress for {seconds}s after the prompt. {hint}": "发送消息后，opencode 已 {seconds} 秒没有进展。{hint}",
   "optional instructions": "可选说明",
   "provider error": "提供商错误",
@@ -221,5 +226,6 @@
   "{reason}. Retrying in {seconds}s.": "{reason}。{seconds} 秒后重试。",
   "{reason}. Retrying.": "{reason}。正在重试。",
   "~/.claude.json exists but couldn't be parsed, so it was left alone. Fix or remove the file and try again.": "~/.claude.json 存在但无法解析，因此未做改动。请修复或删除该文件后重试。",
-  "~/.claude.json is not a JSON object. Not switching.": "~/.claude.json 不是 JSON 对象。未切换。"
+  "~/.claude.json is not a JSON object. Not switching.": "~/.claude.json 不是 JSON 对象。未切换。",
+  "pi isn't installed. Install it and try again.": "未安装 pi。请安装后重试。"
 }

@@ -1,6 +1,7 @@
 use super::{ChatView, ui};
 use crate::{
-    AcceptCommand, AgentKind, DismissCommands, NewClaudeChat, NewCodexChat, NewOpencodeChat,
+    AcceptCommand, AgentKind, DismissCommands, NewClaudeChat, NewCodexChat, NewOmpChat,
+    NewOpencodeChat, NewPiChat,
     SelectNextCommand, SelectPreviousCommand, Send, ToggleFocus,
     chat_style::{MENU_ITEM_RADIUS, icon, ink, popover_card, selected_row},
     slash_commands::{
@@ -634,6 +635,8 @@ impl ChatView {
                 AgentKind::Claude => window.dispatch_action(Box::new(NewClaudeChat), cx),
                 AgentKind::Codex => window.dispatch_action(Box::new(NewCodexChat), cx),
                 AgentKind::Opencode => window.dispatch_action(Box::new(NewOpencodeChat), cx),
+                AgentKind::Omp => window.dispatch_action(Box::new(NewOmpChat), cx),
+                AgentKind::Pi => window.dispatch_action(Box::new(NewPiChat), cx),
             },
             AppCommand::Resume => window.dispatch_action(Box::new(ToggleFocus), cx),
             AppCommand::Stop => self.session.update(cx, |session, cx| session.stop(cx)),

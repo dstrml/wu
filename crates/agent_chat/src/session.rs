@@ -1,6 +1,7 @@
 use agent_harness::{
     AgentEvent, CancellationToken, ClaudeHarness, CodexHarness, DoneStatus, ExternalSession,
-    Harness, HarnessId, Model, OpencodeHarness, PermissionMode, ReasoningLevel, RunControls,
+    AcpHarness, Harness, HarnessId, Model, OpencodeHarness, PermissionMode, ReasoningLevel,
+    RunControls,
     RunRequest, SkillRef, SlashCommand, SteerMessage, ToolCall, UserInputAnswer, UserInputQuestion,
     usage::PlanUsage,
 };
@@ -167,6 +168,8 @@ impl AgentKind {
             AgentKind::Claude => HarnessId::ClaudeCode,
             AgentKind::Codex => HarnessId::Codex,
             AgentKind::Opencode => HarnessId::Opencode,
+            AgentKind::Omp => HarnessId::Omp,
+            AgentKind::Pi => HarnessId::Pi,
         }
     }
 
@@ -175,6 +178,8 @@ impl AgentKind {
             AgentKind::Claude => Arc::new(ClaudeHarness::new()),
             AgentKind::Codex => Arc::new(CodexHarness::new()),
             AgentKind::Opencode => Arc::new(OpencodeHarness::new()),
+            AgentKind::Omp => Arc::new(AcpHarness::omp()),
+            AgentKind::Pi => Arc::new(AcpHarness::pi()),
         }
     }
 }

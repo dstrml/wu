@@ -91,7 +91,7 @@ async fn small_model(candidate: &Candidate) -> Option<String> {
                 .find(|model| model.id.contains("mini"))
                 .map(|model| model.id)
         }
-        AgentKind::Opencode => None,
+        AgentKind::Opencode | AgentKind::Omp | AgentKind::Pi => None,
     }
 }
 
@@ -104,11 +104,13 @@ async fn run_once(
 ) -> Result<String> {
     let permission = match kind {
         AgentKind::Codex => PermissionMode::ReadOnly,
-        AgentKind::Claude | AgentKind::Opencode => PermissionMode::Ask,
+        AgentKind::Claude | AgentKind::Opencode | AgentKind::Omp | AgentKind::Pi => {
+            PermissionMode::Ask
+        }
     };
     let reasoning = match kind {
         AgentKind::Claude | AgentKind::Codex => Some(ReasoningLevel::Low),
-        AgentKind::Opencode => None,
+        AgentKind::Opencode | AgentKind::Omp | AgentKind::Pi => None,
     };
     let request = RunRequest {
         prompt,
