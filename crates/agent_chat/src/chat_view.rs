@@ -215,6 +215,7 @@ pub struct ChatView {
     diagram_theme: Option<(Arc<theme::Theme>, DiagramTheme)>,
     diagram_images: HashMap<u64, Arc<gpui::Image>>,
     diagram_sources: HashSet<String>,
+    diagram_generation: usize,
     diagram_sources_shown: HashSet<String>,
     editing_queued: Option<queue_panel::QueuedEdit>,
     lightbox_focus: FocusHandle,
@@ -309,7 +310,7 @@ impl ChatView {
             }),
             cx.on_release(|this, cx| {
                 this.clear_search_highlights(cx);
-                this.release_diagram_images(None, cx);
+                this.release_diagram_images(cx);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
                 this.window_active = window.is_window_active();
@@ -404,6 +405,7 @@ impl ChatView {
             diagram_theme: None,
             diagram_images: HashMap::default(),
             diagram_sources: HashSet::default(),
+            diagram_generation: 0,
             diagram_sources_shown: HashSet::default(),
             editing_queued: None,
             lightbox_focus: cx.focus_handle(),
@@ -1188,7 +1190,7 @@ impl ChatView {
         let view_for_hide = view.clone();
         let copied = self.copied.clone();
         CodeBlockRenderer::Custom {
-            render: Arc::new(move |kind, parsed, range, metadata, _, cx| {
+            render: Arc::new(move |kind, parsed, range, metadata, window, cx| {
                 let colors = cx.theme().colors();
                 let language: SharedString = match kind {
                     CodeBlockKind::FencedLang(language) => language.clone(),
@@ -1213,7 +1215,14 @@ impl ChatView {
                     view.upgrade().map(|chat| {
                         let shown_source =
                             chat.read(cx).diagram_sources_shown.contains(code.trim_end());
-                        let diagram = chat.read(cx).diagrams.read(cx).get(&code).cloned();
+                        let diagrams = chat.read(cx).diagrams.read(cx);
+                        let diagram = diagrams.get(&code).cloned();
+                        if diagrams.was_dropped(&code) {
+                            let code = code.clone();
+                            window.on_next_frame(move |_, cx| {
+                                chat.update(cx, |chat, cx| chat.request_diagrams(vec![code], cx));
+                            });
+                        }
                         (shown_source, diagram)
                     })
                 } else {
@@ -1466,7 +1475,7 @@ impl ChatView {
         self.scanned_tail = tail;
         self.scanned_entries = entries.len();
         self.check_paths(paths, cx);
-        self.request_diagrams(diagrams, None, cx);
+        self.request_diagrams(diagrams, cx);
     }
 
     fn message_style_for_frame(&mut self, window: &Window, cx: &App) -> MarkdownStyle {
@@ -3909,7 +3918,8 @@ impl ChatView {
         }
         self.sync_transcript(cx);
         self.update_scroll_state();
-        self.refresh_diagrams(window, cx);
+        self.refresh_diagrams(cx);
+        self.release_dropped_diagram_images(window, cx);
         self.observe_todo(cx);
         self.images
             .update(cx, |images, cx| images.start_frame(window, cx));

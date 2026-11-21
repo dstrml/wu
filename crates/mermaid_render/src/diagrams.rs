@@ -18,17 +18,31 @@ pub enum Diagram {
     Failed(String),
 }
 
+struct Requested {
+    diagram: Diagram,
+    request: u64,
+}
+
 #[derive(Default)]
 pub struct MermaidDiagrams {
     theme: Option<DiagramTheme>,
     generation: usize,
-    diagrams: HashMap<String, Diagram>,
+    requests: u64,
+    diagrams: HashMap<String, Requested>,
+    dropped: HashSet<String>,
     tasks: HashMap<String, Task<()>>,
 }
 
 impl MermaidDiagrams {
     pub fn get(&self, source: &str) -> Option<&Diagram> {
-        self.diagrams.get(&normalize(source))
+        self.diagrams
+            .get(&normalize(source))
+            .map(|requested| &requested.diagram)
+    }
+
+    /// Whether `source` was dropped to make room and has to be requested again to show.
+    pub fn was_dropped(&self, source: &str) -> bool {
+        !self.dropped.is_empty() && self.dropped.contains(&normalize(source))
     }
 
     pub fn is_ready(&self, source: &str) -> bool {
@@ -40,19 +54,61 @@ impl MermaidDiagrams {
         self.generation
     }
 
+    /// Keeps at most `MAX_DIAGRAMS`, dropping the ones requested longest ago.
     pub fn request(&mut self, source: &str, theme: &DiagramTheme, cx: &mut Context<Self>) {
-        if self.theme.as_ref() != Some(theme) {
-            self.theme = Some(theme.clone());
-            self.clear();
-        }
+        self.use_theme(theme);
         let key = normalize(source);
-        if self.diagrams.contains_key(&key) {
+        self.requests += 1;
+        if let Some(requested) = self.diagrams.get_mut(&key) {
+            requested.request = self.requests;
             return;
         }
         if self.diagrams.len() >= MAX_DIAGRAMS {
-            self.clear();
+            self.drop_oldest();
         }
-        self.diagrams.insert(key.clone(), Diagram::Pending);
+        self.dropped.remove(&key);
+        self.draw(key, theme, cx);
+    }
+
+    /// Keeps exactly the listed diagrams, however many, for views that show one document.
+    pub fn show_only(&mut self, sources: &[&str], theme: &DiagramTheme, cx: &mut Context<Self>) {
+        self.use_theme(theme);
+        self.retain(sources);
+        for source in sources {
+            let key = normalize(source);
+            if !self.diagrams.contains_key(&key) {
+                self.draw(key, theme, cx);
+            }
+        }
+    }
+
+    fn retain(&mut self, sources: &[&str]) {
+        let sources = sources
+            .iter()
+            .map(|source| normalize(source))
+            .collect::<HashSet<_>>();
+        self.diagrams.retain(|source, _| sources.contains(source));
+        self.tasks.retain(|source, _| sources.contains(source));
+    }
+
+    fn use_theme(&mut self, theme: &DiagramTheme) {
+        if self.theme.as_ref() != Some(theme) {
+            self.theme = Some(theme.clone());
+            self.diagrams.clear();
+            self.tasks.clear();
+            self.dropped.clear();
+            self.generation += 1;
+        }
+    }
+
+    fn draw(&mut self, key: String, theme: &DiagramTheme, cx: &mut Context<Self>) {
+        self.diagrams.insert(
+            key.clone(),
+            Requested {
+                diagram: Diagram::Pending,
+                request: self.requests,
+            },
+        );
         let source = key.clone();
         let theme = theme.clone();
         let task = cx.spawn({
@@ -64,7 +120,9 @@ impl MermaidDiagrams {
                     .await;
                 this.update(cx, |this, cx| {
                     this.tasks.remove(&key);
-                    this.diagrams.insert(key, diagram);
+                    if let Some(requested) = this.diagrams.get_mut(&key) {
+                        requested.diagram = diagram;
+                    }
                     cx.notify();
                 })
                 .log_err();
@@ -73,20 +131,18 @@ impl MermaidDiagrams {
         self.tasks.insert(key, task);
     }
 
-    /// Drops every diagram whose source isn't listed, for views that show one document.
-    pub fn retain(&mut self, sources: &[&str]) {
-        let sources = sources
+    fn drop_oldest(&mut self) {
+        let oldest = self
+            .diagrams
             .iter()
-            .map(|source| normalize(source))
-            .collect::<HashSet<_>>();
-        self.diagrams.retain(|source, _| sources.contains(source));
-        self.tasks.retain(|source, _| sources.contains(source));
-    }
-
-    fn clear(&mut self) {
-        self.diagrams.clear();
-        self.tasks.clear();
-        self.generation += 1;
+            .min_by_key(|(_, requested)| requested.request)
+            .map(|(source, _)| source.clone());
+        if let Some(oldest) = oldest {
+            self.diagrams.remove(&oldest);
+            self.tasks.remove(&oldest);
+            self.dropped.insert(oldest);
+            self.generation += 1;
+        }
     }
 }
 
@@ -159,7 +215,9 @@ mod tests {
             diagrams.generation()
         });
 
-        diagrams.update(cx, |diagrams, _| diagrams.retain(&[flowchart]));
+        diagrams.update(cx, |diagrams, cx| {
+            diagrams.show_only(&[flowchart], &theme(0.), cx)
+        });
         diagrams.read_with(cx, |diagrams, _| {
             assert!(diagrams.get(broken).is_none());
             assert!(diagrams.is_ready(flowchart));
@@ -172,6 +230,56 @@ mod tests {
         diagrams.read_with(cx, |diagrams, _| {
             assert!(matches!(diagrams.get(flowchart), Some(Diagram::Pending)));
             assert_ne!(diagrams.generation(), generation);
+        });
+    }
+
+    #[gpui::test]
+    fn only_the_oldest_diagram_makes_room_and_one_document_keeps_them_all(cx: &mut TestAppContext) {
+        let diagrams = cx.new(|_| MermaidDiagrams::default());
+        let source = |index: usize| format!("flowchart TD\nA --> B{index}\n");
+        diagrams.update(cx, |diagrams, cx| {
+            for index in 0..MAX_DIAGRAMS {
+                diagrams.request(&source(index), &theme(0.), cx);
+            }
+            diagrams.request(&source(0), &theme(0.), cx);
+        });
+        cx.run_until_parked();
+        let generation = diagrams.read_with(cx, |diagrams, _| diagrams.generation());
+
+        diagrams.update(cx, |diagrams, cx| {
+            diagrams.request(&source(MAX_DIAGRAMS), &theme(0.), cx)
+        });
+        cx.run_until_parked();
+        diagrams.read_with(cx, |diagrams, _| {
+            assert!(diagrams.get(&source(1)).is_none());
+            assert!(diagrams.was_dropped(&source(1)));
+            assert!(
+                diagrams.is_ready(&source(0)),
+                "asked for again, so it stays"
+            );
+            assert!(diagrams.is_ready(&source(2)));
+            assert!(diagrams.is_ready(&source(MAX_DIAGRAMS)));
+            assert_ne!(diagrams.generation(), generation);
+        });
+
+        diagrams.update(cx, |diagrams, cx| {
+            diagrams.request(&source(1), &theme(0.), cx)
+        });
+        cx.run_until_parked();
+        diagrams.read_with(cx, |diagrams, _| {
+            assert!(diagrams.is_ready(&source(1)));
+            assert!(!diagrams.was_dropped(&source(1)));
+            assert!(diagrams.was_dropped(&source(2)));
+        });
+
+        let document: Vec<String> = (0..MAX_DIAGRAMS + 6).map(source).collect();
+        let document: Vec<&str> = document.iter().map(String::as_str).collect();
+        diagrams.update(cx, |diagrams, cx| {
+            diagrams.show_only(&document, &theme(0.), cx)
+        });
+        cx.run_until_parked();
+        diagrams.read_with(cx, |diagrams, _| {
+            assert!(document.iter().all(|source| diagrams.is_ready(source)));
         });
     }
 }

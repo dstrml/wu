@@ -26,6 +26,8 @@ use normalize::Feed;
 const MAX_LISTED_SESSIONS: usize = 500;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 const COMMANDS_WAIT: Duration = Duration::from_secs(8);
+/// ACP updates name no turn, so the next prompt waits until a stopped turn has gone quiet.
+const STOPPED_TURN_SETTLE: Duration = Duration::from_millis(250);
 
 pub struct AcpAgent {
     pub id: HarnessId,
@@ -1076,6 +1078,7 @@ async fn run_session(session: Session) {
     let mut stop_ack = None;
     let mut stop_kill_starts_at = None;
     let mut stopped_turn_may_trail = false;
+    let mut stopped_turn_settles_at: Option<tokio::time::Instant> = None;
     let mut pending_settings: Option<TurnSettings> = None;
     let mut unanswered = CancellationToken::new();
     let mut done_sent = false;
@@ -1085,7 +1088,12 @@ async fn run_session(session: Session) {
         ($update:expr, $label:lifetime) => {{
             let update: &Value = $update;
             config.note_update(update);
-            if !(stopped_turn_may_trail && normalize::is_turn_content(update)) {
+            if stopped_turn_may_trail && normalize::is_turn_content(update) {
+                if stopped_turn_settles_at.is_some() {
+                    stopped_turn_settles_at =
+                        Some(tokio::time::Instant::now() + STOPPED_TURN_SETTLE);
+                }
+            } else {
                 for event in feed.update(update) {
                     if !send(&event_tx, event).await {
                         break $label;
@@ -1117,6 +1125,7 @@ async fn run_session(session: Session) {
             running = true;
             done_sent = false;
             stopped_turn_may_trail = false;
+            stopped_turn_settles_at = None;
             let (previous, next) = feed.rotate();
             if !send(
                 &event_tx,
@@ -1206,6 +1215,8 @@ async fn run_session(session: Session) {
                 if stopping {
                     stopping = false;
                     stopped_turn_may_trail = true;
+                    stopped_turn_settles_at =
+                        Some(tokio::time::Instant::now() + STOPPED_TURN_SETTLE);
                     feed.close_tools();
                     if let Some(handle) = escalation.take() {
                         handle.abort();
@@ -1242,7 +1253,7 @@ async fn run_session(session: Session) {
                     if message.settings.is_some() {
                         pending_settings = message.settings;
                     }
-                    if running && !agent.steers_mid_turn {
+                    if (running && !agent.steers_mid_turn) || stopped_turn_settles_at.is_some() {
                         queued.push_back(blocks);
                         continue;
                     }
@@ -1253,6 +1264,15 @@ async fn run_session(session: Session) {
                     if !running {
                         break 'main;
                     }
+                }
+            },
+
+            _ = tokio::time::sleep_until(
+                stopped_turn_settles_at.unwrap_or_else(tokio::time::Instant::now)
+            ), if stopped_turn_settles_at.is_some() => {
+                stopped_turn_settles_at = None;
+                if let Some(blocks) = queued.pop_front() {
+                    start_prompt!(blocks, 'main);
                 }
             },
 

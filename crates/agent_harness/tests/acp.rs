@@ -608,6 +608,40 @@ async fn a_stopped_turn_withdraws_its_questions_and_drops_late_output() {
 }
 
 #[tokio::test]
+async fn output_trailing_a_stopped_turn_stays_out_of_the_next_reply() {
+    let (asked_tx, mut asked) = mpsc::unbounded_channel();
+    let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (steer, steer_rx) = mpsc::channel(8);
+    let run_controls = RunControls {
+        request_input: Box::new({
+            let held = held.clone();
+            move |_| {
+                let (tx, rx) = oneshot::channel();
+                held.lock().unwrap().push(tx);
+                asked_tx.send(()).unwrap();
+                rx
+            }
+        }),
+        steering: steer_rx,
+        interrupt: CancellationToken::new(),
+        permission: tokio::sync::watch::channel(PermissionMode::Ask).1,
+    };
+    let mut stream = harness().run(request("halt"), run_controls).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), asked.recv())
+        .await
+        .expect("the agent asks for permission")
+        .unwrap();
+    steer.send(stop()).await.unwrap();
+    steer.send(message("pid", None)).await.unwrap();
+    let stopped = collect_until_done(&mut stream).await;
+    assert_eq!(done(&stopped), (DoneStatus::Interrupted, None));
+
+    let next = collect_until_done(&mut stream).await;
+    assert_eq!(done(&next), (DoneStatus::Completed, None));
+    assert!(texts(&next).starts_with("pid="), "{}", texts(&next));
+}
+
+#[tokio::test]
 async fn stopping_between_turns_does_nothing() {
     let (run_controls, steer, _interrupt) = controls("Allow");
     let mut stream = harness().run(request("pid"), run_controls).await.unwrap();

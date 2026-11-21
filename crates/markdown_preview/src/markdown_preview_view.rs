@@ -1160,10 +1160,7 @@ impl MarkdownPreviewView {
         }
         let sources = mermaid_sources(&source, &events);
         self.diagrams.update(cx, |diagrams, cx| {
-            diagrams.retain(&sources);
-            for diagram_source in &sources {
-                diagrams.request(diagram_source, theme, cx);
-            }
+            diagrams.show_only(&sources, theme, cx);
         });
         let generation = self.diagrams.read(cx).generation();
         self.diagram_scan = Some((events, theme.clone(), generation));
