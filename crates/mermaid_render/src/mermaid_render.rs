@@ -170,6 +170,13 @@ fn exceeds_complexity_limit(source: &str) -> bool {
 }
 
 fn render_svg(source: &str, palette: &Palette) -> Result<String, RenderError> {
+    let options = render_options(source, palette);
+    let layout = diagram_layout(source, &options)?;
+    let svg = mermaid_rs_renderer::render_svg(&layout, &options.theme, &options.layout);
+    Ok(restyle(svg, palette))
+}
+
+fn render_options(source: &str, palette: &Palette) -> mermaid_rs_renderer::RenderOptions {
     let mut options = mermaid_rs_renderer::RenderOptions::default();
     options.theme = if palette.dark {
         mermaid_rs_renderer::Theme::dark()
@@ -205,9 +212,203 @@ fn render_svg(source: &str, palette: &Palette) -> Result<String, RenderError> {
         // Gantt derives its bar hues from this color; a neutral gray turns every section red.
         theme.primary_border_color = palette.accent_line.clone();
     }
-    let svg = mermaid_rs_renderer::render_with_options(source, options)
+    options
+}
+
+fn diagram_layout(
+    source: &str,
+    options: &mermaid_rs_renderer::RenderOptions,
+) -> Result<mermaid_rs_renderer::Layout, RenderError> {
+    let parsed = mermaid_rs_renderer::parse_mermaid_strict(source)
         .map_err(|error| RenderError::Invalid(error.to_string()))?;
-    Ok(restyle(svg, palette))
+    let mut layout =
+        mermaid_rs_renderer::compute_layout(&parsed.graph, &options.theme, &options.layout);
+    if layout.kind == mermaid_rs_renderer::DiagramKind::Flowchart {
+        place_flowchart_labels(&mut layout, options.theme.font_size);
+    }
+    Ok(layout)
+}
+
+const EDGE_LABEL_PADDING: (f32, f32) = (4.5, 2.2);
+const EDGE_LABEL_MEASURED_AT: f32 = 16.0;
+const EDGE_LABEL_CLEARANCE: f32 = 4.0;
+const EDGE_LABEL_LINE_FRACTIONS: [f32; 15] = [
+    0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8, 0.15, 0.85,
+];
+const DIAGRAM_MARGIN: f32 = 8.0;
+const EDGE_LABEL_GAPS_BESIDE_LINE: [f32; 4] = [6.0, 16.0, 28.0, 40.0];
+
+#[derive(Clone, Copy, Debug)]
+struct Area {
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+}
+
+impl Area {
+    fn around(center: (f32, f32), width: f32, height: f32) -> Self {
+        Self {
+            left: center.0 - width / 2.0,
+            top: center.1 - height / 2.0,
+            right: center.0 + width / 2.0,
+            bottom: center.1 + height / 2.0,
+        }
+    }
+
+    fn grown(self, by: f32) -> Self {
+        Self {
+            left: self.left - by,
+            top: self.top - by,
+            right: self.right + by,
+            bottom: self.bottom + by,
+        }
+    }
+
+    fn overlaps(&self, other: &Area) -> bool {
+        self.left < other.right
+            && other.left < self.right
+            && self.top < other.bottom
+            && other.top < self.bottom
+    }
+
+    fn crossed_by(&self, line: &[(f32, f32)]) -> bool {
+        line.windows(2).any(|ends| {
+            let (start, end) = (ends[0], ends[1]);
+            let (mut enters, mut leaves) = (0.0_f32, 1.0_f32);
+            for (delta, low, high) in [
+                (end.0 - start.0, self.left - start.0, self.right - start.0),
+                (end.1 - start.1, self.top - start.1, self.bottom - start.1),
+            ] {
+                if delta == 0.0 {
+                    if low > 0.0 || high < 0.0 {
+                        return false;
+                    }
+                } else {
+                    let (first, second) = (low / delta, high / delta);
+                    enters = enters.max(first.min(second));
+                    leaves = leaves.min(first.max(second));
+                }
+            }
+            enters <= leaves
+        })
+    }
+}
+
+/// The library moves a label off its own line without looking at what it lands on, often a node.
+fn place_flowchart_labels(layout: &mut mermaid_rs_renderer::Layout, font_size: f32) {
+    let text_scale = (font_size / EDGE_LABEL_MEASURED_AT).min(1.0);
+    let nodes: Vec<Area> = layout
+        .nodes
+        .values()
+        .filter(|node| !node.hidden)
+        .map(|node| {
+            Area {
+                left: node.x,
+                top: node.y,
+                right: node.x + node.width,
+                bottom: node.y + node.height,
+            }
+            .grown(EDGE_LABEL_CLEARANCE)
+        })
+        .collect();
+    let lines: Vec<Vec<(f32, f32)>> = layout
+        .edges
+        .iter()
+        .map(|edge| edge.points.clone())
+        .collect();
+    let mut placed: Vec<Area> = Vec::new();
+    for (index, edge) in layout.edges.iter_mut().enumerate() {
+        let (Some(label), Some(anchor)) = (edge.label.as_mut(), edge.label_anchor) else {
+            continue;
+        };
+        label.width *= text_scale;
+        let width = label.width + EDGE_LABEL_PADDING.0 * 2.0;
+        let height = label.height + EDGE_LABEL_PADDING.1 * 2.0;
+        let best = label_spots(&edge.points, width, height)
+            .into_iter()
+            .filter_map(|center| {
+                let area = Area::around(center, width, height);
+                // The drawing can only grow right and down, so a label may not start before it.
+                let blocked = area.left < DIAGRAM_MARGIN
+                    || area.top < DIAGRAM_MARGIN
+                    || nodes
+                        .iter()
+                        .chain(&placed)
+                        .any(|taken| area.overlaps(taken));
+                if blocked {
+                    return None;
+                }
+                let lines_covered = lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, line)| *other != index && area.crossed_by(line))
+                    .count();
+                Some((lines_covered, center, area))
+            })
+            .min_by_key(|(lines_covered, _, _)| *lines_covered);
+        match best {
+            Some((_, center, area)) => {
+                edge.label_anchor = Some(center);
+                placed.push(area);
+            }
+            None => placed.push(Area::around(anchor, width, height)),
+        }
+    }
+    for label in &placed {
+        layout.width = layout.width.max(label.right + DIAGRAM_MARGIN);
+        layout.height = layout.height.max(label.bottom + DIAGRAM_MARGIN);
+    }
+}
+
+/// Spots for a label, best first: on its line near the middle, then beside the line.
+fn label_spots(line: &[(f32, f32)], width: f32, height: f32) -> Vec<(f32, f32)> {
+    let length: f32 = line.windows(2).map(|ends| distance(ends[0], ends[1])).sum();
+    if length <= 0.0 {
+        return Vec::new();
+    }
+    let on_line: Vec<((f32, f32), (f32, f32))> = EDGE_LABEL_LINE_FRACTIONS
+        .iter()
+        .filter_map(|fraction| point_along(line, length * fraction))
+        .collect();
+    let mut spots: Vec<(f32, f32)> = on_line.iter().map(|(point, _)| *point).collect();
+    for gap in EDGE_LABEL_GAPS_BESIDE_LINE {
+        for (point, direction) in &on_line {
+            let normal = (-direction.1, direction.0);
+            let reach = normal.0.abs() * width / 2.0 + normal.1.abs() * height / 2.0 + gap;
+            for side in [1.0, -1.0] {
+                spots.push((
+                    point.0 + normal.0 * reach * side,
+                    point.1 + normal.1 * reach * side,
+                ));
+            }
+        }
+    }
+    spots
+}
+
+fn point_along(line: &[(f32, f32)], mut travel: f32) -> Option<((f32, f32), (f32, f32))> {
+    for ends in line.windows(2) {
+        let (start, end) = (ends[0], ends[1]);
+        let segment = distance(start, end);
+        if segment <= 0.0 {
+            continue;
+        }
+        if travel <= segment {
+            let direction = ((end.0 - start.0) / segment, (end.1 - start.1) / segment);
+            let point = (
+                start.0 + direction.0 * travel,
+                start.1 + direction.1 * travel,
+            );
+            return Some((point, direction));
+        }
+        travel -= segment;
+    }
+    None
+}
+
+fn distance(from: (f32, f32), to: (f32, f32)) -> f32 {
+    (to.0 - from.0).hypot(to.1 - from.1)
 }
 
 fn diagram_keyword(source: &str) -> Option<&str> {
@@ -554,6 +755,56 @@ mod tests {
         assert!(diagram.width > 0.0 && diagram.height > 0.0);
         assert_eq!(render(source, theme), Ok(diagram.clone()));
         diagram
+    }
+
+    #[test]
+    fn edge_labels_stay_clear_of_nodes_and_each_other() {
+        let donations = "flowchart TD\n    Donor[Donor] -->|card, one-time or monthly| OC[Wu on Open Collective]\n    OC --> Host[Open Source Collective]\n    Host -->|keeps host fee| Fee[Host fee]\n    Host -->|holds the rest| Balance[Wu balance]\n    Maintainer[Maintainer] -->|submits expense| Balance\n    Balance -->|bank transfer via Wise| Bank[Pakistani bank account, PKR]\n";
+        let sideways = "flowchart LR\n    A[Client] -->|sends a long request| B[Server]\n    B -->|replies| C[Cache]\n    C -->|stores the answer| D[Disk]";
+        for source in [donations, sideways, FLOWCHART] {
+            let options = render_options(source, &Palette::new(&dark_theme()));
+            let layout = diagram_layout(source, &options).expect("diagram should lay out");
+            let nodes: Vec<Area> = layout
+                .nodes
+                .values()
+                .map(|node| Area {
+                    left: node.x,
+                    top: node.y,
+                    right: node.x + node.width,
+                    bottom: node.y + node.height,
+                })
+                .collect();
+            let labels: Vec<Area> = layout
+                .edges
+                .iter()
+                .filter_map(|edge| {
+                    let label = edge.label.as_ref()?;
+                    Some(Area::around(
+                        edge.label_anchor?,
+                        label.width + EDGE_LABEL_PADDING.0 * 2.0,
+                        label.height + EDGE_LABEL_PADDING.1 * 2.0,
+                    ))
+                })
+                .collect();
+            assert!(!labels.is_empty());
+            for (index, label) in labels.iter().enumerate() {
+                let inside = label.left >= 0.0
+                    && label.top >= 0.0
+                    && label.right <= layout.width
+                    && label.bottom <= layout.height;
+                assert!(inside, "{label:?} leaves the drawing in {source}");
+                assert!(
+                    !nodes.iter().any(|node| label.overlaps(node)),
+                    "{label:?} covers a node in {source}"
+                );
+                assert!(
+                    !labels[index + 1..]
+                        .iter()
+                        .any(|other| label.overlaps(other)),
+                    "{label:?} covers another label in {source}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -10,6 +10,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 - Agents left idle for 15 minutes are terminated till the next message is sent.
 - Faster Git refresh and commit history in large repositories.
 - Faster search panel on files with very long lines.
+- Fix Mermaid rendering issues.
 
 ## 1.4.0 - 2026-11-21
 
