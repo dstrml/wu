@@ -5959,29 +5959,10 @@ impl EditorElement {
         for (scrollbar_layout, axis) in scrollbars_layout.iter_scrollbars() {
             let hitbox = &scrollbar_layout.hitbox;
             if scrollbars_layout.visible {
-                let scrollbar_edges = match axis {
-                    ScrollbarAxis::Horizontal => Edges {
-                        top: Pixels::ZERO,
-                        right: Pixels::ZERO,
-                        bottom: Pixels::ZERO,
-                        left: Pixels::ZERO,
-                    },
-                    ScrollbarAxis::Vertical => Edges {
-                        top: Pixels::ZERO,
-                        right: Pixels::ZERO,
-                        bottom: Pixels::ZERO,
-                        left: ScrollbarLayout::BORDER_WIDTH,
-                    },
-                };
-
                 window.paint_layer(hitbox.bounds, |window| {
-                    window.paint_quad(quad(
+                    window.paint_quad(fill(
                         hitbox.bounds,
-                        Corners::default(),
                         cx.theme().colors().scrollbar_track_background,
-                        scrollbar_edges,
-                        cx.theme().colors().scrollbar_track_border,
-                        BorderStyle::Solid,
                     ));
 
                     if axis == ScrollbarAxis::Vertical {
@@ -6011,13 +5992,20 @@ impl EditorElement {
                                 cx.theme().colors().scrollbar_thumb_background
                             }
                         };
-                        window.paint_quad(quad(
-                            thumb_bounds,
-                            Corners::default(),
-                            scrollbar_thumb_color,
-                            scrollbar_edges,
-                            cx.theme().colors().scrollbar_thumb_border,
-                            BorderStyle::Solid,
+                        let thumb_bounds = thumb_bounds.extend(match axis {
+                            ScrollbarAxis::Horizontal => Edges {
+                                top: -ScrollbarLayout::THUMB_INSET,
+                                bottom: -ScrollbarLayout::THUMB_INSET,
+                                ..Default::default()
+                            },
+                            ScrollbarAxis::Vertical => Edges {
+                                left: -ScrollbarLayout::THUMB_INSET,
+                                right: -ScrollbarLayout::THUMB_INSET,
+                                ..Default::default()
+                            },
+                        });
+                        window.paint_quad(fill(thumb_bounds, scrollbar_thumb_color).corner_radii(
+                            Corners::all(Pixels::MAX).clamp_radii_for_quad_size(thumb_bounds.size),
                         ));
 
                         if any_scrollbar_dragged {
@@ -10161,6 +10149,7 @@ struct ScrollbarLayout {
 
 impl ScrollbarLayout {
     const BORDER_WIDTH: Pixels = px(1.0);
+    const THUMB_INSET: Pixels = px(2.0);
     const LINE_MARKER_HEIGHT: Pixels = px(2.0);
     const MIN_MARKER_HEIGHT: Pixels = px(5.0);
     const MIN_THUMB_SIZE: Pixels = px(25.0);

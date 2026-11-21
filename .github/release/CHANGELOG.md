@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Thinner, rounded scrollbar in the editor.
+
 ## 1.4.0 - 2026-11-21
 
 - Support git ops like cherry-pick, merge, and squash.
