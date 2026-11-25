@@ -635,7 +635,7 @@ rsa = "0.9.6"
 rust-embed = { version = "8.11", features = ["include-exclude"] }
 rustc-hash = "2.1.0"
 rustix = { version = "1.1", features = ["fs"] }
-rustls = { version = "0.23.26" }
+rustls = { version = "0.23.26", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 rustls-platform-verifier = "0.7"
 
 schemars = { version = "1.0", features = ["indexmap2"] }
