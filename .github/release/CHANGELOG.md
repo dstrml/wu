@@ -5,6 +5,7 @@ All notable user-facing changes to Wu are listed here, newest first.
 ## Unreleased
 
 - Fix Chinese and other input methods stopping on Linux X11.
+- Fix Node.js language servers failing in projects with old node versions pinned.
 
 ## 1.5.0 - 2026-11-22
 

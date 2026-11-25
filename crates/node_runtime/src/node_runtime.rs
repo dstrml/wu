@@ -933,19 +933,29 @@ impl SystemNodeRuntime {
     const MIN_VERSION: semver::Version = Version::new(22, 0, 0);
     async fn new(node: PathBuf, npm: PathBuf) -> Result<Self> {
         let output = util::command::new_command(&node)
-            .arg("--version")
+            .args([
+                "-e",
+                "console.log(process.version); console.log(process.execPath)",
+            ])
             .output()
             .await
             .with_context(|| format!("running node from {:?}", node))?;
         if !output.status.success() {
             anyhow::bail!(
-                "failed to run node --version. stdout: {}, stderr: {}",
+                "failed to run node to check its version. stdout: {}, stderr: {}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
             );
         }
-        let version_str = String::from_utf8_lossy(&output.stdout);
-        let version = semver::Version::parse(version_str.trim().trim_start_matches('v'))?;
+        let (version, executable_path) =
+            parse_node_probe_output(&String::from_utf8_lossy(&output.stdout))?;
+        // Version managers put a shim on PATH that picks a Node version from the working directory.
+        let node = match executable_path {
+            Some(executable_path) if fs::metadata(&executable_path).await.is_ok() => {
+                executable_path
+            }
+            _ => node,
+        };
         if version < Self::MIN_VERSION {
             anyhow::bail!(
                 "node at {} is too old. want: {}, got: {}",
@@ -972,6 +982,18 @@ impl SystemNodeRuntime {
         let npm = which::which("npm").map_err(DetectError::NotInPath)?;
         Self::new(node, npm).await.map_err(DetectError::Other)
     }
+}
+
+fn parse_node_probe_output(stdout: &str) -> Result<(Version, Option<PathBuf>)> {
+    let mut lines = stdout.lines().map(str::trim);
+    let version_line = lines.next().context("node printed no version")?;
+    let version = Version::parse(version_line.trim_start_matches('v'))
+        .with_context(|| format!("parsing node version {version_line:?}"))?;
+    let executable_path = lines
+        .next()
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from);
+    Ok((version, executable_path))
 }
 
 enum DetectError {
@@ -1271,7 +1293,8 @@ mod tests {
 
     use super::{
         NpmInfo, VersionStrategy, build_npm_command_args, deserialize_npm_info_from_response,
-        proxy_argument, select_npm_package_version, should_install_npm_package_version,
+        parse_node_probe_output, proxy_argument, select_npm_package_version,
+        should_install_npm_package_version,
     };
 
     // Map localhost to 127.0.0.1
@@ -1729,6 +1752,28 @@ mod tests {
                 Version::parse("3.0.0")?
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_node_probe_output() -> Result<()> {
+        let (version, executable_path) = parse_node_probe_output(
+            "v24.18.0\n/Users/me/.vite-plus/js_runtime/node/24.18.0/bin/node\n",
+        )?;
+        assert_eq!(version, Version::parse("24.18.0")?);
+        assert_eq!(
+            executable_path.as_deref(),
+            Some(Path::new(
+                "/Users/me/.vite-plus/js_runtime/node/24.18.0/bin/node"
+            ))
+        );
+
+        let (version, executable_path) = parse_node_probe_output("v22.1.0\r\n")?;
+        assert_eq!(version, Version::parse("22.1.0")?);
+        assert_eq!(executable_path, None);
+
+        assert!(parse_node_probe_output("").is_err());
+        assert!(parse_node_probe_output("not a version\n").is_err());
         Ok(())
     }
 }
