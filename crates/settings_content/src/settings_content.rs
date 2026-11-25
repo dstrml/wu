@@ -124,7 +124,7 @@ macro_rules! settings_overrides {
         }
     }
 }
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hash;
 pub use util::serde::default_true;
 
@@ -1473,7 +1473,32 @@ pub enum ImageFileSizeUnit {
 pub struct RemoteSettingsContent {
     pub ssh_connections: Option<Vec<SshConnection>>,
     pub wsl_connections: Option<Vec<WslConnection>>,
+    pub dev_container_connections: Option<Vec<DevContainerConnection>>,
     pub read_ssh_config: Option<bool>,
+    pub use_podman: Option<bool>,
+    /// Whether to build dev container images with BuildKit.
+    ///
+    /// When unset, Wu auto-detects BuildKit by probing for the `buildx` CLI
+    /// plugin. Set to `false` to force the classic Docker builder, which is
+    /// required for Docker-compatible engines that lack an integrated BuildKit
+    /// (e.g. Apple Container via a Docker-API bridge), where BuildKit builds
+    /// cannot resolve locally-built images.
+    ///
+    /// Default: null (auto-detect)
+    pub dev_container_use_buildkit: Option<bool>,
+}
+
+#[with_fallible_options]
+#[derive(
+    Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, MergeFrom, Hash,
+)]
+pub struct DevContainerConnection {
+    pub name: String,
+    pub remote_user: String,
+    pub container_id: String,
+    pub use_podman: bool,
+    pub extension_ids: Vec<String>,
+    pub remote_env: BTreeMap<String, String>,
 }
 
 #[with_fallible_options]

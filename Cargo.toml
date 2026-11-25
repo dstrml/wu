@@ -28,6 +28,7 @@ members = [
     "crates/debug_adapter_extension",
     "crates/debugger_tools",
     "crates/debugger_ui",
+    "crates/dev_container",
     "crates/diagnostics",
     "crates/dictation",
     "crates/editor",
@@ -226,6 +227,7 @@ db = { path = "crates/db" }
 debug_adapter_extension = { path = "crates/debug_adapter_extension" }
 debugger_tools = { path = "crates/debugger_tools" }
 debugger_ui = { path = "crates/debugger_ui" }
+dev_container = { path = "crates/dev_container" }
 derive_refineable = { path = "crates/refineable/derive_refineable" }
 diagnostics = { path = "crates/diagnostics" }
 dictation = { path = "crates/dictation" }

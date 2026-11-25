@@ -4,7 +4,7 @@
   "Are you sure you want to restart?": "确定要重启吗？",
   "Bottom dock": "底部停靠栏",
   "Cancel": "取消",
-  "Cannot drop local files on a remote SSH project": "无法将本地文件拖放到远程 SSH 项目中",
+  "Cannot drop local files on a remote SSH/Docker project": "无法将本地文件拖放到远程 SSH/Docker 项目中",
   "Click to Close": "点击关闭",
   "Click to close": "点击关闭",
   "Clone Repository": "克隆仓库",

@@ -1,0 +1,14 @@
+{
+  "Confirm Selections": "确认所选项",
+  "Create Dev Container": "创建开发容器",
+  "Error Creating Dev Container Definition": "创建开发容器定义时出错",
+  "Error Retrieving Templates": "获取模板时出错",
+  "Overwrite Existing Configuration?": "覆盖现有配置？",
+  "Querying features...": "正在查询功能...",
+  "Querying template registry...": "正在查询模板仓库...",
+  "Search for Dev Container Templates": "搜索开发容器模板",
+  "Select Feature": "选择功能",
+  "Select a template": "选择模板",
+  "Select features to add": "选择要添加的功能",
+  "Template Option: ": "模板选项："
+}

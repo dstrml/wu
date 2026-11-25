@@ -12,6 +12,7 @@
   "Currently Checked Out: {branch}": "当前签出：{branch}",
   "Currently In Use: {worktree}": "当前使用：{worktree}",
   "Detached HEAD: {branch}": "分离的 HEAD：{branch}",
+  "Dev Container": "开发容器",
   "Disconnected from {host}": "已与 {host} 断开连接",
   "Introducing:": "新功能：",
   "It won't show again for this feature": "此功能的公告不会再显示",

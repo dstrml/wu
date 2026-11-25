@@ -231,6 +231,26 @@ pub fn strip_path_suffix<'a>(base: &'a Path, suffix: &Path) -> Option<&'a Path> 
     None
 }
 
+pub fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(..) | Component::RootDir => {
+                normalized.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(name) => {
+                normalized.push(name);
+            }
+        }
+    }
+    normalized
+}
+
 /// In memory, this is identical to `Path`. On non-Windows conversions to this type are no-ops. On
 /// windows, these conversions sanitize UNC paths by removing the `\\\\?\\` prefix.
 #[derive(Eq, PartialEq, Hash, Ord, PartialOrd)]

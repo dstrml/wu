@@ -66,6 +66,8 @@ pub enum CliRequest {
         env: Option<HashMap<String, String>>,
         user_data_dir: Option<String>,
         #[serde(default)]
+        dev_container: bool,
+        #[serde(default)]
         cwd: Option<PathBuf>,
     },
     SetOpenBehavior {

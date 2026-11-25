@@ -37,6 +37,7 @@ pub(crate) struct RemoteConnectionId(pub u64);
 pub(crate) enum RemoteConnectionKind {
     Ssh,
     Wsl,
+    Docker,
 }
 
 #[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
@@ -158,6 +159,7 @@ impl RemoteConnectionKind {
         match self {
             RemoteConnectionKind::Ssh => "ssh",
             RemoteConnectionKind::Wsl => "wsl",
+            RemoteConnectionKind::Docker => "docker",
         }
     }
 
@@ -165,6 +167,7 @@ impl RemoteConnectionKind {
         match text {
             "ssh" => Some(Self::Ssh),
             "wsl" => Some(Self::Wsl),
+            "docker" => Some(Self::Docker),
             _ => None,
         }
     }

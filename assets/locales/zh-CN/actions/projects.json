@@ -1,4 +1,12 @@
 {
+  "projects::InitializeDevContainer": {
+    "description": "为当前项目创建开发容器配置。",
+    "name": "初始化开发容器"
+  },
+  "projects::OpenDevContainer": {
+    "description": "打开开发容器连接窗口。",
+    "name": "打开开发容器"
+  },
   "projects::OpenFolderInWsl": {
     "description": "在 WSL 中打开一个文件夹。",
     "name": "在 WSL 中打开文件夹"
