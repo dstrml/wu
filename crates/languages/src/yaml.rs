@@ -70,9 +70,10 @@ impl LspInstaller for YamlLspAdapter {
         &self,
         _latest_version: Self::BinaryVersion,
         container_dir: PathBuf,
-        _: &Arc<dyn LspAdapterDelegate>,
+        delegate: &Arc<dyn LspAdapterDelegate>,
     ) -> impl Send + Future<Output = Result<LanguageServerBinary>> + use<> {
         let node = self.node.clone();
+        let worktree_root = delegate.worktree_root_path().to_path_buf();
 
         async move {
             let server_path = container_dir.join(SERVER_PATH);
@@ -81,7 +82,7 @@ impl LspInstaller for YamlLspAdapter {
                 .await?;
 
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(&worktree_root).await?,
                 env: None,
                 arguments: server_binary_arguments(&server_path),
             })
@@ -92,11 +93,12 @@ impl LspInstaller for YamlLspAdapter {
         &self,
         version: &Self::BinaryVersion,
         container_dir: &PathBuf,
-        _: &Arc<dyn LspAdapterDelegate>,
+        delegate: &Arc<dyn LspAdapterDelegate>,
     ) -> impl Send + Future<Output = Option<LanguageServerBinary>> + use<> {
         let node = self.node.clone();
         let version = version.clone();
         let container_dir = container_dir.clone();
+        let worktree_root = delegate.worktree_root_path().to_path_buf();
 
         async move {
             let server_path = container_dir.join(SERVER_PATH);
@@ -114,7 +116,7 @@ impl LspInstaller for YamlLspAdapter {
                 None
             } else {
                 Some(LanguageServerBinary {
-                    path: node.binary_path().await.ok()?,
+                    path: node.binary_path_in(&worktree_root).await.ok()?,
                     env: None,
                     arguments: server_binary_arguments(&server_path),
                 })
@@ -125,9 +127,9 @@ impl LspInstaller for YamlLspAdapter {
     async fn cached_server_binary(
         &self,
         container_dir: PathBuf,
-        _: &dyn LspAdapterDelegate,
+        delegate: &dyn LspAdapterDelegate,
     ) -> Option<LanguageServerBinary> {
-        get_cached_server_binary(container_dir, &self.node).await
+        get_cached_server_binary(container_dir, &self.node, delegate.worktree_root_path()).await
     }
 }
 
@@ -206,6 +208,7 @@ fn worktree_root(delegate: &Arc<dyn LspAdapterDelegate>, settings: Option<Value>
 async fn get_cached_server_binary(
     container_dir: PathBuf,
     node: &NodeRuntime,
+    worktree_root: &Path,
 ) -> Option<LanguageServerBinary> {
     maybe!(async {
         let server_path = container_dir.join(SERVER_PATH);
@@ -214,7 +217,7 @@ async fn get_cached_server_binary(
             "missing executable in directory {server_path:?}"
         );
         Ok(LanguageServerBinary {
-            path: node.binary_path().await?,
+            path: node.binary_path_in(worktree_root).await?,
             env: None,
             arguments: server_binary_arguments(&server_path),
         })

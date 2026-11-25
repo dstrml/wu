@@ -644,11 +644,12 @@ impl PyrightLspAdapter {
     async fn get_cached_server_binary(
         container_dir: PathBuf,
         node: &NodeRuntime,
+        worktree_root: &Path,
     ) -> Option<LanguageServerBinary> {
         let server_path = container_dir.join(Self::SERVER_PATH);
         if server_path.exists() {
             Some(LanguageServerBinary {
-                path: node.binary_path().await.log_err()?,
+                path: node.binary_path_in(worktree_root).await.log_err()?,
                 env: None,
                 arguments: vec![server_path.into(), "--stdio".into()],
             })
@@ -818,7 +819,7 @@ impl LspInstaller for PyrightLspAdapter {
 
             let env = delegate.shell_env().await;
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(delegate.worktree_root_path()).await?,
                 env: Some(env),
                 arguments: vec![server_path.into(), "--stdio".into()],
             })
@@ -853,7 +854,10 @@ impl LspInstaller for PyrightLspAdapter {
             } else {
                 let env = delegate.shell_env().await;
                 Some(LanguageServerBinary {
-                    path: node.binary_path().await.ok()?,
+                    path: node
+                        .binary_path_in(delegate.worktree_root_path())
+                        .await
+                        .ok()?,
                     env: Some(env),
                     arguments: vec![server_path.into(), "--stdio".into()],
                 })
@@ -866,7 +870,12 @@ impl LspInstaller for PyrightLspAdapter {
         container_dir: PathBuf,
         delegate: &dyn LspAdapterDelegate,
     ) -> Option<LanguageServerBinary> {
-        let mut binary = Self::get_cached_server_binary(container_dir, &self.node).await?;
+        let mut binary = Self::get_cached_server_binary(
+            container_dir,
+            &self.node,
+            delegate.worktree_root_path(),
+        )
+        .await?;
         binary.env = Some(delegate.shell_env().await);
         Some(binary)
     }
@@ -2058,11 +2067,12 @@ impl BasedPyrightLspAdapter {
     async fn get_cached_server_binary(
         container_dir: PathBuf,
         node: &NodeRuntime,
+        worktree_root: &Path,
     ) -> Option<LanguageServerBinary> {
         let server_path = container_dir.join(Self::SERVER_PATH);
         if server_path.exists() {
             Some(LanguageServerBinary {
-                path: node.binary_path().await.log_err()?,
+                path: node.binary_path_in(worktree_root).await.log_err()?,
                 env: None,
                 arguments: vec![server_path.into(), "--stdio".into()],
             })
@@ -2258,7 +2268,7 @@ impl LspInstaller for BasedPyrightLspAdapter {
 
             let env = delegate.shell_env().await;
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(delegate.worktree_root_path()).await?,
                 env: Some(env),
                 arguments: vec![server_path.into(), "--stdio".into()],
             })
@@ -2293,7 +2303,10 @@ impl LspInstaller for BasedPyrightLspAdapter {
             } else {
                 let env = delegate.shell_env().await;
                 Some(LanguageServerBinary {
-                    path: node.binary_path().await.ok()?,
+                    path: node
+                        .binary_path_in(delegate.worktree_root_path())
+                        .await
+                        .ok()?,
                     env: Some(env),
                     arguments: vec![server_path.into(), "--stdio".into()],
                 })
@@ -2306,7 +2319,12 @@ impl LspInstaller for BasedPyrightLspAdapter {
         container_dir: PathBuf,
         delegate: &dyn LspAdapterDelegate,
     ) -> Option<LanguageServerBinary> {
-        let mut binary = Self::get_cached_server_binary(container_dir, &self.node).await?;
+        let mut binary = Self::get_cached_server_binary(
+            container_dir,
+            &self.node,
+            delegate.worktree_root_path(),
+        )
+        .await?;
         binary.env = Some(delegate.shell_env().await);
         Some(binary)
     }

@@ -39,3 +39,6 @@ async-std.workspace = true
 
 [package.metadata.cargo-shear]
 ignored = ["async-std"]
+
+[dev-dependencies]
+tempfile.workspace = true

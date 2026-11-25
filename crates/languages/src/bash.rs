@@ -8,7 +8,12 @@ use node_runtime::{NodeRuntime, VersionStrategy};
 use project::{ContextProviderWithTasks, lsp_store::language_server_settings};
 use semver::Version;
 use serde_json::Value;
-use std::{future::Future, path::PathBuf, sync::Arc, vec};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    sync::Arc,
+    vec,
+};
 use task::{TaskTemplate, TaskTemplates, VariableName};
 use util::{ResultExt, maybe};
 
@@ -44,6 +49,7 @@ impl BashLspAdapter {
         container_dir: PathBuf,
         env: HashMap<String, String>,
         node: &NodeRuntime,
+        worktree_root: &Path,
     ) -> Option<lsp::LanguageServerBinary> {
         maybe!(async {
             let server_path = container_dir
@@ -54,7 +60,7 @@ impl BashLspAdapter {
                 "missing executable in directory {server_path:?}"
             );
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(worktree_root).await?,
                 env: Some(env),
                 arguments: vec![server_path.into(), "start".into()],
             })
@@ -73,7 +79,13 @@ impl LspInstaller for BashLspAdapter {
         delegate: &dyn LspAdapterDelegate,
     ) -> Option<lsp::LanguageServerBinary> {
         let env = delegate.shell_env().await;
-        Self::get_cached_server_binary(container_dir, env, &self.node).await
+        Self::get_cached_server_binary(
+            container_dir,
+            env,
+            &self.node,
+            delegate.worktree_root_path(),
+        )
+        .await
     }
 
     async fn check_if_user_installed(
@@ -122,7 +134,10 @@ impl LspInstaller for BashLspAdapter {
             } else {
                 let env = delegate.shell_env().await;
                 Some(LanguageServerBinary {
-                    path: node.binary_path().await.ok()?,
+                    path: node
+                        .binary_path_in(delegate.worktree_root_path())
+                        .await
+                        .ok()?,
                     env: Some(env),
                     arguments: vec![server_path.into(), "start".into()],
                 })
@@ -160,7 +175,7 @@ impl LspInstaller for BashLspAdapter {
 
             let env = delegate.shell_env().await;
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(delegate.worktree_root_path()).await?,
                 env: Some(env),
                 arguments: vec![server_path.into(), "start".into()],
             })

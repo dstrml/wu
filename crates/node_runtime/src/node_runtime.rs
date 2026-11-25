@@ -56,7 +56,11 @@ pub struct NodeRuntime(Arc<Mutex<NodeRuntimeState>>);
 
 struct NodeRuntimeState {
     http: Arc<dyn HttpClient>,
-    instance: Option<Box<dyn NodeRuntimeTrait>>,
+    /// Cached instances keyed by the directory the system `node` was probed in. `None` means
+    /// the process working directory. Bucketing by directory keeps per-directory shims (nvm,
+    /// fnm, mise, volta, vite-plus `vp`, ...) honest: the probe and the language server run in
+    /// the same directory, so the version check sees the version that will actually run.
+    instances: HashMap<Option<PathBuf>, Box<dyn NodeRuntimeTrait>>,
     last_options: Option<NodeBinaryOptions>,
     options: watch::Receiver<Option<NodeBinaryOptions>>,
     shell_env_loaded: Shared<oneshot::Receiver<()>>,
@@ -70,7 +74,7 @@ impl NodeRuntime {
     ) -> Self {
         NodeRuntime(Arc::new(Mutex::new(NodeRuntimeState {
             http,
-            instance: None,
+            instances: HashMap::default(),
             last_options: None,
             options,
             shell_env_loaded: shell_env_loaded.unwrap_or(oneshot::channel().1).shared(),
@@ -80,14 +84,14 @@ impl NodeRuntime {
     pub fn unavailable() -> Self {
         NodeRuntime(Arc::new(Mutex::new(NodeRuntimeState {
             http: Arc::new(http_client::BlockedHttpClient),
-            instance: None,
+            instances: HashMap::default(),
             last_options: None,
             options: watch::channel(Some(NodeBinaryOptions::default())).1,
             shell_env_loaded: oneshot::channel().1.shared(),
         })))
     }
 
-    async fn instance(&self) -> Box<dyn NodeRuntimeTrait> {
+    async fn instance_for(&self, cwd: Option<&Path>) -> Box<dyn NodeRuntimeTrait> {
         let mut state = self.0.lock().await;
 
         let options = loop {
@@ -105,15 +109,21 @@ impl NodeRuntime {
             }
         };
 
+        // When options change, all probes are stale — drop them so detection runs with the
+        // fresh settings.
         if state.last_options.as_ref() != Some(&options) {
-            state.instance.take();
+            state.instances.clear();
         }
-        if let Some(instance) = state.instance.as_ref() {
+
+        // A probe done for one directory says nothing about another one, so a miss must run a
+        // fresh detection instead of reusing an instance cached for a different directory.
+        let cache_key = cwd.map(Path::to_path_buf);
+        if let Some(instance) = state.instances.get(&cache_key) {
             return instance.boxed_clone();
         }
 
         if let Some((node, npm)) = options.use_paths.as_ref() {
-            let instance = match SystemNodeRuntime::new(node.clone(), npm.clone()).await {
+            let instance = match SystemNodeRuntime::new(node.clone(), npm.clone(), None).await {
                 Ok(instance) => {
                     log::info!("using Node.js from `node.path` in settings: {:?}", instance);
                     Box::new(instance)
@@ -130,19 +140,20 @@ impl NodeRuntime {
                     });
                 }
             };
-            state.instance = Some(instance.boxed_clone());
+            state.instances.insert(cache_key, instance.boxed_clone());
             state.last_options = Some(options);
             return instance;
         }
 
         let system_node_error = if options.allow_path_lookup {
             state.shell_env_loaded.clone().await.ok();
-            match SystemNodeRuntime::detect().await {
+            match SystemNodeRuntime::detect(cwd).await {
                 Ok(instance) => {
                     log::info!("using Node.js found on PATH: {:?}", instance);
-                    state.instance = Some(instance.boxed_clone());
+                    let instance = instance.boxed_clone();
+                    state.instances.insert(cache_key, instance.boxed_clone());
                     state.last_options = Some(options);
-                    return Box::new(instance) as Box<dyn NodeRuntimeTrait>;
+                    return instance;
                 }
                 Err(err) => Some(err),
             }
@@ -209,13 +220,20 @@ impl NodeRuntime {
             })
         };
 
-        state.instance = Some(instance.boxed_clone());
+        state.instances.insert(cache_key, instance.boxed_clone());
         state.last_options = Some(options);
         instance
     }
 
+    /// Returns the node binary to use when running in `cwd` (typically the worktree root), so
+    /// that directory-aware shims (nvm/fnm/mise/volta/vp/etc.) report the version they will
+    /// actually run. The probe and its result are cached per directory.
+    pub async fn binary_path_in(&self, cwd: &Path) -> Result<PathBuf> {
+        self.instance_for(Some(cwd)).await.binary_path()
+    }
+
     pub async fn binary_path(&self) -> Result<PathBuf> {
-        self.instance().await.binary_path()
+        self.instance_for(None).await.binary_path()
     }
 
     pub async fn run_npm_subcommand(
@@ -225,7 +243,7 @@ impl NodeRuntime {
         args: &[&str],
     ) -> Result<Output> {
         let http = self.0.lock().await.http.clone();
-        self.instance()
+        self.instance_for(None)
             .await
             .run_npm_subcommand(directory, http.proxy(), subcommand, args)
             .await
@@ -236,7 +254,7 @@ impl NodeRuntime {
         local_package_directory: &Path,
         name: &str,
     ) -> Result<Option<Version>> {
-        self.instance()
+        self.instance_for(None)
             .await
             .npm_package_installed_version(local_package_directory, name)
             .await
@@ -249,7 +267,7 @@ impl NodeRuntime {
         args: &[&str],
     ) -> Result<NpmCommand> {
         let http = self.0.lock().await.http.clone();
-        self.instance()
+        self.instance_for(None)
             .await
             .npm_command(prefix_dir, http.proxy(), subcommand, args)
             .await
@@ -266,7 +284,7 @@ impl NodeRuntime {
         version_requirement: Option<&VersionReq>,
     ) -> Result<Version> {
         let http = self.0.lock().await.http.clone();
-        let instance = self.instance().await;
+        let instance = self.instance_for(None).await;
         let output = instance
             .run_npm_subcommand(
                 None,
@@ -931,9 +949,17 @@ pub struct SystemNodeRuntime {
 
 impl SystemNodeRuntime {
     const MIN_VERSION: semver::Version = Version::new(22, 0, 0);
-    async fn new(node: PathBuf, npm: PathBuf) -> Result<Self> {
-        let output = util::command::new_command(&node)
-            .arg("--version")
+
+    /// Runs `<node> --version` as if started from `cwd`. Directory-aware shims resolve the
+    /// interpreter from the working directory, so probing without one can report a different
+    /// version than the language server actually gets.
+    async fn probe_version(node: &Path, cwd: Option<&Path>) -> Result<Version> {
+        let mut command = util::command::new_command(node);
+        command.arg("--version");
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let output = command
             .output()
             .await
             .with_context(|| format!("running node from {:?}", node))?;
@@ -946,14 +972,27 @@ impl SystemNodeRuntime {
         }
         let version_str = String::from_utf8_lossy(&output.stdout);
         let version = semver::Version::parse(version_str.trim().trim_start_matches('v'))?;
+        Ok(version)
+    }
+
+    fn ensure_supported_version(version: Version, node: Option<&Path>) -> Result<()> {
         if version < Self::MIN_VERSION {
-            anyhow::bail!(
+            let node = node
+                .map(|node| node.display().to_string())
+                .unwrap_or_else(|| "system PATH".to_string());
+            bail!(
                 "node at {} is too old. want: {}, got: {}",
-                node.to_string_lossy(),
+                node,
                 Self::MIN_VERSION,
                 version
             )
         }
+        Ok(())
+    }
+
+    async fn new(node: PathBuf, npm: PathBuf, cwd: Option<&Path>) -> Result<Self> {
+        let version = Self::probe_version(&node, cwd).await?;
+        Self::ensure_supported_version(version, Some(&node))?;
 
         let scratch_dir = paths::data_dir().join("node");
         fs::create_dir(&scratch_dir).await.ok();
@@ -967,10 +1006,10 @@ impl SystemNodeRuntime {
         })
     }
 
-    async fn detect() -> std::result::Result<Self, DetectError> {
+    async fn detect(cwd: Option<&Path>) -> std::result::Result<Self, DetectError> {
         let node = which::which("node").map_err(DetectError::NotInPath)?;
         let npm = which::which("npm").map_err(DetectError::NotInPath)?;
-        Self::new(node, npm).await.map_err(DetectError::Other)
+        Self::new(node, npm, cwd).await.map_err(DetectError::Other)
     }
 }
 
@@ -1270,8 +1309,9 @@ mod tests {
     use semver::{Version, VersionReq};
 
     use super::{
-        NpmInfo, VersionStrategy, build_npm_command_args, deserialize_npm_info_from_response,
-        proxy_argument, select_npm_package_version, should_install_npm_package_version,
+        NpmInfo, SystemNodeRuntime, VersionStrategy, build_npm_command_args,
+        deserialize_npm_info_from_response, proxy_argument, select_npm_package_version,
+        should_install_npm_package_version,
     };
 
     // Map localhost to 127.0.0.1
@@ -1730,5 +1770,101 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    // A stand-in for shims like `vp`, nvm's or mise's `node`, which pick the interpreter from a
+    // version file found in the working directory they were started in.
+    #[cfg(unix)]
+    const DISPATCHER_NODE: &str = r#"#!/bin/sh
+if [ -f .node-version ]; then
+  printf 'v%s\n' "$(tr -d '[:space:]' < .node-version)"
+else
+  printf 'v24.18.0\n'
+fi
+"#;
+
+    #[cfg(unix)]
+    const FIXED_NODE: &str = r#"#!/bin/sh
+printf 'v24.18.0\n'
+"#;
+
+    #[cfg(unix)]
+    fn write_fake_node(path: &Path, contents: &str) -> std::io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, contents)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn probe_version_resolves_directory_aware_shim_against_cwd() -> Result<()> {
+        smol::block_on(async {
+            let dir = tempfile::tempdir()?;
+            let node = dir.path().join("node");
+            write_fake_node(&node, DISPATCHER_NODE)?;
+
+            let old_worktree = dir.path().join("old");
+            std::fs::create_dir(&old_worktree)?;
+            std::fs::write(old_worktree.join(".node-version"), "12.22.12\n")?;
+
+            let new_worktree = dir.path().join("new");
+            std::fs::create_dir(&new_worktree)?;
+
+            let old_version = SystemNodeRuntime::probe_version(&node, Some(&old_worktree)).await?;
+            let new_version = SystemNodeRuntime::probe_version(&node, Some(&new_worktree)).await?;
+
+            assert_eq!(old_version, Version::new(12, 22, 12));
+            assert_eq!(new_version, Version::new(24, 18, 0));
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn probe_version_ignores_version_files_for_plain_node() -> Result<()> {
+        smol::block_on(async {
+            let dir = tempfile::tempdir()?;
+            let node = dir.path().join("node");
+            write_fake_node(&node, FIXED_NODE)?;
+
+            let old_worktree = dir.path().join("old");
+            std::fs::create_dir(&old_worktree)?;
+            std::fs::write(old_worktree.join(".node-version"), "12.22.12\n")?;
+
+            let with_cwd = SystemNodeRuntime::probe_version(&node, Some(&old_worktree)).await?;
+            let without_cwd = SystemNodeRuntime::probe_version(&node, None).await?;
+
+            assert_eq!(with_cwd, Version::new(24, 18, 0));
+            assert_eq!(without_cwd, Version::new(24, 18, 0));
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn rejects_too_old_node_resolved_from_cwd() -> Result<()> {
+        smol::block_on(async {
+            let dir = tempfile::tempdir()?;
+            let node = dir.path().join("node");
+            write_fake_node(&node, DISPATCHER_NODE)?;
+
+            let old_worktree = dir.path().join("old");
+            std::fs::create_dir(&old_worktree)?;
+            std::fs::write(old_worktree.join(".node-version"), "12.22.12\n")?;
+
+            let version = SystemNodeRuntime::probe_version(&node, Some(&old_worktree)).await?;
+            let error = SystemNodeRuntime::ensure_supported_version(version, Some(&node))
+                .expect_err("expected a Node 12 probe to be rejected");
+
+            assert!(
+                error.to_string().contains("too old"),
+                "unexpected error: {error:#}"
+            );
+            assert!(
+                error.to_string().contains(&node.display().to_string()),
+                "error should name the probed node: {error:#}"
+            );
+            Ok(())
+        })
     }
 }

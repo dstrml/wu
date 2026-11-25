@@ -689,12 +689,13 @@ impl LspInstaller for TypeScriptLspAdapter {
         &self,
         version: &Self::BinaryVersion,
         container_dir: &PathBuf,
-        _: &Arc<dyn LspAdapterDelegate>,
+        delegate: &Arc<dyn LspAdapterDelegate>,
     ) -> impl Send + Future<Output = Option<LanguageServerBinary>> + use<> {
         let node = self.node.clone();
         let typescript_version = version.typescript_version.clone();
         let server_version = version.server_version.clone();
         let container_dir = container_dir.clone();
+        let worktree_root = delegate.worktree_root_path().to_path_buf();
 
         async move {
             let server_path = container_dir.join(Self::NEW_SERVER_PATH);
@@ -725,7 +726,7 @@ impl LspInstaller for TypeScriptLspAdapter {
             }
 
             Some(LanguageServerBinary {
-                path: node.binary_path().await.ok()?,
+                path: node.binary_path_in(&worktree_root).await.ok()?,
                 env: None,
                 arguments: typescript_server_binary_arguments(&server_path),
             })
@@ -736,9 +737,10 @@ impl LspInstaller for TypeScriptLspAdapter {
         &self,
         latest_version: Self::BinaryVersion,
         container_dir: PathBuf,
-        _: &Arc<dyn LspAdapterDelegate>,
+        delegate: &Arc<dyn LspAdapterDelegate>,
     ) -> impl Send + Future<Output = Result<LanguageServerBinary>> + use<> {
         let node = self.node.clone();
+        let worktree_root = delegate.worktree_root_path().to_path_buf();
 
         async move {
             let server_path = container_dir.join(Self::NEW_SERVER_PATH);
@@ -754,7 +756,7 @@ impl LspInstaller for TypeScriptLspAdapter {
             .await?;
 
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(&worktree_root).await?,
                 env: None,
                 arguments: typescript_server_binary_arguments(&server_path),
             })
@@ -764,9 +766,9 @@ impl LspInstaller for TypeScriptLspAdapter {
     async fn cached_server_binary(
         &self,
         container_dir: PathBuf,
-        _: &dyn LspAdapterDelegate,
+        delegate: &dyn LspAdapterDelegate,
     ) -> Option<LanguageServerBinary> {
-        get_cached_ts_server_binary(container_dir, &self.node).await
+        get_cached_ts_server_binary(container_dir, &self.node, delegate.worktree_root_path()).await
     }
 }
 
@@ -880,19 +882,20 @@ impl LspAdapter for TypeScriptLspAdapter {
 async fn get_cached_ts_server_binary(
     container_dir: PathBuf,
     node: &NodeRuntime,
+    worktree_root: &Path,
 ) -> Option<LanguageServerBinary> {
     maybe!(async {
         let old_server_path = container_dir.join(TypeScriptLspAdapter::OLD_SERVER_PATH);
         let new_server_path = container_dir.join(TypeScriptLspAdapter::NEW_SERVER_PATH);
         if new_server_path.exists() {
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(worktree_root).await?,
                 env: None,
                 arguments: typescript_server_binary_arguments(&new_server_path),
             })
         } else if old_server_path.exists() {
             Ok(LanguageServerBinary {
-                path: node.binary_path().await?,
+                path: node.binary_path_in(worktree_root).await?,
                 env: None,
                 arguments: typescript_server_binary_arguments(&old_server_path),
             })

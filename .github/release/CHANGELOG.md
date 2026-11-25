@@ -4,6 +4,8 @@ All notable user-facing changes to Wu are listed here, newest first.
 
 ## Unreleased
 
+- Fixed built-in node language servers failing to start in worktrees that pin an old node version through a directory-aware shim (vp, nvm, fnm, mise, volta).
+
 ## 1.5.0 - 2026-11-22
 
 - Add support Antigravity.
