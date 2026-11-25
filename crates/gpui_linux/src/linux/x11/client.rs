@@ -84,6 +84,7 @@ pub(crate) struct XinputSupport {
 }
 
 const GPUI_X11_SCALE_FACTOR_ENV: &str = "GPUI_X11_SCALE_FACTOR";
+const MAX_XIM_RECONNECT_ATTEMPTS: u32 = 5;
 
 pub(crate) struct WindowRef {
     window: X11WindowStatePtr,
@@ -203,6 +204,8 @@ pub struct X11ClientState {
     keyboard_layout: LinuxKeyboardLayout,
     pub(crate) ximc: Option<X11rbClient<Rc<XCBConnection>>>,
     pub(crate) xim_handler: Option<XimHandler>,
+    xim_lost: bool,
+    xim_reconnect_attempts: u32,
     pub modifiers: Modifiers,
     pub capslock: Capslock,
     // TODO: Can the other updates to `modifiers` be removed so that this is unnecessary?
@@ -578,6 +581,8 @@ impl X11Client {
             keyboard_layout,
             ximc,
             xim_handler,
+            xim_lost: false,
+            xim_reconnect_attempts: 0,
 
             compose_state,
             pre_edit_text: None,
@@ -713,13 +718,22 @@ impl X11Client {
 
                 let xim_filtered = ximc.filter_event(&event, &mut xim_handler);
                 let xim_callback_event = xim_handler.last_callback_event.take();
+                let xim_just_connected = !xim_connected && xim_handler.connected;
 
                 let mut state = self.0.borrow_mut();
                 state.restore_xim(ximc, xim_handler);
+                if xim_just_connected {
+                    state.xim_reconnect_attempts = 0;
+                }
+                let has_focused_window = state.keyboard_focused_window.is_some();
                 drop(state);
 
                 if let Some(event) = xim_callback_event {
                     self.handle_xim_callback_event(event);
+                }
+
+                if xim_just_connected && has_focused_window {
+                    self.enable_ime();
                 }
 
                 match xim_filtered {
@@ -740,9 +754,16 @@ impl X11Client {
                         // hence we fall back to handle_event
                         log::error!("XIMClientError: {}", err);
                         let mut state = self.0.borrow_mut();
-                        state.take_xim();
+                        let was_connected = state
+                            .take_xim()
+                            .is_some_and(|(_, xim_handler)| xim_handler.connected);
+                        state.xim_lost = true;
+                        state.composing = false;
                         drop(state);
                         self.handle_event(event);
+                        if was_connected {
+                            self.reconnect_xim();
+                        }
                     }
                 }
             }
@@ -765,9 +786,37 @@ impl X11Client {
         Ok(())
     }
 
+    fn reconnect_xim(&self) {
+        let mut state = self.0.borrow_mut();
+        if state.has_xim()
+            || !state.xim_lost
+            || state.xim_reconnect_attempts >= MAX_XIM_RECONNECT_ATTEMPTS
+        {
+            return;
+        }
+        state.xim_reconnect_attempts += 1;
+        match X11rbClient::init(Rc::clone(&state.xcb_connection), state.x_root_index, None) {
+            Ok(ximc) => {
+                let mut xim_handler = XimHandler::new();
+                if let Some(window) = state.keyboard_focused_window {
+                    xim_handler.window = window;
+                }
+                state.restore_xim(ximc, xim_handler);
+                state.xim_lost = false;
+                log::info!("Reconnecting to the XIM server");
+            }
+            Err(err) => log::error!("Failed to reconnect to the XIM server: {err}"),
+        }
+    }
+
     pub fn enable_ime(&self) {
         let mut state = self.0.borrow_mut();
-        if !state.has_xim() {
+        // fcitx5 rejects an input context requested before the handshake assigns `im_id`.
+        let xim_connected = state
+            .xim_handler
+            .as_ref()
+            .is_some_and(|xim_handler| xim_handler.connected);
+        if !state.has_xim() || !xim_connected {
             return;
         }
 
@@ -1018,6 +1067,7 @@ impl X11Client {
                     handler.window = event.event;
                 }
                 drop(state);
+                self.reconnect_xim();
                 self.enable_ime();
             }
             Event::FocusOut(event) => {
