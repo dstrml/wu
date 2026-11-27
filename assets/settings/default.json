@@ -1932,8 +1932,10 @@
   //
   "file_types": {
     "JSONC": [
+      "**/.wu/*.json",
       "**/.zed/*.json",
       "**/.vscode/**/*.json",
+      "**/{wu,Wu}/{settings,keymap,tasks,debug}.json",
       "**/{zed,Zed}/{settings,keymap,tasks,debug}.json",
       "tsconfig*.json",
     ],
